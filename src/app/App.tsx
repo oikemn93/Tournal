@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { getData, saveData, checkBackend, stripImages, mergeImages, signQZ, sendInvoiceEmail, storePDFForSMS, getCurrentAuthUser, hasAuthenticatedSession, signInWithPhone, signUpWithPhone, signOut as signOutFromSupabase, createBoutique, createUser, resetUserPassword, subscribeToBoutiqueChanges, assignUserToBoutique } from "../lib/api";
+import { getData, saveData, checkBackend, stripImages, mergeImages, signQZ, sendInvoiceEmail, storePDFForSMS, getCurrentAuthUser, hasAuthenticatedSession, signInWithPhone, signUpWithPhone, signOut as signOutFromSupabase, createBoutique, createUser, resetUserPassword, subscribeToBoutiqueChanges, assignUserToBoutique, unassignUserFromBoutique } from "../lib/api";
 import { toast, Toaster } from "sonner";
 import {
   LayoutDashboard, Package, Users, Truck, FileText, ShieldCheck,
@@ -8804,11 +8804,19 @@ export default function App() {
         const old = previousAssignments.get(`${user.id}:${assignment.boutiqueId}`);
         return !old || old.role !== assignment.role || JSON.stringify(old.droits) !== JSON.stringify(assignment.droits);
       });
+    const nextAssignmentKeys = new Set(next.flatMap(user => user.assignments.map(assignment => `${user.id}:${assignment.boutiqueId}`)));
+    const removedAssignments = previous.flatMap(user => user.assignments.map(assignment => ({ user, assignment })))
+      .filter(({ user, assignment }) => !nextAssignmentKeys.has(`${user.id}:${assignment.boutiqueId}`));
 
-    if (changedAssignments.length) {
-      void Promise.all(changedAssignments.map(({ user, assignment }) =>
-        assignUserToBoutique(assignment.boutiqueId, user.id, roleToDatabase(assignment.role), assignment.droits),
-      )).catch((error) => {
+    if (changedAssignments.length || removedAssignments.length) {
+      void Promise.all([
+        ...changedAssignments.map(({ user, assignment }) =>
+          assignUserToBoutique(assignment.boutiqueId, user.id, roleToDatabase(assignment.role), assignment.droits),
+        ),
+        ...removedAssignments.map(({ user, assignment }) =>
+          unassignUserFromBoutique(assignment.boutiqueId, user.id),
+        ),
+      ]).catch((error) => {
         toast.error(error instanceof Error ? error.message : "Affectation utilisateur impossible");
         void pullRemote();
       });

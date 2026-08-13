@@ -169,6 +169,10 @@ export async function assignUserToBoutique(
   return adminProvision<{ ok: true }>("assign_user", { boutiqueId, userId, role, droits });
 }
 
+export async function unassignUserFromBoutique(boutiqueId: string, userId: string) {
+  return adminProvision<{ ok: true }>("unassign_user", { boutiqueId, userId });
+}
+
 /** Reads the compatibility state while the screens are progressively moved to relational tables. */
 export async function getData<T>(key: string): Promise<T | null> {
   if (key === "boutiques") {

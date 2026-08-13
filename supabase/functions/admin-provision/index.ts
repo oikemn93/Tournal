@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
-type Action = "create_boutique" | "create_user" | "reset_password" | "assign_user";
+type Action = "create_boutique" | "create_user" | "reset_password" | "assign_user" | "unassign_user";
 
 const allowedOrigins = new Set(["https://tournal-wldg.vercel.app"]);
 
@@ -130,6 +130,25 @@ Deno.serve(async (request) => {
         { boutique_id: boutiqueId, user_id: userId, role, droits },
         { onConflict: "boutique_id,user_id" },
       );
+      if (error) return reply(request, { error: error.message }, 422);
+      return reply(request, { ok: true });
+    }
+
+    if (action === "unassign_user") {
+      const boutiqueId = text(payload.boutiqueId, "Boutique", 120);
+      const userId = text(payload.userId, "Utilisateur", 36);
+      const { data: boutique, error: boutiqueError } = await admin
+        .from("boutiques")
+        .select("owner_id")
+        .eq("id", boutiqueId)
+        .maybeSingle();
+      if (boutiqueError || !boutique) return reply(request, { error: "Boutique introuvable" }, 422);
+      if (boutique.owner_id === userId) return reply(request, { error: "Le propri\u00e9taire ne peut pas \u00eatre retir\u00e9 de sa boutique" }, 422);
+
+      const { error } = await admin.from("boutique_assignments")
+        .delete()
+        .eq("boutique_id", boutiqueId)
+        .eq("user_id", userId);
       if (error) return reply(request, { error: error.message }, 422);
       return reply(request, { ok: true });
     }
