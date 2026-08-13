@@ -131,6 +131,32 @@ export function hasAuthenticatedSession() {
   return Boolean(readSession()?.access_token);
 }
 
+/** Validates the locally cached token with Supabase Auth, not just localStorage. */
+export async function validateServerSession(): Promise<boolean> {
+  const session = readSession();
+  if (!session?.access_token) return false;
+  try {
+    const response = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      headers: { apikey: PUBLISHABLE_KEY, Authorization: `Bearer ${session.access_token}` },
+    });
+    if (!response.ok) { storeSession(null); return false; }
+    const user = await response.json() as AuthUser;
+    if (!user?.id || user.id !== session.user?.id) { storeSession(null); return false; }
+    return true;
+  } catch {
+    // Do not invalidate a session merely because the device is temporarily offline.
+    return false;
+  }
+}
+
+export async function startAppSession(boutiqueId: string) {
+  return dataRequest<{ expires_at:string }>("rpc/start_app_session", { method:"POST", body:JSON.stringify({ p_boutique_id:boutiqueId }) });
+}
+
+export async function validateAppSession(boutiqueId: string) {
+  return dataRequest<boolean>("rpc/validate_app_session", { method:"POST", body:JSON.stringify({ p_boutique_id:boutiqueId }) });
+}
+
 /**
  * Watches the shared boutique state over a WebSocket.  A database update
  * triggers a single refresh for connected users instead of periodic polling.
