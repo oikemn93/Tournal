@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Search, Plus, Send, FileText, Eye, Mail, MessageCircle, Smartphone, Phone, Wallet, CreditCard, RotateCcw, ShoppingCart, Receipt, AlertCircle, Trash2, CheckCircle, Minus, Store } from "lucide-react";
 import type { Boutique, Invoice, InvoiceStatus, InvoiceLine, StockEntry, PaymentMethod, Client, PlatformUser } from "../types";
 import { SEM, inputCls, PAYMENT_METHODS, PM_ICON, PM_COLOR, PLACEHOLDER_IMGS } from "../constants";
-import { createSale } from "../../lib/api";
+import { createSale, recordPayment } from "../../lib/api";
 import { fmt, today, imgSrc } from "../utils/formatting";
 import { invBadge, lineTotal, lineDispQty, lineDispUnit, genInvoiceId, productQty, getSiblings } from "../utils/inventory";
 import { buildReceiptHtml, openInvoicePDF, buildInvoiceMessage, agentPrint, printReceipt } from "../utils/invoice";
@@ -297,13 +297,21 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
     setSoldeDone(true);
     setTimeout(() => { setSoldeMode(false); setSoldeAmount(""); setSoldeDone(false); setDetailInv(prev => prev ? { ...prev, acompte: newAcompte, status: newStatus } : null); }, 1200);
   }
-  function submitEncaiss() {
+  async function submitEncaiss() {
     if (!encaissInv || submittingPayment) return;
     const montantEncaiss = Number(encaissAmt) || 0;
     if (montantEncaiss <= 0) return;
     setSubmittingPayment(true);
-    const newAcompte = Math.min(encaissInv.acompte + montantEncaiss, encaissInv.montant);
-    const newStatus: InvoiceStatus = newAcompte >= encaissInv.montant ? "payé" : "acompte";
+    let persisted;
+    try {
+      persisted = await recordPayment({ boutiqueId:boutique.id, invoiceId:encaissInv.id, amount:montantEncaiss, paymentMethod:encaissMethod });
+    } catch (error) {
+      setSubmittingPayment(false);
+      alert(error instanceof Error ? error.message : "Encaissement impossible");
+      return;
+    }
+    const newAcompte = persisted.acompte;
+    const newStatus: InvoiceStatus = persisted.status === "payée" ? "payé" : "acompte";
     const updatedInv: Invoice = { ...encaissInv, acompte: newAcompte, status: newStatus, paymentMethod: encaissMethod };
 
     // Deduct stock on FIRST encaissement (acompte was 0 before)

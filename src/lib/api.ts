@@ -283,6 +283,13 @@ export async function createSale(params: { boutiqueId: string; client: string; c
   });
 }
 
+export async function recordPayment(params: { boutiqueId:string; invoiceId:string; amount:number; paymentMethod:string }) {
+  return dataRequest<{ invoice_id:string; acompte:number; status:string }>("rpc/record_payment", {
+    method:"POST", headers:{ Prefer:"return=representation" },
+    body:JSON.stringify({ p_boutique_id:params.boutiqueId, p_invoice_id:params.invoiceId, p_idempotency_key:crypto.randomUUID(), p_amount:params.amount, p_payment_method:params.paymentMethod }),
+  });
+}
+
 export async function checkBackend(): Promise<boolean> {
   try {
     await fetch(`${SUPABASE_URL}/auth/v1/health`, { headers: { apikey: PUBLISHABLE_KEY } });
