@@ -308,6 +308,16 @@ export async function createCharge(params:{ boutiqueId:string; label:string; amo
   return dataRequest<{ charge_id:number }>("rpc/create_charge", { method:"POST", headers:{ Prefer:"return=representation" }, body:JSON.stringify({ p_boutique_id:params.boutiqueId,p_idempotency_key:crypto.randomUUID(),p_label:params.label,p_montant:params.amount,p_categorie:params.category,p_note:params.note ?? null }) });
 }
 
+export async function createClient(params:{ boutiqueId:string; name:string; type?:"B2B"|"B2C"; phone?:string; email?:string; city?:string }) {
+  return dataRequest<{client_id:number}>("rpc/create_client", { method:"POST", body:JSON.stringify({ p_boutique_id:params.boutiqueId,p_idempotency_key:crypto.randomUUID(),p_nom:params.name,p_type:params.type ?? "B2C",p_tel:params.phone ?? null,p_email:params.email ?? null,p_ville:params.city ?? null }) });
+}
+export async function createSupplier(params:{ boutiqueId:string; name:string; phone?:string; city?:string }) {
+  return dataRequest<{supplier_id:number}>("rpc/create_supplier", { method:"POST", body:JSON.stringify({ p_boutique_id:params.boutiqueId,p_idempotency_key:crypto.randomUUID(),p_nom:params.name,p_tel:params.phone ?? null,p_ville:params.city ?? null }) });
+}
+export async function createProduct(params:{ boutiqueId:string; name:string; unit:string; categoryId?:string; purchasePrice?:number; salePrice?:number }) {
+  return dataRequest<{product_id:number}>("rpc/create_product", { method:"POST", body:JSON.stringify({ p_boutique_id:params.boutiqueId,p_idempotency_key:crypto.randomUUID(),p_nom:params.name,p_unit:params.unit,p_category_id:params.categoryId ?? null,p_prix_achat:params.purchasePrice ?? 0,p_prix_vente:params.salePrice ?? 0 }) });
+}
+
 export async function checkBackend(): Promise<boolean> {
   try {
     await fetch(`${SUPABASE_URL}/auth/v1/health`, { headers: { apikey: PUBLISHABLE_KEY } });
