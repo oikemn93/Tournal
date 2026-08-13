@@ -21,9 +21,6 @@ import { ClientsView as RelationalClientsView } from "./screens/ClientsView";
 import { FournisseursView as RelationalFournisseursView } from "./screens/FournisseursView";
 import { ChargesView as RelationalChargesView } from "./screens/ChargesView";
 import { ComptabiliteView as RelationalComptabiliteView } from "./screens/RapportView";
-import { InventoryView as RelationalInventoryView } from "./screens/InventoryView";
-import { AdministrationView as RelationalAdministrationView } from "./screens/AdministrationView";
-import { TransfersView as RelationalTransfersView } from "./screens/TransfersView";
 
 const ReadOnlyCtx = React.createContext(false);
 const useReadOnly = () => React.useContext(ReadOnlyCtx);
@@ -9022,9 +9019,43 @@ export default function App() {
         {safeTab==="pos"          && canAccess("vente")        && <RelationalPOSView boutique={boutique} allBoutiques={boutiques} currentUser={currentUser} onUpdate={updateBoutique} logAction={logAction}/>}
         {safeTab==="charges"      && canAccess("charges")      && <RelationalChargesView boutique={boutique} onUpdate={updateBoutique} logAction={logAction}/>}
         {safeTab==="compta"       && canAccess("compta")       && <RelationalComptabiliteView boutique={boutique}/>}
-        {safeTab==="inventaire"   && canAccess("inventaire")   && <RelationalInventoryView boutique={boutique} onUpdate={updateBoutique} logAction={logAction}/>}
-        {safeTab==="transferts"   && canAccess("stock")        && <RelationalTransfersView boutique={boutique} allBoutiques={boutiques}/>}
-        {safeTab==="admin"        && isOwner                  && <RelationalAdministrationView boutique={boutique} onUpdate={updateBoutique} logAction={logAction}/>}
+        {safeTab==="inventaire"   && canAccess("inventaire")   && (
+          <InventaireView
+            boutique={boutique}
+            currentUser={currentUser!}
+            onUpdate={updateBoutique}
+            logAction={logAction}
+            onClose={()=>setTab("dashboard")}
+          />
+        )}
+        {safeTab==="transferts"   && canAccess("stock")        && (
+          <TransfertsView
+            boutique={boutique}
+            allBoutiques={boutiques}
+            platformUsers={platformUsers}
+            groupes={groupes}
+            currentUser={currentUser!}
+            onUpdate={updateBoutique}
+            onUpdateOtherBoutique={updateOtherBoutique}
+            logAction={logAction}
+          />
+        )}
+        {safeTab==="admin"        && isOwner                  && (
+          <AdminView
+            boutique={boutique}
+            allBoutiques={boutiques}
+            platformUsers={platformUsers}
+            currentUser={currentUser!}
+            onUpdate={updateBoutique}
+            onUpdateUsers={handleUpdatePlatformUsers}
+            onCreateUser={handleCreateUser}
+            logAction={logAction}
+            lockMinutesInit={Math.round(lockTimeoutMs / 60000)}
+            sessionMinutesInit={Math.round(sessionExpiryMs / 60000)}
+            backendOk={backendOk}
+            lastSyncAt={lastSyncAt}
+          />
+        )}
       </main>
       {/* More menu overlay */}
       {moreOpen && createPortal(
