@@ -8649,10 +8649,10 @@ export default function App() {
   useEffect(() => {
     if (!synced || !hasAuthenticatedSession()) return;
     const onVisible = () => { if (document.visibilityState === "visible") pullRemote(); };
-    const unsubscribe = subscribeToBoutiqueChanges(pullRemote);
+    const unsubscribe = subscribeToBoutiqueChanges(activeBoutiqueId ?? "", pullRemote);
     document.addEventListener("visibilitychange", onVisible);
     return () => { unsubscribe(); document.removeEventListener("visibilitychange", onVisible); };
-  }, [synced, pullRemote]);
+  }, [synced, pullRemote, activeBoutiqueId]);
 
   useEffect(() => { if (!synced) return; debouncedSave("boutiques", boutiques); }, [boutiques, synced, debouncedSave]);
   useEffect(() => { if (!synced) return; debouncedSave("platform_users", platformUsers); }, [platformUsers, synced, debouncedSave]);

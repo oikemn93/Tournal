@@ -212,6 +212,8 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
   const [encaissAmt,setEncaissAmt] = useState("");
   const [encaissMethod,setEncaissMethod] = useState<PaymentMethod>("Espèces");
   const [encaissDone,setEncaissDone] = useState(false);
+  const [submittingInvoice, setSubmittingInvoice] = useState(false);
+  const [submittingPayment, setSubmittingPayment] = useState(false);
   // Return state
   const [returnInv, setReturnInv] = useState<Invoice|null>(null);
   const [returnQtys, setReturnQtys] = useState<Record<number,number>>({});
@@ -295,9 +297,10 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
     setTimeout(() => { setSoldeMode(false); setSoldeAmount(""); setSoldeDone(false); setDetailInv(prev => prev ? { ...prev, acompte: newAcompte, status: newStatus } : null); }, 1200);
   }
   function submitEncaiss() {
-    if (!encaissInv) return;
+    if (!encaissInv || submittingPayment) return;
     const montantEncaiss = Number(encaissAmt) || 0;
     if (montantEncaiss <= 0) return;
+    setSubmittingPayment(true);
     const newAcompte = Math.min(encaissInv.acompte + montantEncaiss, encaissInv.montant);
     const newStatus: InvoiceStatus = newAcompte >= encaissInv.montant ? "payé" : "acompte";
     const updatedInv: Invoice = { ...encaissInv, acompte: newAcompte, status: newStatus, paymentMethod: encaissMethod };
@@ -316,7 +319,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
     logAction("Encaissement", `${encaissInv.id} · +${fmt(montantEncaiss)} · ${encaissMethod}`, "💵");
     setTimeout(() => agentPrint(buildReceiptHtml(updatedInv, boutique, currentUser.nom)), 200);
     setEncaissDone(true);
-    setTimeout(() => { setEncaissInv(null); setEncaissAmt(""); setEncaissDone(false); }, 1400);
+    setTimeout(() => { setEncaissInv(null); setEncaissAmt(""); setEncaissDone(false); setSubmittingPayment(false); }, 1400);
   }
 
   function openReturn(inv: Invoice) {
@@ -354,7 +357,8 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
   }
 
   function submit() {
-    if (!client||lines.length===0) return;
+    if (!client||lines.length===0 || submittingInvoice) return;
+    setSubmittingInvoice(true);
     const isSiblingTransfer = !!siblingClient;
     const ct  = isSiblingTransfer ? "Inter-tenant" : (clients.find(c=>c.nom===client)?.type??"B2C");
     const cTel = clients.find(c=>c.nom===client)?.tel;
@@ -381,7 +385,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
       onUpdateOtherBoutique(siblingClient.id, { products:sbProducts, entries:sbEntries });
     }
     logAction(isSiblingTransfer?"Transfert inter-tenant":"Nouvelle facture", `${id} · ${client} · ${fmt(montant)}`, isSiblingTransfer?"🔄":"🧾");
-    setLines([]); setAcompte(""); setModal(false);
+    setLines([]); setAcompte(""); setModal(false); setSubmittingInvoice(false);
   }
 
   const UNPAID: InvoiceStatus[] = ["en attente","acompte","en retard"];
@@ -638,7 +642,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
           {aNum>0&&montant>0&&<div className="mt-2"><div className="h-2 bg-muted rounded-full overflow-hidden"><div className="h-full rounded-full" style={{ width:`${pct}%`, background:"#C9A227" }}/></div><div className="flex justify-between mt-1 text-xs"><span className="text-muted-foreground">Reste: {fmt(Math.max(0,montant-aNum))}</span><span style={{ color:"#C9A227",fontWeight:700 }}>{pct}%</span></div></div>}
         </Field>
         {aNum===0&&<Field label="STATUT"><div className="grid grid-cols-2 gap-2">{(["en attente","acompte","payé","en retard"] as InvoiceStatus[]).map(s=>{const [tc]=invBadge(s);return<button key={s} onClick={()=>setStatus(s)} className="py-3 rounded-xl text-xs font-bold capitalize" style={{ background:status===s?tc:tc+"22", color:status===s?"#fff":tc }}>{s}</button>;})}</div></Field>}
-        <SubmitBtn color={boutique.color} label="Créer la facture" onClick={submit} disabled={!client||lines.length===0}/>
+        <SubmitBtn color={boutique.color} label={submittingInvoice ? "Création…" : "Créer la facture"} onClick={submit} disabled={submittingInvoice || !client||lines.length===0}/>
       </Modal>}
 
       {shareInv&&<ShareInvoiceModal inv={shareInv} boutique={boutique} clients={clients} onClose={()=>setShareInv(null)}/>}
@@ -745,7 +749,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
               <p className="font-black text-sm" style={{color:SEM.success.accent,fontFamily:"'Nunito',sans-serif"}}>Encaissement enregistré ✓</p>
             </div>
           ) : (
-            <SubmitBtn color={boutique.color} label="Confirmer l'encaissement" onClick={submitEncaiss} disabled={!Number(encaissAmt)||Number(encaissAmt)<=0}/>
+            <SubmitBtn color={boutique.color} label={submittingPayment ? "Encaissement…" : "Confirmer l'encaissement"} onClick={submitEncaiss} disabled={submittingPayment || !Number(encaissAmt)||Number(encaissAmt)<=0}/>
           )}
         </Modal>
       )}

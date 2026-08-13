@@ -135,15 +135,19 @@ export function hasAuthenticatedSession() {
  * Watches the shared boutique state over a WebSocket.  A database update
  * triggers a single refresh for connected users instead of periodic polling.
  */
-export function subscribeToBoutiqueChanges(onChange: () => void) {
+export function subscribeToBoutiqueChanges(boutiqueId: string, onChange: () => void) {
   const session = readSession();
-  if (!session?.access_token) return () => undefined;
+  if (!session?.access_token || !boutiqueId) return () => undefined;
 
   realtimeClient.realtime.setAuth(session.access_token);
-  const channel = realtimeClient
-    .channel("tournal-boutique-state")
-    .on("postgres_changes", { event: "*", schema: "public", table: "boutique_state" }, onChange)
-    .subscribe();
+  const filter = `boutique_id=eq.${boutiqueId}`;
+  let channel = realtimeClient.channel(`tournal:${boutiqueId}`);
+  // Each subscription is scoped to one boutique and only to relational tables.
+  // This deliberately avoids both the former global JSON blob and polling.
+  for (const table of ["products", "stock_entries", "invoices", "invoice_lines", "clients", "charges", "caisse_sessions"]) {
+    channel = channel.on("postgres_changes", { event: "*", schema: "public", table, filter }, onChange);
+  }
+  channel = channel.subscribe();
 
   return () => { void realtimeClient.removeChannel(channel); };
 }
