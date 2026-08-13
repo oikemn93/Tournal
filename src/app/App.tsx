@@ -23,6 +23,7 @@ import { ChargesView as RelationalChargesView } from "./screens/ChargesView";
 import { ComptabiliteView as RelationalComptabiliteView } from "./screens/RapportView";
 import { InventoryView as RelationalInventoryView } from "./screens/InventoryView";
 import { AdministrationView as RelationalAdministrationView } from "./screens/AdministrationView";
+import { TransfersView as RelationalTransfersView } from "./screens/TransfersView";
 
 const ReadOnlyCtx = React.createContext(false);
 const useReadOnly = () => React.useContext(ReadOnlyCtx);
@@ -9022,7 +9023,7 @@ export default function App() {
         {safeTab==="charges"      && canAccess("charges")      && <RelationalChargesView boutique={boutique} onUpdate={updateBoutique} logAction={logAction}/>}
         {safeTab==="compta"       && canAccess("compta")       && <RelationalComptabiliteView boutique={boutique}/>}
         {safeTab==="inventaire"   && canAccess("inventaire")   && <RelationalInventoryView boutique={boutique} onUpdate={updateBoutique} logAction={logAction}/>}
-        {safeTab==="transferts"   && canAccess("stock")        && <RelationalMigrationNotice title="Transferts"/>}
+        {safeTab==="transferts"   && canAccess("stock")        && <RelationalTransfersView boutique={boutique} allBoutiques={boutiques}/>}
         {safeTab==="admin"        && isOwner                  && <RelationalAdministrationView boutique={boutique} onUpdate={updateBoutique} logAction={logAction}/>}
       </main>
       {/* More menu overlay */}

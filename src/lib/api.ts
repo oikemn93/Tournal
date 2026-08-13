@@ -400,6 +400,17 @@ export async function updateBoutiqueProfile(params: { boutiqueId:string; nom:str
   });
 }
 
+export type RelationalTransfer = { id:string; from_boutique_id:string; to_boutique_id:string; status:string; note:string|null; created_at:string; lines:Array<{ product_name:string; unit:string; qty:number }> };
+export async function getStockTransfers(boutiqueId: string) {
+  return dataRequest<RelationalTransfer[]>(`stock_transfers?select=id,from_boutique_id,to_boutique_id,status,note,created_at,stock_transfer_lines(product_name,unit,qty)&or=(from_boutique_id.eq.${encodeURIComponent(boutiqueId)},to_boutique_id.eq.${encodeURIComponent(boutiqueId)})&order=created_at.desc`);
+}
+export async function createStockTransfer(params: { fromBoutiqueId:string; toBoutiqueId:string; lines:Array<{productId:number;qty:number}>; note?:string }) {
+  return dataRequest<{transfer_id:string;status:string}>("rpc/create_stock_transfer", { method:"POST", body:JSON.stringify({ p_from_boutique_id:params.fromBoutiqueId,p_to_boutique_id:params.toBoutiqueId,p_idempotency_key:crypto.randomUUID(),p_lines:params.lines.map(line=>({product_id:line.productId,qty:line.qty})),p_note:params.note ?? null }) });
+}
+export async function acceptStockTransfer(transferId: string) {
+  return dataRequest<{transfer_id:string;status:string}>("rpc/accept_stock_transfer", { method:"POST", body:JSON.stringify({ p_transfer_id:transferId,p_idempotency_key:crypto.randomUUID() }) });
+}
+
 export async function checkBackend(): Promise<boolean> {
   try {
     await fetch(`${SUPABASE_URL}/auth/v1/health`, { headers: { apikey: PUBLISHABLE_KEY } });
