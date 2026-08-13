@@ -5168,6 +5168,7 @@ function FacturesView({ boutique, allBoutiques, platformUsers, groupes, currentU
   const canSeeMargin = activeAssignFv?.role === "Propriétaire" || !!(activeAssignFv?.droits?.marges);
   const [statusFilter,setStatusFilter] = useState<InvoiceStatus|"all"|"impayé">(initialStatus ?? "all");
   const [invSearch, setInvSearch] = useState("");
+  const [invoiceSort, setInvoiceSort] = useState<"date_desc"|"date_asc"|"number_asc"|"number_desc">("date_desc");
   const [modal,setModal]   = useState(false);
   const [shareInv,setShareInv]   = useState<Invoice|null>(null);
   const [detailInv,setDetailInv] = useState<Invoice|null>(null);
@@ -5373,7 +5374,23 @@ function FacturesView({ boutique, allBoutiques, platformUsers, groupes, currentU
   }
 
   const UNPAID: InvoiceStatus[] = ["en attente","acompte","en retard"];
-  const filtered = [...invoices].reverse().filter(i=>(statusFilter==="all"||statusFilter==="impayé"?statusFilter==="impayé"?UNPAID.includes(i.status):true:i.status===statusFilter)&&(i.client.toLowerCase().includes(invSearch.toLowerCase())||i.id.toLowerCase().includes(invSearch.toLowerCase())));
+  const invoiceDateKey = (inv: Invoice) => {
+    const date = new Date(inv.dateRaw ?? inv.date);
+    if (!Number.isNaN(date.getTime())) return date.getTime();
+    const numericId = Number(inv.id);
+    return Number.isFinite(numericId) ? numericId : 0;
+  };
+  const compareInvoiceNumbers = (a: Invoice, b: Invoice) =>
+    a.id.localeCompare(b.id, "fr", { numeric: true, sensitivity: "base" });
+  const filtered = invoices
+    .filter(i => (statusFilter==="all"||statusFilter==="impayé" ? statusFilter==="impayé" ? UNPAID.includes(i.status) : true : i.status===statusFilter)
+      && (i.client.toLowerCase().includes(invSearch.toLowerCase()) || i.id.toLowerCase().includes(invSearch.toLowerCase())))
+    .sort((a, b) => {
+      if (invoiceSort === "number_asc") return compareInvoiceNumbers(a, b);
+      if (invoiceSort === "number_desc") return compareInvoiceNumbers(b, a);
+      const byDate = invoiceDateKey(a) - invoiceDateKey(b);
+      return invoiceSort === "date_asc" ? byDate || compareInvoiceNumbers(a, b) : -byDate || compareInvoiceNumbers(b, a);
+    });
   const returnIds = new Set(invoices.filter(i=>i.type==="Retour").map(i=>i.id));
   const hasReturn = (invId: string) => invoices.some(i => i.type === "Retour" && i.lines && invoices.find(o=>o.id===invId)?.lines?.some(ol=>i.lines!.some(rl=>rl.productId===ol.productId)));
   const pills: Array<{id:InvoiceStatus|"all"|"impayé";label:string;color:string}> = [
@@ -5390,6 +5407,15 @@ function FacturesView({ boutique, allBoutiques, platformUsers, groupes, currentU
       <div className="relative"><Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground"/><input value={invSearch} onChange={e=>setInvSearch(e.target.value)} placeholder="Chercher une facture ou un client…" className={inputCls+" pl-11"}/></div>
       <div className="flex gap-2" style={{ overflowX:"auto", scrollbarWidth:"none" }}>
         {pills.map(s=><button key={s.id} onClick={()=>setStatusFilter(s.id as InvoiceStatus|"all"|"impayé")}className="px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap flex-shrink-0" style={{ background:statusFilter===s.id?s.color:s.color+"22", color:statusFilter===s.id?"#fff":s.color }}>{s.label}</button>)}
+      </div>
+      <div className="flex items-center gap-2">
+        <label htmlFor="invoice-sort" className="text-xs font-bold text-muted-foreground whitespace-nowrap">Trier par</label>
+        <select id="invoice-sort" value={invoiceSort} onChange={e=>setInvoiceSort(e.target.value as typeof invoiceSort)} className={inputCls+" py-2 text-sm"}>
+          <option value="date_desc">Date : récent d'abord</option>
+          <option value="date_asc">Date : ancien d'abord</option>
+          <option value="number_asc">N° : croissant</option>
+          <option value="number_desc">N° : décroissant</option>
+        </select>
       </div>
       <div className="space-y-3">
         {filtered.map(inv=>{
