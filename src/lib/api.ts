@@ -218,11 +218,11 @@ export async function getData<T>(key: string): Promise<T | null> {
     ]);
     const day = (value?: string | null) => value ? new Date(value).toLocaleDateString("fr-FR") : "";
     return boutiques.map((b) => ({
-      id: b.id, nom: b.nom, ville: b.ville ?? "", color: "#C9A227",
-      initials: (b.nom ?? "?").split(/\\s+/).map((x: string) => x[0]).join("").slice(0, 2).toUpperCase(),
+      id: b.id, nom: b.nom, ville: b.ville ?? "", color: b.color ?? "#C9A227",
+      initials: b.initials ?? (b.nom ?? "?").split(/\\s+/).map((x: string) => x[0]).join("").slice(0, 2).toUpperCase(),
       logo: b.logo_url ?? undefined, adresse: b.adresse ?? undefined, email: b.email ?? undefined, tel: b.tel ?? undefined,
       categories: categories.filter(c => c.boutique_id === b.id).map(c => ({ id:c.id, nom:c.nom, unitVente:"unité", nbPiecesParLot:1, longueurParPiece:1 })),
-      products: products.filter(p => p.boutique_id === b.id).map(p => ({ id:p.id, nom:p.nom, img:"", unit:p.unit, fournisseur:"", categorie:categories.find(c=>c.boutique_id===b.id&&c.id===p.category_id)?.nom })),
+      products: products.filter(p => p.boutique_id === b.id).map(p => ({ id:p.id, nom:p.nom, img:p.image_url ?? "", unit:p.unit, fournisseur:p.supplier_name ?? "", categorie:categories.find(c=>c.boutique_id===b.id&&c.id===p.category_id)?.nom })),
       entries: entries.filter(e => e.boutique_id === b.id).map(e => ({ id:e.id, productId:e.product_id, qty:e.qty, unit:"unité", montantDu:Number(e.qty)*Number(e.prix_unit ?? 0), date:day(e.entry_date), fournisseur:e.note ?? "", invoiceId:undefined })),
       clients: clients.filter(c => c.boutique_id === b.id).map(c => ({ id:c.id, nom:c.nom, type:c.type, tel:c.tel ?? "", total:c.total ?? 0, last:day(c.last_invoice_at), ville:c.ville ?? "", adresse:c.adresse ?? undefined, email:c.email ?? undefined, contact:c.contact ?? undefined })),
       suppliers: suppliers.filter(s => s.boutique_id === b.id).map(s => ({ id:s.id, nom:s.nom, ville:s.ville ?? "", lastDelivery:day(s.last_delivery_at), tel:s.tel ?? "", initials:s.initials ?? "", color:s.color ?? "#C9A227", email:s.email ?? undefined, contact:s.contact ?? undefined })),

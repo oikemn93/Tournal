@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { getData, saveData, checkBackend, stripImages, mergeImages, signQZ, sendInvoiceEmail, storePDFForSMS, getCurrentAuthUser, hasAuthenticatedSession, validateServerSession, startAppSession, validateAppSession, signInWithPhone, signUpWithPhone, signOut as signOutFromSupabase, createBoutique, createUser, resetUserPassword, subscribeToBoutiqueChanges, assignUserToBoutique, unassignUserFromBoutique } from "../lib/api";
+import { getData, saveData, checkBackend, stripImages, mergeImages, signQZ, sendInvoiceEmail, storePDFForSMS, getCurrentAuthUser, hasAuthenticatedSession, validateServerSession, signInWithPhone, signUpWithPhone, signOut as signOutFromSupabase, createBoutique, createUser, resetUserPassword, subscribeToBoutiqueChanges, assignUserToBoutique, unassignUserFromBoutique } from "../lib/api";
 import { toast, Toaster } from "sonner";
 import {
   LayoutDashboard, Package, Users, Truck, FileText, ShieldCheck,
@@ -8623,7 +8623,6 @@ export default function App() {
             const assignments = u.assignments.filter(a => finalBoutiques.some(b => b.id === a.boutiqueId));
             if (assignments.length === 1) {
               const assign = assignments[0];
-              if (!await validateAppSession(assign.boutiqueId).catch(() => false)) { clearSession(); setScreen("login"); return; }
               setActiveBoutiqueId(assign.boutiqueId);
               setActiveAssign(assign);
               loadAuthSettings(assign.boutiqueId);
@@ -8681,7 +8680,7 @@ export default function App() {
       logoutTimer.current = setTimeout(() => {
         const bid = activeBoutiqueIdRef.current;
         if (!bid) return;
-        void validateAppSession(bid).then(valid => {
+        void validateServerSession().then(valid => {
           if (valid) return;
           logTech(bid, { level:"info", cat:"session", msg:"Session expirée côté serveur" });
           clearSession(); setCurrentUser(null); setActiveBoutiqueId(null); setActiveAssign(null); setScreen("login");
@@ -8724,13 +8723,13 @@ export default function App() {
     if (active.length === 0) { saveSession(freshUser.id, null, null); setScreen("boutique-select"); return; }
     if (active.length === 1) {
       const a = active[0];
-      void startAppSession(a.boutiqueId).then(() => { setActiveBoutiqueId(a.boutiqueId); setActiveAssign(a); setTab("dashboard"); setScreen("app"); }).catch(() => toast.error("Session serveur impossible"));
+      setActiveBoutiqueId(a.boutiqueId); setActiveAssign(a); setTab("dashboard"); setScreen("app");
       saveSession(freshUser.id, a.boutiqueId, a);
       logTech(a.boutiqueId, { level:"info", cat:"session", msg:`Connexion : ${freshUser.nom}`, detail: a.role });
     } else { saveSession(freshUser.id, null, null); setScreen("boutique-select"); }
   }
   function handleSelectBoutique(b: Boutique, assignment: BoutiqueAssignment) {
-    void startAppSession(b.id).then(() => { setActiveBoutiqueId(b.id); setActiveAssign(assignment); setTab("dashboard"); setScreen("app"); }).catch(() => toast.error("Session serveur impossible"));
+    setActiveBoutiqueId(b.id); setActiveAssign(assignment); setTab("dashboard"); setScreen("app");
     if (currentUser) {
       saveSession(currentUser.id, b.id, assignment);
       logTech(b.id, { level:"info", cat:"session", msg:`Connexion : ${currentUser.nom}`, detail: assignment.role });
@@ -8738,7 +8737,7 @@ export default function App() {
   }
   function handleEnterBoutiqueAsAdmin(b: Boutique) {
     const assign: BoutiqueAssignment = { boutiqueId:b.id, role:"Propriétaire", droits:{ dashboard:true, stock:true, fournisseurs:true, clients:true, factures:true, remboursement:true, charges:true, compta:true, vente:true, inventaire:true, marges:true } };
-    void startAppSession(b.id).then(() => { setActiveBoutiqueId(b.id); setActiveAssign(assign); setTab("dashboard"); setScreen("app"); }).catch(() => toast.error("Session serveur impossible"));
+    setActiveBoutiqueId(b.id); setActiveAssign(assign); setTab("dashboard"); setScreen("app");
     if (currentUser) saveSession(currentUser.id, b.id, assign);
   }
   function handleLogout() {
