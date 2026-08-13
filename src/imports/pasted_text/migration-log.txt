@@ -1,0 +1,237 @@
+Super Admin
+Tournal
+● Backend
+
+Quitter
+🏪 Boutiques (3)
+👥 Utilisateurs (5)
+🔄 Migration
+Migration KV → Supabase
+Importe toutes les boutiques, produits, clients, factures et autres données depuis l'ancien système vers les nouvelles tables Supabase. Opération idempotente — peut être relancée sans risque.
+
+🔄 Lancer la migration
+Journal
+
+Chargement des UUIDs Supabase…
+
+2 UUID(s) chargés
+
+Migration des assignments…
+
+⚠ Pas d'UUID pour +221 70 000 0000 (Ibou Diallo)
+
+⚠ Pas d'UUID pour +221 77 111 0001 (Moussa Konaté)
+
+⚠ Pas d'UUID pour +221 77 111 0002 (Ibrahima Bah)
+
+⚠ Pas d'UUID pour +221 77 111 0003 (Kadiatou Diallo)
+
+⚠ Pas d'UUID pour +225 07 200 0001 (Aïssatou Koné)
+
+⚠ Pas d'UUID pour +223 76 300 0001 (Sékou Traoré)
+
+⚠ Pas d'UUID pour +221 775000133 (Alé Gaye)
+
+⚠ Pas d'UUID pour +221 771000002 (Fallou)
+
+⚠ Pas d'UUID pour +221 771000003 (Modou)
+
+⚠ Pas d'UUID pour +221 787577875 (MAREMA GAYE)
+
+⚠ Pas d'UUID pour +221 776153815 (Amar)
+
+⚠ Pas d'UUID pour +221 771000009 (Youssou)
+
+⚠ Pas d'UUID pour +221 001 (Proprio groupe)
+
+0 assignment(s) migrés
+
+Boutique: Konaté Textiles (b1)
+
+produits: 0
+
+mouvements: 0
+
+fournisseurs: 0
+
+clients: 0
+
+factures: 0
+
+lignes: 0
+
+audit: 3
+
+✓ Konaté Textiles terminé
+
+Boutique: Élégance Tissus (b2)
+
+produits: 0
+
+mouvements: 0
+
+fournisseurs: 0
+
+clients: 0
+
+factures: 0
+
+lignes: 0
+
+✓ Élégance Tissus terminé
+
+Boutique: Sékou Fabrics (b3)
+
+produits: 0
+
+mouvements: 0
+
+fournisseurs: 0
+
+clients: 0
+
+factures: 0
+
+lignes: 0
+
+✓ Sékou Fabrics terminé
+
+Boutique: td (b1785098527977)
+
+audit: 1
+
+✓ td terminé
+
+Boutique: KDT1 (b1785168316757)
+
+catégories: 0
+
+produits: 0
+
+mouvements: 0
+
+fournisseurs: 0
+
+clients: 0
+
+factures: 0
+
+lignes: 0
+
+charges: 0
+
+caisse: 0
+
+audit: 153
+
+✓ KDT1 terminé
+
+Boutique: Keur Dabakh Textile (b1785182214663)
+
+catégories: 0
+
+produits: 0
+
+mouvements: 0
+
+fournisseurs: 0
+
+factures: 0
+
+lignes: 0
+
+charges: 0
+
+caisse: 0
+
+audit: 293
+
+✓ Keur Dabakh Textile terminé
+
+⚠ Migration terminée avec 29 erreur(s)
+
+⚠ Migration avec erreurs
+
+6 boutique(s) · assignment(s)
+
+Konaté Textiles
+
+products: 0 · stock_entries: 0 · suppliers: 0 · clients: 0 · invoices: 0 · invoice_lines: 0 · audit_log: 3
+
+Élégance Tissus
+
+products: 0 · stock_entries: 0 · suppliers: 0 · clients: 0 · invoices: 0 · invoice_lines: 0
+
+Sékou Fabrics
+
+products: 0 · stock_entries: 0 · suppliers: 0 · clients: 0 · invoices: 0 · invoice_lines: 0
+
+b1785098527977
+
+audit_log: 1
+
+b1785168316757
+
+categories: 0 · products: 0 · stock_entries: 0 · suppliers: 0 · clients: 0 · invoices: 0 · invoice_lines: 0 · charges: 0 · caisse_sessions: 0 · audit_log: 153
+
+b1785182214663
+
+categories: 0 · products: 0 · stock_entries: 0 · suppliers: 0 · invoices: 0 · invoice_lines: 0 · charges: 0 · caisse_sessions: 0 · audit_log: 293
+
+[products] insert or update on table "products" violates foreign key constraint "products_boutique_id_category_id_fkey"
+
+[stock_entries] insert or update on table "stock_entries" violates foreign key constraint "stock_entries_boutique_id_product_id_fkey"
+
+[invoices] new row for relation "invoices" violates check constraint "invoices_type_check"
+
+[invoice_lines] insert or update on table "invoice_lines" violates foreign key constraint "invoice_lines_boutique_id_invoice_id_fkey"
+
+[products] insert or update on table "products" violates foreign key constraint "products_boutique_id_category_id_fkey"
+
+[stock_entries] insert or update on table "stock_entries" violates foreign key constraint "stock_entries_boutique_id_product_id_fkey"
+
+[invoices] new row for relation "invoices" violates check constraint "invoices_type_check"
+
+[invoice_lines] insert or update on table "invoice_lines" violates foreign key constraint "invoice_lines_boutique_id_invoice_id_fkey"
+
+[products] insert or update on table "products" violates foreign key constraint "products_boutique_id_category_id_fkey"
+
+[stock_entries] insert or update on table "stock_entries" violates foreign key constraint "stock_entries_boutique_id_product_id_fkey"
+
+[invoices] new row for relation "invoices" violates check constraint "invoices_type_check"
+
+[invoice_lines] insert or update on table "invoice_lines" violates foreign key constraint "invoice_lines_boutique_id_invoice_id_fkey"
+
+[products] insert or update on table "products" violates foreign key constraint "products_boutique_id_category_id_fkey"
+
+[stock_entries] insert or update on table "stock_entries" violates foreign key constraint "stock_entries_boutique_id_product_id_fkey"
+
+[stock_entries] insert or update on table "stock_entries" violates foreign key constraint "stock_entries_boutique_id_product_id_fkey"
+
+[invoices] new row for relation "invoices" violates check constraint "invoices_type_check"
+
+[invoice_lines] insert or update on table "invoice_lines" violates foreign key constraint "invoice_lines_boutique_id_invoice_id_fkey"
+
+[invoice_lines] insert or update on table "invoice_lines" violates foreign key constraint "invoice_lines_boutique_id_invoice_id_fkey"
+
+[products] insert or update on table "products" violates foreign key constraint "products_boutique_id_category_id_fkey"
+
+[stock_entries] insert or update on table "stock_entries" violates foreign key constraint "stock_entries_boutique_id_product_id_fkey"
+
+[stock_entries] insert or update on table "stock_entries" violates foreign key constraint "stock_entries_boutique_id_product_id_fkey"
+
+[stock_entries] insert or update on table "stock_entries" violates foreign key constraint "stock_entries_boutique_id_product_id_fkey"
+
+[stock_entries] insert or update on table "stock_entries" violates foreign key constraint "stock_entries_boutique_id_product_id_fkey"
+
+[invoices] new row for relation "invoices" violates check constraint "invoices_type_check"
+
+[invoices] new row for relation "invoices" violates check constraint "invoices_type_check"
+
+[invoices] new row for relation "invoices" violates check constraint "invoices_type_check"
+
+[invoice_lines] insert or update on table "invoice_lines" violates foreign key constraint "invoice_lines_boutique_id_invoice_id_fkey"
+
+[invoice_lines] insert or update on table "invoice_lines" violates foreign key constraint "invoice_lines_boutique_id_invoice_id_fkey"
+
+[invoice_lines] insert or update on table "invoice_lines" violates foreign key constraint "invoice_lines_boutique_id_invoice_id_fkey"
