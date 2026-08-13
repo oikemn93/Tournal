@@ -47,6 +47,16 @@ type Transfer = {
   invoiceId?: string;
 };
 type BoutiquePartner = { id: string; phone: string; nom: string; boutiqueIds: string[]; addedAt: string };
+
+function RelationalMigrationNotice({ title }: { title: string }) {
+  return <div className="min-h-[55vh] flex items-center justify-center px-4">
+    <div className="max-w-md text-center rounded-3xl border border-amber-200 bg-amber-50 p-7 space-y-3">
+      <Lock size={30} className="mx-auto text-amber-700" />
+      <h2 className="text-xl font-black">{title} en migration</h2>
+      <p className="text-sm text-amber-900">Cet écran est temporairement en lecture protégée : ses opérations ne seront réactivées qu’avec une sauvegarde transactionnelle dans Supabase.</p>
+    </div>
+  </div>;
+}
 type CartItem   = { productId: number; nom: string; img: string; unit: string; qty: number; prixUnit: number; sellUnit?: string; sellQty?: number };
 type InvoiceStatus = "payé" | "acompte" | "en attente" | "en retard";
 type PaymentMethod = "Espèces" | "Wave" | "Orange Money" | "Autre";
@@ -9009,8 +9019,8 @@ export default function App() {
         {safeTab==="pos"          && canAccess("vente")        && <RelationalPOSView boutique={boutique} allBoutiques={boutiques} currentUser={currentUser} onUpdate={updateBoutique} logAction={logAction}/>}
         {safeTab==="charges"      && canAccess("charges")      && <RelationalChargesView boutique={boutique} onUpdate={updateBoutique} logAction={logAction}/>}
         {safeTab==="compta"       && canAccess("compta")       && <RelationalComptabiliteView boutique={boutique}/>}
-        {safeTab==="inventaire"   && canAccess("inventaire")   && currentUser && <InventaireView boutique={boutique} currentUser={currentUser} onUpdate={updateBoutique} logAction={logAction} onClose={()=>setTab("stock")}/>}
-        {safeTab==="transferts"   && canAccess("stock")        && currentUser && <TransfertsView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} groupes={groupes} currentUser={currentUser} onUpdate={updateBoutique} onUpdateOtherBoutique={updateOtherBoutique} logAction={logAction}/>}
+        {safeTab==="inventaire"   && canAccess("inventaire")   && <RelationalMigrationNotice title="Inventaire"/>}
+        {safeTab==="transferts"   && canAccess("stock")        && <RelationalMigrationNotice title="Transferts"/>}
         {safeTab==="admin"        && isOwner                  && <AdminView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} currentUser={currentUser} onUpdate={updateBoutique} onUpdateUsers={handleUpdatePlatformUsers} onCreateUser={handleCreateUser}
               onSaveAuthSettings={async (lockMin: number, sessMin: number) => {
                 const bid = activeBoutiqueId;
