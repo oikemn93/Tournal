@@ -370,6 +370,9 @@ function getSiblings(currentId: string, allBoutiques: Boutique[], allUsers: Plat
 function lineDispQty(l: InvoiceLine | CartItem) { return l.sellQty ?? l.qty; }
 function lineDispUnit(l: InvoiceLine | CartItem) { return l.sellUnit ?? l.unit; }
 function lineTotal(l: InvoiceLine | CartItem) { return (l.sellQty ?? l.qty) * l.prixUnit; }
+function invoiceSign(inv: Invoice) { return inv.type === "Retour" ? -1 : 1; }
+function signedInvoiceAmount(inv: Invoice) { return invoiceSign(inv) * inv.montant; }
+function signedInvoicePaid(inv: Invoice) { return invoiceSign(inv) * inv.acompte; }
 function productQty(pid: number, entries: StockEntry[]) { return entries.filter(e => e.productId === pid).reduce((s, e) => s + e.qty, 0); }
 function productMontant(pid: number, entries: StockEntry[]) { return entries.filter(e => e.productId === pid && e.qty > 0).reduce((s, e) => s + e.montantDu, 0); }
 
@@ -2203,13 +2206,13 @@ function DashboardView({ boutique, onNavigate }: { boutique: Boutique; onNavigat
   }
 
   const caInv       = filtInv.filter(i => i.type !== "Transfert interne" && i.type !== "B2B Achat");
-  const ca          = caInv.reduce((s,i) => s + i.acompte, 0); // encaissé réel
-  const caTotal     = caInv.reduce((s,i) => s + i.montant, 0);
+  const ca          = caInv.reduce((s,i) => s + signedInvoicePaid(i), 0); // encaissé réel, retours déduits
+  const caTotal     = caInv.reduce((s,i) => s + signedInvoiceAmount(i), 0);
   // B2B debt charges count only their paid portion (acompte); regular charges count fully
   const totalCharges= filtCh.reduce((s,c) => s + (c.isB2BDebt ? (c.acompte ?? 0) : c.montant), 0);
   const margeBrute  = ca - totalCharges;
-  const prevCa      = prevInv.filter(i => i.type !== "Transfert interne" && i.type !== "B2B Achat").reduce((s,i) => s + i.acompte, 0);
-  const prevTotal   = prevInv.filter(i => i.type !== "Transfert interne" && i.type !== "B2B Achat").reduce((s,i) => s + i.montant, 0);
+  const prevCa      = prevInv.filter(i => i.type !== "Transfert interne" && i.type !== "B2B Achat").reduce((s,i) => s + signedInvoicePaid(i), 0);
+  const prevTotal   = prevInv.filter(i => i.type !== "Transfert interne" && i.type !== "B2B Achat").reduce((s,i) => s + signedInvoiceAmount(i), 0);
   const trendCa     = trend(ca, prevCa);
   const trendTotal  = trend(caTotal, prevTotal);
   const margeNette  = margeBrute; // can extend with taxes
@@ -2238,7 +2241,7 @@ function DashboardView({ boutique, onNavigate }: { boutique: Boutique; onNavigat
       });
       return MONTHS.map((m, idx) => ({
         m,
-        v: Math.round(yearInv.filter(inv => parseInvDate(inv).getMonth() === idx).reduce((s,inv)=>s+inv.acompte,0) / 1000)
+        v: Math.round(yearInv.filter(inv => parseInvDate(inv).getMonth() === idx).reduce((s,inv)=>s+signedInvoicePaid(inv),0) / 1000)
       }));
     }
     // group by day of week for semaine (robust parsing)
@@ -2246,7 +2249,7 @@ function DashboardView({ boutique, onNavigate }: { boutique: Boutique; onNavigat
       const days = ["Lun","Mar","Mer","Jeu","Ven","Sam","Dim"];
       return days.map((d,i) => ({
         m: d,
-        v: Math.round(caInv.filter(inv => (parseInvDate(inv).getDay()+6)%7 === i).reduce((s,inv)=>s+inv.acompte,0) / 1000)
+        v: Math.round(caInv.filter(inv => (parseInvDate(inv).getDay()+6)%7 === i).reduce((s,inv)=>s+signedInvoicePaid(inv),0) / 1000)
       }));
     }
     // group by date for mois/jour/custom
@@ -3209,7 +3212,7 @@ function InventaireView({ boutique, currentUser, onUpdate, logAction, onClose }:
     // Snapshot profit/loss at validation time
     const snapCA = (boutique.invoices ?? [])
       .filter(inv => (inv.dateRaw ?? "") >= session.dateRaw && inv.type !== "Transfert interne" && inv.type !== "B2B Achat")
-      .reduce((s, inv) => s + inv.acompte, 0);
+      .reduce((s, inv) => s + signedInvoicePaid(inv), 0);
     const snapCOGS = (boutique.invoices ?? [])
       .filter(inv => (inv.dateRaw ?? "") >= session.dateRaw && inv.type !== "Transfert interne" && inv.type !== "B2B Achat")
       .reduce((s, inv) => s + (inv.lines ?? []).reduce((ls, l) => l.prixAchat != null ? ls + l.prixAchat * l.qty : ls, 0), 0);
@@ -3425,7 +3428,7 @@ function InventaireView({ boutique, currentUser, onUpdate, logAction, onClose }:
   const sessionDateRaw = session?.dateRaw ?? new Date(0).toISOString();
   const chiffreAffaires = (boutique.invoices ?? [])
     .filter(inv => (inv.dateRaw ?? "") >= sessionDateRaw && inv.type !== "Transfert interne" && inv.type !== "B2B Achat")
-    .reduce((sum, inv) => sum + inv.acompte, 0);
+    .reduce((sum, inv) => sum + signedInvoicePaid(inv), 0);
   const coutVentes = (boutique.invoices ?? [])
     .filter(inv => (inv.dateRaw ?? "") >= sessionDateRaw && inv.type !== "Transfert interne" && inv.type !== "B2B Achat")
     .reduce((sum, inv) => {
@@ -7320,10 +7323,10 @@ function POSView({ boutique, allBoutiques, currentUser, onUpdate, logAction }: {
 
   const todayStr = new Date().toISOString().split("T")[0];
   const todayInv = invoices.filter(i => i.dateRaw === todayStr && i.acompte > 0);
-  const totalJour = todayInv.reduce((s, i) => s + i.acompte, 0);
+  const totalJour = todayInv.reduce((s, i) => s + signedInvoicePaid(i), 0);
   const byMethod = PAYMENT_METHODS.map(m => ({
     m,
-    total: todayInv.filter(i => i.paymentMethod === m).reduce((s, i) => s + i.acompte, 0),
+    total: todayInv.filter(i => i.paymentMethod === m).reduce((s, i) => s + signedInvoicePaid(i), 0),
     count: todayInv.filter(i => i.paymentMethod === m).length,
   }));
   const totalEspeces = byMethod.find(b => b.m === "Espèces")?.total ?? 0;
@@ -8034,8 +8037,8 @@ function ComptabiliteView({ boutique, currentUser }: { boutique: Boutique; curre
 
   const compInv      = filtInv.filter(i => i.type !== "Transfert interne" && i.type !== "B2B Achat");
   const encaisséInv  = compInv.filter(i => i.acompte > 0);
-  const ca           = compInv.reduce((s,i)=>s+i.acompte,0);
-  const caTotal      = compInv.reduce((s,i)=>s+i.montant,0);
+  const ca           = compInv.reduce((s,i)=>s+signedInvoicePaid(i),0);
+  const caTotal      = compInv.reduce((s,i)=>s+signedInvoiceAmount(i),0);
   const nbVentes     = encaisséInv.length;
   const panierMoyen  = nbVentes > 0 ? ca / nbVentes : 0;
   const impayé       = compInv.reduce((s,i)=>s+(i.montant-i.acompte),0);
@@ -8043,8 +8046,8 @@ function ComptabiliteView({ boutique, currentUser }: { boutique: Boutique; curre
   const margeBrute   = ca - totalCharges;
   const tauxMarge    = ca > 0 ? (margeBrute/ca*100).toFixed(1) : "0";
 
-  const prevCaRapport    = prevRapportInv.filter(i=>i.type!=="Transfert interne"&&i.type!=="B2B Achat").reduce((s,i)=>s+i.acompte,0);
-  const prevTotalRapport = prevRapportInv.filter(i=>i.type!=="Transfert interne"&&i.type!=="B2B Achat").reduce((s,i)=>s+i.montant,0);
+  const prevCaRapport    = prevRapportInv.filter(i=>i.type!=="Transfert interne"&&i.type!=="B2B Achat").reduce((s,i)=>s+signedInvoicePaid(i),0);
+  const prevTotalRapport = prevRapportInv.filter(i=>i.type!=="Transfert interne"&&i.type!=="B2B Achat").reduce((s,i)=>s+signedInvoiceAmount(i),0);
   const trendCaRapport   = trendRapport(ca, prevCaRapport);
   const trendTotalRapport = trendRapport(caTotal, prevTotalRapport);
 
