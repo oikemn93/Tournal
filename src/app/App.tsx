@@ -4927,25 +4927,25 @@ function silentPrint(html: string) {
 }
 
 // ─── QZ TRAY CERTIFICATE (embedded — avoids fetch failures in proxy environments)
-const QZ_CERT = `-----BEGIN CERTIFICATE-----
-MIIDUzCCAjugAwIBAgIUGNj7uBO1E0B2UGTkTetR9yr8lUkwDQYJKoZIhvcNAQEN
-BQAwOTEYMBYGA1UEAwwPVG91cm5hbCBRWiBUcmF5MRAwDgYDVQQKDAdUb3VybmFs
-MQswCQYDVQQGEwJTTjAeFw0yNjA3MjkxOTI3MzRaFw0zNjA3MjYxOTI3MzRaMDkx
-GDAWBgNVBAMMD1RvdXJuYWwgUVogVHJheTEQMA4GA1UECgwHVG91cm5hbDELMAkG
-A1UEBhMCU04wggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDD/mlDDU3F
-NS9HlJPwCWRbhg51GlJ0ubatO+Gl6JvLgAfw8cbPna05Aj7/Y+TF4D9u/d0+r8l7
-nSsqtFHQ76L0db7QuaeDdnwR7u/dy3lDXOdrekCKZhZCjwXuZHrK+ZUPI3hXbheq
-PRhQk9HOG2p7MWlm9+VI6KNe17cks4PO4TlyNIsKJX/oICPu7r9KZ+UyGvdC3KP+
-XHKWwQYB0OhPXhLUskMcuXFk4kN5L1Sz8IrpjkwfjE2OSKNKAI0wFQN6wojYTIzT
-7EUfqWRGopp48QBL0PDxjy/hYUI9k2I3tjv5GdUg2Zy6nQ+y+VJSYWB9ZpZcdgGY
-tEhx6nwJY5uTAgMBAAGjUzBRMB0GA1UdDgQWBBRgA4R+MDat/6Dv6nSZRTekQhcj
-BTAfBgNVHSMEGDAWgBRgA4R+MDat/6Dv6nSZRTekQhcjBTAPBgNVHRMBAf8EBTAD
-AQH/MA0GCSqGSIb3DQEBDQUAA4IBAQB50R26/sllhl5EEysu5Dpx1ufr/WaQT3cp
-6EKAU8vpHi4n4TnYJ9GFacrA8R+h8Z3K1F5De9Ko7x5MA3K87Fz0tAED9jAxHseu
-IgRbhi7zex2+70Qr3CyDaiOxaotuSdrQSx9GMY1y6F3XzF7/T4cR4o9lq9DZlaUT
-jmiiZY+3roPgEFbhzjDIjnjrYyZEJXxMzAOOGvoR0SdCigpy10bz2+HAXhFFtIaq
-+JfX/e8adC5JmNMZbJ21Po9Ayq2XL2e2wK9DPg6QlbbNyoZV8fy4446xWqwsDIsO
-+vNgm2xYH9ii/jSOVPyfj7ByRNDrv0VsAPya53HmmxfYRpBgnOJH
+const QZ_CERT_ROTATED = `-----BEGIN CERTIFICATE-----
+MIIDOTCCAiGgAwIBAgIUOa1/7AYJL6pGwXwojhWAcAD/vpIwDQYJKoZIhvcNAQEL
+BQAwLDEYMBYGA1UEAwwPVG91cm5hbCBRWiBUcmF5MRAwDgYDVQQKDAdUb3VybmFs
+MB4XDTI2MDgxMzA0MDgzOVoXDTM2MDgxMDA0MDgzOVowLDEYMBYGA1UEAwwPVG91
+cm5hbCBRWiBUcmF5MRAwDgYDVQQKDAdUb3VybmFsMIIBIjANBgkqhkiG9w0BAQEF
+AAOCAQ8AMIIBCgKCAQEAjlZwFiIgOmFPoanG7TkBdfoFA3pNpUirEyJJSF2T6au3
+1azLUdgVx/ZA1ltmWdsLbJpa3AEycJFPiYHk2aSMY0AQReo9+sj/5j8TE4j4S/wv
+58trY2UaButOs4PcnAbwTx37JudzLsywWJSeJX4zI1EON/wB4DrieB4M2Yvsr+u/
+GA8J1dzczPLbnZixit7gb72gr3q9jZATh6/YRbs35tYYC71jTY/ZxJVmxMRuzmO6
+AXVHMWOCF7ZT5RWF2r369OnqOsvCJXN2G5wmG6s2jPQaUrGT0+OgWvX6Pe8njMyj
+A9BwBC0QRlnwCLSrXvPeXpVc09pm35QkJDr6S/KUqQIDAQABo1MwUTAdBgNVHQ4E
+FgQUupyVz7ptI255R/D2yPjL7iiAEmQwHwYDVR0jBBgwFoAUupyVz7ptI255R/D2
+yPjL7iiAEmQwDwYDVR0TAQH/BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOCAQEAcTA1
+djMmBRrhRtTjCPGrSvq43Tp7VPNzKVLU7CFIBRfBRKnFEm82v1ihLJexKzGLTQmp
+LTM4CbEybjXaFuhzMUE9GokNqIgXQN68T+jMC8hA7R0DPxYK8c9kxYEVlyPulhHx
+WnQ894KcB2v4WkjnNzOInfgAsY4u1fi29UETS1OJNWRSWrdnnD1Gkz/+2cpAZT/h
+mTNgQI0C6bB051yZcvKyYrP7ASoFUlj1xLf7qQFOyOS3XGKkcv5RRLcuzvJGp9tI
+lFVACAKPBsq9w6fXa/BtZlsmYfYTi9mxRCFGjyV/zBSKW9jRlEQuIYtaZKu0P82X
+29No9wIhTQ7U/067jg==
 -----END CERTIFICATE-----`;
 
 // ─── PRINT AGENT (QZ Tray WebSocket) ─────────────────────────────────────────
@@ -4982,7 +4982,7 @@ async function connectQZ(savedPrinter?: string): Promise<void> {
     if (!qz) throw new Error("qz unavailable");
 
     // Load the self-signed certificate from the static asset
-    qz.security.setCertificatePromise((res: any) => { res(QZ_CERT); });
+    qz.security.setCertificatePromise((res: any) => { res(QZ_CERT_ROTATED); });
     // Sign each print request server-side (SHA512withRSA — private key never leaves the server)
     qz.security.setSignatureAlgorithm("SHA512");
     qz.security.setSignaturePromise((toSign: string) => (res: any, rej: any) => {

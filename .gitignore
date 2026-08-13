@@ -5,3 +5,5 @@ dist/
 .env.*
 !.env.example
 *.local
+certs-gen/*.pem
+!certs-gen/README.md
