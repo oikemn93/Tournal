@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { getData, saveData, checkBackend, stripImages, mergeImages, signQZ, sendInvoiceEmail, storePDFForSMS, getCurrentAuthUser, hasAuthenticatedSession, signInWithPhone, signUpWithPhone, signOut as signOutFromSupabase, createBoutique, createUser, resetUserPassword } from "../lib/api";
+import { getData, saveData, checkBackend, stripImages, mergeImages, signQZ, sendInvoiceEmail, storePDFForSMS, getCurrentAuthUser, hasAuthenticatedSession, signInWithPhone, signUpWithPhone, signOut as signOutFromSupabase, createBoutique, createUser, resetUserPassword, subscribeToBoutiqueChanges } from "../lib/api";
 import { toast, Toaster } from "sonner";
 import {
   LayoutDashboard, Package, Users, Truck, FileText, ShieldCheck,
@@ -8402,7 +8402,6 @@ export default function App() {
   const [sessionExpiryMs, setSessionExpiryMs] = useState(SESSION_EXPIRY_MS);
   const LOCK_TIMEOUT_MS = lockTimeoutMs; // alias for existing refs
   const saveTimer   = useRef<ReturnType<typeof setTimeout>|null>(null);
-  const pollTimer   = useRef<ReturnType<typeof setInterval>|null>(null);
   const pendingSaves = useRef<Record<string, unknown>>({});
   const isSaving             = useRef(false); // true while a save is in-flight
   const isPulling            = useRef(false); // prevents setInterval + visibilitychange overlap
@@ -8457,6 +8456,7 @@ export default function App() {
       try {
         await Promise.all(entries.map(([k, v]) => {
           if (k === "boutiques") {
+            lastRemoteB.current = JSON.stringify(v);
             const { stripped, images } = stripImages(v as any[]);
             return Promise.all([saveData(k, stripped), saveData("boutique_images", images)]);
           }
@@ -8638,13 +8638,14 @@ export default function App() {
     return () => document.removeEventListener("wheel", onWheel);
   }, []);
 
-  // Start polling after initial load — every 5 s + immediate pull on tab focus
+  // Supabase Realtime pushes boutique changes to connected users.  A single
+  // refresh follows each event; there is no periodic 2-second polling.
   useEffect(() => {
     if (!synced || !hasAuthenticatedSession()) return;
-    pollTimer.current = setInterval(pullRemote, 2000);
     const onVisible = () => { if (document.visibilityState === "visible") pullRemote(); };
+    const unsubscribe = subscribeToBoutiqueChanges(pullRemote);
     document.addEventListener("visibilitychange", onVisible);
-    return () => { if (pollTimer.current) clearInterval(pollTimer.current); document.removeEventListener("visibilitychange", onVisible); };
+    return () => { unsubscribe(); document.removeEventListener("visibilitychange", onVisible); };
   }, [synced, pullRemote]);
 
   useEffect(() => { if (!synced) return; debouncedSave("boutiques", boutiques); }, [boutiques, synced, debouncedSave]);

@@ -1,3 +1,5 @@
+import { createClient } from "@supabase/supabase-js";
+
 /**
  * Small browser-only client for the Tournal Supabase project.
  *
@@ -11,6 +13,9 @@ type AuthSession = { access_token: string; refresh_token: string; user: AuthUser
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL ?? "https://cnxtylngddwmhugxkzju.supabase.co";
 const PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? "sb_publishable_Jeo4Bx2IsTPCkzsQMYTuFQ_VKPQc9Aq";
 const SESSION_STORAGE_KEY = "tournal.supabase.session";
+const realtimeClient = createClient(SUPABASE_URL, PUBLISHABLE_KEY, {
+  auth: { persistSession: false, autoRefreshToken: false },
+});
 
 function phoneToEmail(phone: string) {
   const digits = phone.replace(/\D/g, "");
@@ -124,6 +129,23 @@ export function getCurrentAuthUser(): AuthUser | null {
 
 export function hasAuthenticatedSession() {
   return Boolean(readSession()?.access_token);
+}
+
+/**
+ * Watches the shared boutique state over a WebSocket.  A database update
+ * triggers a single refresh for connected users instead of periodic polling.
+ */
+export function subscribeToBoutiqueChanges(onChange: () => void) {
+  const session = readSession();
+  if (!session?.access_token) return () => undefined;
+
+  realtimeClient.realtime.setAuth(session.access_token);
+  const channel = realtimeClient
+    .channel("tournal-boutique-state")
+    .on("postgres_changes", { event: "*", schema: "public", table: "boutique_state" }, onChange)
+    .subscribe();
+
+  return () => { void realtimeClient.removeChannel(channel); };
 }
 
 export async function createBoutique(nom: string, ville: string, ownerId: string) {
