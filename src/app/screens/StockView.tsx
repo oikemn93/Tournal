@@ -7,7 +7,7 @@ import { productQty, productMontant, productMontantNet, stockStatus, stockDot } 
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
-import { recordStockMovement } from "../../lib/api";
+import { createProduct, recordStockMovement } from "../../lib/api";
 
 export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
   boutique: Boutique; onUpdate: (u: Partial<Boutique>) => void;
@@ -140,16 +140,22 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
     setDLotMode(false); setDLots("1"); setDPieces(""); setDLongueur("");
   }
 
-  function submitNew() {
+  async function submitNew() {
     if (!nNom.trim()) return;
     const finalCat = nCatMode === "new" ? nCatNew.trim() : nCat;
-    const pid = Date.now();
+    const localPid = Date.now();
     let updatedCats = cats;
     if (nCatMode === "new" && nCatNew.trim() && !cats.find(c => c.nom === nCatNew.trim())) {
-      updatedCats = [...cats, { id: "cat" + pid, nom: nCatNew.trim(), unitVente: nUnit, nbPiecesParLot: 0, longueurParPiece: 0 }];
+      updatedCats = [...cats, { id: "cat" + localPid, nom: nCatNew.trim(), unitVente: nUnit, nbPiecesParLot: 0, longueurParPiece: 0 }];
     }
     const initQty = nLotMode ? nLotQty : Number(nQty);
     const lotExtra = nLotMode ? { nbLots: Number(nLots)||1, nbPieces: Number(nPieces)||0, ...(nUnit !== "pièces" ? { longueurPiece: Number(nLongueur)||0 } : {}) } : {};
+    let persisted;
+    try {
+      persisted = await createProduct({ boutiqueId:boutique.id, name:nNom.trim(), unit:nUnit, categoryId:cats.find(c=>c.nom===finalCat)?.id, purchasePrice:Number(nMontant) || 0, salePrice:Number(nPrixUnit) || 0 });
+      if (initQty > 0) await recordStockMovement({ boutiqueId:boutique.id, productId:persisted.product_id, qty:initQty, type:"achat", prixUnit:initQty ? (Number(nMontant) || 0) / initQty : 0, note:nFourn });
+    } catch (error) { alert(error instanceof Error ? error.message : "Création du produit impossible"); return; }
+    const pid = persisted.product_id;
     const newEntries = initQty > 0 ? [...entries, { id: pid + 1, productId: pid, qty: initQty, unit: nUnit, montantDu: Number(nMontant) || 0, date: today(), fournisseur: nFourn, ...lotExtra }] : entries;
     onUpdate({
       products: [...products, { id: pid, nom: nNom.trim(), img: nImg ?? PLACEHOLDER_IMGS[Math.floor(Math.random() * 4)], unit: nUnit, fournisseur: nFourn, categorie: finalCat || undefined }],
