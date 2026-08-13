@@ -290,9 +290,9 @@ const INIT_PLATFORM_USERS: PlatformUser[] = [];
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 
 const fmt   = (n: number) => new Intl.NumberFormat("fr-FR").format(n) + " F";
-const today = () => new Date().toLocaleDateString("fr-FR", { day: "2-digit", month: "short" }) + " · " + new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+const today = () => new Date().toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" }) + " · " + new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 const ini   = (n: string) => n.split(" ").map(w => w[0]).slice(0, 2).join("").toUpperCase();
-const nowStr = () => new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+const nowStr = () => new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 const cleanPhone = (s: string) => s.replace(/[\s\-().]/g, "");
 
 function genInvoiceId(boutique: Boutique, allBoutiques: Boutique[], invoices: Invoice[]): string {
@@ -6333,7 +6333,7 @@ function fmtAge(ts: number): string {
   return `il y a ${Math.floor(d/86400)}j`;
 }
 function fmtDateTime(ts: number): string {
-  return new Date(ts).toLocaleString("fr-FR", { day:"2-digit", month:"short", hour:"2-digit", minute:"2-digit" });
+  return new Date(ts).toLocaleString("fr-FR", { day:"2-digit", month:"short", year:"numeric", hour:"2-digit", minute:"2-digit", second:"2-digit" });
 }
 
 function SupervisionSection({ boutique, allBoutiques, backendOk, lastSyncAt }: {
