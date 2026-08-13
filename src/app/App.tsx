@@ -14,6 +14,7 @@ import {
   Printer, Settings, Check, ChevronLeft, ClipboardCheck,
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, Cell, PieChart, Pie } from "recharts";
+import { StockView as RelationalStockView } from "./screens/StockView";
 
 const ReadOnlyCtx = React.createContext(false);
 const useReadOnly = () => React.useContext(ReadOnlyCtx);
@@ -8995,7 +8996,7 @@ export default function App() {
       {isReadOnly && <div className="flex items-center gap-2 px-4 py-2 text-xs font-bold text-amber-800 bg-amber-50 border-b border-amber-200"><Lock size={12}/> Mode lecture seule — aucune modification possible</div>}
       <main className="flex-1 overflow-y-auto px-4 py-4 pb-20" style={{ scrollbarWidth:"none" }}>
         {safeTab==="dashboard"    && canAccess("dashboard") && <DashboardView boutique={boutique} onNavigate={(t,f)=>{setNavFilter(f??{});setTab(t);}}/>}
-        {safeTab==="stock"        && canAccess("stock")        && <StockView boutique={boutique} onUpdate={updateBoutique} logAction={logAction} initialFilter={navFilter.stockFilter} allBoutiques={boutiques} onUpdateOtherBoutique={updateOtherBoutique} currentUser={currentUser}/>}
+        {safeTab==="stock"        && canAccess("stock")        && <RelationalStockView boutique={boutique} onUpdate={updateBoutique} logAction={logAction} initialFilter={navFilter.stockFilter}/>}
         {safeTab==="fournisseurs" && canAccess("fournisseurs") && <FournisseursView boutique={boutique} onUpdate={updateBoutique} logAction={logAction}/>}
         {safeTab==="clients"      && canAccess("clients")      && <ClientsView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} currentUser={currentUser!} onUpdate={updateBoutique} logAction={logAction} initialTab={navFilter.clientTab as ClientType|undefined}/>}
         {safeTab==="factures"     && canAccess("factures")     && <FacturesView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} groupes={groupes} currentUser={currentUser} canReturn={canAccess("remboursement")} onUpdate={updateBoutique} onUpdateOtherBoutique={updateOtherBoutique} logAction={logAction} initialStatus={navFilter.statusFilter as InvoiceStatus|"all"|undefined}/>}
