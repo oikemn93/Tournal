@@ -180,8 +180,31 @@ export async function unassignUserFromBoutique(boutiqueId: string, userId: strin
 /** Reads the compatibility state while the screens are progressively moved to relational tables. */
 export async function getData<T>(key: string): Promise<T | null> {
   if (key === "boutiques") {
-    const rows = await dataRequest<Array<{ value: T }>>("boutique_state?select=value&order=updated_at.asc");
-    return rows.map((row) => row.value) as T;
+    // Compatibility projection: legacy screens still consume a Boutique object,
+    // but its data now comes exclusively from the relational source of truth.
+    const [boutiques, categories, products, entries, clients, suppliers, invoices, lines, charges, sessions] = await Promise.all([
+      dataRequest<any[]>("boutiques?select=*&order=nom.asc"),
+      dataRequest<any[]>("categories?select=*"), dataRequest<any[]>("products?select=*"),
+      dataRequest<any[]>("stock_entries?select=*"), dataRequest<any[]>("clients?select=*"),
+      dataRequest<any[]>("suppliers?select=*"), dataRequest<any[]>("invoices?select=*"),
+      dataRequest<any[]>("invoice_lines?select=*"), dataRequest<any[]>("charges?select=*"),
+      dataRequest<any[]>("caisse_sessions?select=*"),
+    ]);
+    const day = (value?: string | null) => value ? new Date(value).toLocaleDateString("fr-FR") : "";
+    return boutiques.map((b) => ({
+      id: b.id, nom: b.nom, ville: b.ville ?? "", color: "#C9A227",
+      initials: (b.nom ?? "?").split(/\\s+/).map((x: string) => x[0]).join("").slice(0, 2).toUpperCase(),
+      logo: b.logo_url ?? undefined, adresse: b.adresse ?? undefined, email: b.email ?? undefined, tel: b.tel ?? undefined,
+      categories: categories.filter(c => c.boutique_id === b.id).map(c => ({ id:c.id, nom:c.nom, unitVente:"unité", nbPiecesParLot:1, longueurParPiece:1 })),
+      products: products.filter(p => p.boutique_id === b.id).map(p => ({ id:p.id, nom:p.nom, img:"", unit:p.unit, fournisseur:"", categorie:categories.find(c=>c.boutique_id===b.id&&c.id===p.category_id)?.nom })),
+      entries: entries.filter(e => e.boutique_id === b.id).map(e => ({ id:e.id, productId:e.product_id, qty:e.qty, unit:"unité", montantDu:Number(e.qty)*Number(e.prix_unit ?? 0), date:day(e.entry_date), fournisseur:e.note ?? "", invoiceId:undefined })),
+      clients: clients.filter(c => c.boutique_id === b.id).map(c => ({ id:c.id, nom:c.nom, type:c.type, tel:c.tel ?? "", total:c.total ?? 0, last:day(c.last_invoice_at), ville:c.ville ?? "", adresse:c.adresse ?? undefined, email:c.email ?? undefined, contact:c.contact ?? undefined })),
+      suppliers: suppliers.filter(s => s.boutique_id === b.id).map(s => ({ id:s.id, nom:s.nom, ville:s.ville ?? "", lastDelivery:day(s.last_delivery_at), tel:s.tel ?? "", initials:s.initials ?? "", color:s.color ?? "#C9A227", email:s.email ?? undefined, contact:s.contact ?? undefined })),
+      invoices: invoices.filter(i => i.boutique_id === b.id).map(i => ({ id:i.id, client:i.client_nom ?? "Client comptoir", clientTel:i.client_tel ?? undefined, montant:Number(i.montant), acompte:Number(i.acompte), date:day(i.invoice_date), dateRaw:i.invoice_date, status:i.status === "payée" ? "payé" : i.status === "en_attente" ? "en attente" : i.status, type:i.type, paymentMethod:i.payment_method ?? undefined, lines:lines.filter(l=>l.boutique_id===b.id&&l.invoice_id===i.id).map(l=>({ productId:l.product_id, nom:l.nom, qty:Number(l.qty), unit:l.unit ?? "unité", prixUnit:Number(l.prix_unit), sellUnit:l.sell_unit ?? undefined, sellQty:l.sell_qty ? Number(l.sell_qty) : undefined })) })),
+      charges: charges.filter(c => c.boutique_id === b.id).map(c => ({ id:c.id, label:c.label, montant:Number(c.montant), date:day(c.charge_date), dateRaw:c.charge_date, categorie:c.categorie ?? "Autre", recurrence:"unique", note:c.note ?? undefined })),
+      caisseHistory: sessions.filter(s => s.boutique_id === b.id).map(s => ({ id:s.id, openedAt:day(s.opened_at), closedAt:s.closed_at ? day(s.closed_at) : undefined, fondDeCaisse:Number(s.fond_ouverture ?? 0), openedBy:"", closedBy:"" })),
+      auditLog: [],
+    })) as T;
   }
   if (key === "platform_users") {
     const [users, assignments] = await Promise.all([
@@ -223,14 +246,8 @@ export async function getData<T>(key: string): Promise<T | null> {
 
 export async function saveData<T>(key: string, value: T): Promise<void> {
   if (key === "boutiques") {
-    const boutiques = value as Array<{ id: string }>;
-    const body = boutiques.map((boutique) => ({ boutique_id: boutique.id, value: boutique }));
-    if (!body.length) return;
-    await dataRequest("boutique_state?on_conflict=boutique_id", {
-      method: "POST",
-      headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
-      body: JSON.stringify(body),
-    });
+    // Full-state writes are intentionally disabled: business mutations must use
+    // a dedicated relational RPC or endpoint.
     return;
   }
   if (key === "groupes") {
@@ -256,6 +273,14 @@ export async function saveData<T>(key: string, value: T): Promise<void> {
       }),
     });
   }
+}
+
+export async function createSale(params: { boutiqueId: string; client: string; clientTel?: string; paymentMethod?: string; lines: Array<{ productId:number; nom:string; qty:number; unit:string; prixUnit:number; sellUnit?:string; sellQty?:number }> }) {
+  return dataRequest<{ invoice_id:string; total:number }>("rpc/create_sale", {
+    method: "POST",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify({ p_boutique_id:params.boutiqueId, p_idempotency_key:crypto.randomUUID(), p_client_nom:params.client, p_client_tel:params.clientTel ?? null, p_lines:params.lines, p_payment_method:params.paymentMethod ?? null }),
+  });
 }
 
 export async function checkBackend(): Promise<boolean> {

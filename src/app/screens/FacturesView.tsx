@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Search, Plus, Send, FileText, Eye, Mail, MessageCircle, Smartphone, Phone, Wallet, CreditCard, RotateCcw, ShoppingCart, Receipt, AlertCircle, Trash2, CheckCircle, Minus, Store } from "lucide-react";
 import type { Boutique, Invoice, InvoiceStatus, InvoiceLine, StockEntry, PaymentMethod, Client, PlatformUser } from "../types";
 import { SEM, inputCls, PAYMENT_METHODS, PM_ICON, PM_COLOR, PLACEHOLDER_IMGS } from "../constants";
+import { createSale } from "../../lib/api";
 import { fmt, today, imgSrc } from "../utils/formatting";
 import { invBadge, lineTotal, lineDispQty, lineDispUnit, genInvoiceId, productQty, getSiblings } from "../utils/inventory";
 import { buildReceiptHtml, openInvoicePDF, buildInvoiceMessage, agentPrint, printReceipt } from "../utils/invoice";
@@ -356,13 +357,21 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
     setTimeout(() => { setReturnInv(null); setReturnDone(false); }, 1600);
   }
 
-  function submit() {
+  async function submit() {
     if (!client||lines.length===0 || submittingInvoice) return;
     setSubmittingInvoice(true);
     const isSiblingTransfer = !!siblingClient;
     const ct  = isSiblingTransfer ? "Inter-tenant" : (clients.find(c=>c.nom===client)?.type??"B2C");
     const cTel = clients.find(c=>c.nom===client)?.tel;
-    const id  = genInvoiceId(boutique, allBoutiques, invoices);
+    let persisted;
+    try {
+      persisted = await createSale({ boutiqueId:boutique.id, client, clientTel:cTel, lines });
+    } catch (error) {
+      setSubmittingInvoice(false);
+      alert(error instanceof Error ? error.message : "Création de facture impossible");
+      return;
+    }
+    const id = persisted.invoice_id;
     const s: InvoiceStatus = aNum>=montant&&montant>0?"payé":aNum>0?"acompte":status;
     // Deduct stock from current boutique
     const saleEntries: StockEntry[] = lines.map((l,i)=>({ id:Date.now()+i, productId:l.productId, qty:-l.qty, unit:l.unit, montantDu:0, date:today(), fournisseur:`Transfert → ${client}` }));

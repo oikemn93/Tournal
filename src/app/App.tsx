@@ -8654,7 +8654,8 @@ export default function App() {
     return () => { unsubscribe(); document.removeEventListener("visibilitychange", onVisible); };
   }, [synced, pullRemote, activeBoutiqueId]);
 
-  useEffect(() => { if (!synced) return; debouncedSave("boutiques", boutiques); }, [boutiques, synced, debouncedSave]);
+  // Boutique updates are persisted by domain-specific relational operations.
+  // Never write a full JSON state blob from the client.
   useEffect(() => { if (!synced) return; debouncedSave("platform_users", platformUsers); }, [platformUsers, synced, debouncedSave]);
   useEffect(() => { if (!synced) return; debouncedSave("groupes", groupes); }, [groupes, synced, debouncedSave]);
 
