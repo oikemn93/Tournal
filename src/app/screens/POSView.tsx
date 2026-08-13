@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Search, Plus, Minus, ChevronRight, ShoppingBag, Store, Trash2, CheckCircle, AlertCircle, X, Smartphone, ClipboardList } from "lucide-react";
+import { Search, Plus, Minus, ChevronRight, ShoppingBag, Store, Trash2, CheckCircle, AlertCircle, X, Smartphone, ClipboardList, Printer, Settings } from "lucide-react";
 import type { Boutique, CartItem, Invoice, CaisseSession, Product, PlatformUser } from "../types";
 import { SEM, inputCls, PAYMENT_METHODS, PM_ICON, PM_COLOR } from "../constants";
 import { fmt, today, imgSrc } from "../utils/formatting";
@@ -32,7 +32,21 @@ export function POSView({ boutique, allBoutiques, currentUser, onUpdate, logActi
   const [addQty, setAddQty] = useState("1");
   const [addPrice, setAddPrice] = useState("");
   const [addSellUnit, setAddSellUnit] = useState("");
+  const [printerOpen, setPrinterOpen] = useState(false);
+  const [printerName, setPrinterName] = useState(() => localStorage.getItem(`tournal.printer.${boutique.id}`) ?? "");
+  const [qzBusy, setQzBusy] = useState(false);
   const posCats = boutique.categories ?? [];
+
+  async function connectPrinter() {
+    setQzBusy(true);
+    try { await connectQZ(printerName || undefined); }
+    finally { setQzBusy(false); }
+  }
+  function selectPrinter(name: string) {
+    PA.printer = name;
+    setPrinterName(name);
+    localStorage.setItem(`tournal.printer.${boutique.id}`, name);
+  }
 
   function getSellOptions(p: Product): string[] {
     const cat = posCats.find(c => c.nom === p.categorie);
@@ -298,6 +312,18 @@ export function POSView({ boutique, allBoutiques, currentUser, onUpdate, logActi
           </div>
         );
       })()}
+
+      <div className="rounded-2xl border border-border bg-card px-3 py-2.5 flex items-center gap-3">
+        <Printer size={16} className={PA.status==="connected" ? "text-emerald-600" : "text-muted-foreground"}/>
+        <div className="min-w-0 flex-1"><p className="text-xs font-black">Imprimante QZ Tray</p><p className="truncate text-xs text-muted-foreground">{PA.status==="connected" ? (printerName || PA.printer || "Sélectionnez une imprimante") : "Non connectée"}</p></div>
+        <button onClick={()=>setPrinterOpen(true)} className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-bold"><Settings size={14} className="inline mr-1"/>Configurer</button>
+      </div>
+      {printerOpen && <Modal title="Imprimante QZ Tray" color={POS_COLOR} onClose={()=>setPrinterOpen(false)}>
+        <p className="mb-3 text-sm text-muted-foreground">QZ Tray doit être installé et ouvert sur ce poste. À la première utilisation, acceptez la demande locale de QZ Tray.</p>
+        <button onClick={connectPrinter} disabled={qzBusy} className="w-full rounded-2xl bg-slate-800 py-3 font-black text-white disabled:opacity-50">{qzBusy ? "Connexion…" : PA.status==="connected" ? "Actualiser les imprimantes" : "Connecter QZ Tray"}</button>
+        {PA.status==="connected" && <div className="mt-4 space-y-2"><p className="text-xs font-black">IMPRIMANTE DE CE POSTE</p>{PA.printers.length ? PA.printers.map((name:string)=><button key={name} onClick={()=>selectPrinter(name)} className="flex w-full items-center gap-2 rounded-xl border border-border p-3 text-left text-sm font-bold"><Printer size={16}/><span className="flex-1">{name}</span>{printerName===name&&<CheckCircle size={16} className="text-emerald-600"/>}</button>) : <p className="text-sm text-muted-foreground">Aucune imprimante détectée.</p>}</div>}
+        {PA.status!=="connected" && <a className="mt-4 block text-center text-sm font-bold text-blue-700 underline" href="https://qz.io/download" target="_blank" rel="noreferrer">Télécharger QZ Tray</a>}
+      </Modal>}
 
       {/* Two tabs: Produits / Commandes */}
       <div className="flex bg-card rounded-2xl p-1 border border-border gap-1">

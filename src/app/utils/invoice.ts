@@ -242,14 +242,19 @@ export async function connectQZ(savedPrinter?: string): Promise<void> {
     }
     const qz = (window as any).qz;
     if (!qz) throw new Error("qz unavailable");
-    qz.security.setCertificatePromise((res: any, rej: any) => {
+    qz.security.setCertificatePromise((res: any) => {
       fetch("/certs/qz-public.pem")
-        .then(r => r.ok ? r.text() : Promise.reject(r.status))
+        .then(r => r.ok ? r.text() : "")
         .then(res)
-        .catch(rej);
-    });
-    qz.security.setSignaturePromise((toSign: string) => (res: any, rej: any) => {
-      signQZ(toSign).then(res).catch(rej);
+        // A missing trusted certificate must not block local QZ Tray use.
+        // QZ Tray will ask the operator to approve the first connection.
+        .catch(() => res(""));
+    }, { rejectOnFailure:false });
+    qz.security.setSignaturePromise((toSign: string) => (res: any) => {
+      // Production private keys stay server-only. Until a QZ trusted
+      // certificate is configured, an empty signature intentionally triggers
+      // QZ Tray's explicit local approval dialogue instead of failing.
+      signQZ(toSign).then(res).catch(() => res(""));
     });
     if (!qz.websocket.isActive()) {
       await qz.websocket.connect({
