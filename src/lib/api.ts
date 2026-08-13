@@ -246,7 +246,18 @@ export async function getData<T>(key: string): Promise<T | null> {
       suppliers: suppliers.filter(s => s.boutique_id === b.id).map(s => ({ id:s.id, nom:s.nom, ville:s.ville ?? "", lastDelivery:day(s.last_delivery_at), tel:s.tel ?? "", initials:s.initials ?? "", color:s.color ?? "#C9A227", email:s.email ?? undefined, contact:s.contact ?? undefined })),
       invoices: invoices.filter(i => i.boutique_id === b.id).map(i => ({ id:i.id, client:i.client_nom ?? "Client comptoir", clientTel:i.client_tel ?? undefined, montant:Number(i.montant), acompte:Number(i.acompte), date:day(i.invoice_date), dateRaw:i.invoice_date, status:i.status === "payée" ? "payé" : i.status === "en_attente" ? "en attente" : i.status, type:i.type, paymentMethod:i.payment_method ?? undefined, lines:lines.filter(l=>l.boutique_id===b.id&&l.invoice_id===i.id).map(l=>({ productId:l.product_id, nom:l.nom, qty:Number(l.qty), unit:l.unit ?? "unité", prixUnit:Number(l.prix_unit), sellUnit:l.sell_unit ?? undefined, sellQty:l.sell_qty ? Number(l.sell_qty) : undefined })) })),
       charges: charges.filter(c => c.boutique_id === b.id).map(c => ({ id:c.id, label:c.label, montant:Number(c.montant), date:day(c.charge_date), dateRaw:c.charge_date, categorie:c.categorie ?? "Autre", recurrence:"unique", note:c.note ?? undefined })),
-      caisseHistory: sessions.filter(s => s.boutique_id === b.id).map(s => ({ id:s.id, openedAt:day(s.opened_at), closedAt:s.closed_at ? day(s.closed_at) : undefined, fondDeCaisse:Number(s.fond_ouverture ?? 0), openedBy:"", closedBy:"" })),
+      caisseHistory: sessions
+        .filter(s => s.boutique_id === b.id)
+        .sort((a, b) => new Date(a.opened_at).getTime() - new Date(b.opened_at).getTime())
+        .map(s => ({
+          id: s.id,
+          // Keep an ISO-compatible timestamp: the UI needs a Date, not a preformatted label.
+          openedAt: s.opened_at,
+          closedAt: s.closed_at ?? undefined,
+          fondDeCaisse: Number(s.fond_ouverture ?? 0),
+          openedBy: s.opened_by ?? "",
+          closedBy: s.closed_by ?? "",
+        })),
       auditLog: [],
     })) as T;
   }
