@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { getData, saveData, checkBackend, stripImages, mergeImages, signQZ, sendInvoiceEmail, storePDFForSMS, getCurrentAuthUser, hasAuthenticatedSession, signInWithPhone, signUpWithPhone, signOut as signOutFromSupabase, createBoutique, createUser, resetUserPassword, subscribeToBoutiqueChanges } from "../lib/api";
+import { getData, saveData, checkBackend, stripImages, mergeImages, signQZ, sendInvoiceEmail, storePDFForSMS, getCurrentAuthUser, hasAuthenticatedSession, signInWithPhone, signUpWithPhone, signOut as signOutFromSupabase, createBoutique, createUser, resetUserPassword, subscribeToBoutiqueChanges, assignUserToBoutique } from "../lib/api";
 import { toast, Toaster } from "sonner";
 import {
   LayoutDashboard, Package, Users, Truck, FileText, ShieldCheck,
@@ -6542,10 +6542,11 @@ function SupervisionSection({ boutique, allBoutiques, backendOk, lastSyncAt }: {
 
 // ─── VIEW: ADMIN ──────────────────────────────────────────────────────────────
 
-function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdate, onUpdateUsers, logAction, onSaveAuthSettings, lockMinutesInit, sessionMinutesInit, backendOk, lastSyncAt }: {
+function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdate, onUpdateUsers, onCreateUser, logAction, onSaveAuthSettings, lockMinutesInit, sessionMinutesInit, backendOk, lastSyncAt }: {
   boutique: Boutique; allBoutiques: Boutique[]; platformUsers: PlatformUser[]; currentUser: PlatformUser;
   onUpdate: (u: Partial<Boutique>) => void;
   onUpdateUsers: (updater: PlatformUser[] | ((prev: PlatformUser[]) => PlatformUser[])) => void;
+  onCreateUser: (user: Omit<PlatformUser,"id">) => Promise<PlatformUser|null>;
   logAction: (action: string, detail: string, icon: string) => void;
   onSaveAuthSettings?: (lockMin: number, sessMin: number) => Promise<void>;
   lockMinutesInit?: number;
@@ -6601,8 +6602,8 @@ function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdat
       ?.role === "Propriétaire";
   }
 
-  function submitNewUser() {
-    if (!uNom.trim()||!uPhone.trim()||!uPwd.trim()) return;
+  async function submitNewUser() {
+    if (!uNom.trim()||!uPhone.trim()||uPwd.length<12) return;
     const newAssign: BoutiqueAssignment = { boutiqueId:boutique.id, role:uRole, droits:{...uDroits} };
     const existing = platformUsers.find(u=>cleanPhone(u.phone)===cleanPhone(uPhone.trim()));
     if (existing) {
@@ -6610,7 +6611,11 @@ function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdat
       if (!already) { const eid=existing.id; onUpdateUsers(prev=>prev.map(u=>u.id!==eid?u:{...u,assignments:[...u.assignments,newAssign]})); logAction("Compte rattaché",`${existing.nom} · ${uRole}`,"🔗"); }
     } else {
       const color=USER_COLORS[platformUsers.length%USER_COLORS.length];
-      onUpdateUsers(prev=>[...prev,{ id:"u"+Date.now(), phone:uPhone.trim(), password:uPwd, nom:uNom.trim(), initials:ini(uNom.trim()), color, isSuperAdmin:false, assignments:[newAssign] }]);
+      const user = await onCreateUser({ phone:uPhone.trim(), password:uPwd, nom:uNom.trim(), initials:ini(uNom.trim()), color, isSuperAdmin:false, assignments:[] });
+      if (!user) return;
+      onUpdateUsers(prev=>prev.some(existingUser=>existingUser.id===user.id)
+        ? prev.map(existingUser=>existingUser.id===user.id ? {...existingUser, assignments:[...existingUser.assignments,newAssign]} : existingUser)
+        : [...prev,{...user, assignments:[newAssign]}]);
       logAction("Nouveau compte",`${uNom.trim()} · ${uRole}`,"👤");
     }
     setUNom(""); setUPhone("+221 "); setUPwd(""); setAddModal(false);
@@ -8407,6 +8412,7 @@ export default function App() {
   const isPulling            = useRef(false); // prevents setInterval + visibilitychange overlap
   const lastRemoteB          = useRef<string>(""); // JSON fingerprint to detect real changes
   const lastRemoteU          = useRef<string>("");
+  const platformUsersRef     = useRef<PlatformUser[]>([]);
   const activeBoutiqueIdRef  = useRef<string|null>(null); // stable ref for async callbacks
 
   // ── Notification helpers ──────────────────────────────────────────────────
@@ -8678,6 +8684,7 @@ export default function App() {
 
   // Keep stable ref in sync for use inside async callbacks (debouncedSave, logTech)
   useEffect(() => { activeBoutiqueIdRef.current = activeBoutiqueId; }, [activeBoutiqueId]);
+  useEffect(() => { platformUsersRef.current = platformUsers; }, [platformUsers]);
 
   const boutique = boutiques.find(b=>b.id===activeBoutiqueId)??null;
 
@@ -8759,13 +8766,16 @@ export default function App() {
     }
   }
 
-  async function handleCreateUser(user: Omit<PlatformUser,"id">) {
+  async function handleCreateUser(user: Omit<PlatformUser,"id">): Promise<PlatformUser|null> {
     try {
       const { userId } = await createUser(user.phone, user.nom, user.password);
-      setPlatformUsers(prev=>[...prev,{...user,id:userId,password:""}]);
+      const created = {...user,id:userId,password:""};
+      setPlatformUsers(prev=>[...prev,created]);
       toast.success("Compte utilisateur créé");
+      return created;
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Création du compte impossible");
+      return null;
     }
   }
 
@@ -8775,6 +8785,33 @@ export default function App() {
       toast.success("Mot de passe réinitialisé");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Réinitialisation impossible");
+    }
+  }
+
+  function handleUpdatePlatformUsers(updater: PlatformUser[] | ((previous: PlatformUser[]) => PlatformUser[])) {
+    const previous = platformUsersRef.current;
+    const next = typeof updater === "function" ? updater(previous) : updater;
+    platformUsersRef.current = next;
+    setPlatformUsers(next);
+
+    const roleToDatabase = (role: string): "owner" | "manager" | "employee" =>
+      role === "Propriétaire" ? "owner" : role === "Manager" || role === "Gérant" ? "manager" : "employee";
+    const previousAssignments = new Map(previous.flatMap(user => user.assignments.map(assignment => [
+      `${user.id}:${assignment.boutiqueId}`, assignment,
+    ])));
+    const changedAssignments = next.flatMap(user => user.assignments.map(assignment => ({ user, assignment })))
+      .filter(({ user, assignment }) => {
+        const old = previousAssignments.get(`${user.id}:${assignment.boutiqueId}`);
+        return !old || old.role !== assignment.role || JSON.stringify(old.droits) !== JSON.stringify(assignment.droits);
+      });
+
+    if (changedAssignments.length) {
+      void Promise.all(changedAssignments.map(({ user, assignment }) =>
+        assignUserToBoutique(assignment.boutiqueId, user.id, roleToDatabase(assignment.role), assignment.droits),
+      )).catch((error) => {
+        toast.error(error instanceof Error ? error.message : "Affectation utilisateur impossible");
+        void pullRemote();
+      });
     }
   }
 
@@ -8905,7 +8942,7 @@ export default function App() {
         {safeTab==="compta"       && canAccess("compta")       && <ComptabiliteView boutique={boutique} currentUser={currentUser??undefined}/>}
         {safeTab==="inventaire"   && canAccess("inventaire")   && currentUser && <InventaireView boutique={boutique} currentUser={currentUser} onUpdate={updateBoutique} logAction={logAction} onClose={()=>setTab("stock")}/>}
         {safeTab==="transferts"   && canAccess("stock")        && currentUser && <TransfertsView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} groupes={groupes} currentUser={currentUser} onUpdate={updateBoutique} onUpdateOtherBoutique={updateOtherBoutique} logAction={logAction}/>}
-        {safeTab==="admin"        && isOwner                  && <AdminView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} currentUser={currentUser} onUpdate={updateBoutique} onUpdateUsers={setPlatformUsers}
+        {safeTab==="admin"        && isOwner                  && <AdminView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} currentUser={currentUser} onUpdate={updateBoutique} onUpdateUsers={handleUpdatePlatformUsers} onCreateUser={handleCreateUser}
               onSaveAuthSettings={async (lockMin: number, sessMin: number) => {
                 const bid = activeBoutiqueId;
                 if (!bid) return;

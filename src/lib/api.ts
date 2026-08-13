@@ -160,6 +160,15 @@ export async function resetUserPassword(userId: string, password: string) {
   return adminProvision<{ ok: true }>("reset_password", { userId, password });
 }
 
+export async function assignUserToBoutique(
+  boutiqueId: string,
+  userId: string,
+  role: "owner" | "manager" | "employee",
+  droits: Record<string, boolean>,
+) {
+  return adminProvision<{ ok: true }>("assign_user", { boutiqueId, userId, role, droits });
+}
+
 /** Reads the compatibility state while the screens are progressively moved to relational tables. */
 export async function getData<T>(key: string): Promise<T | null> {
   if (key === "boutiques") {
