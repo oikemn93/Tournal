@@ -5230,8 +5230,7 @@ function FacturesView({ boutique, allBoutiques, platformUsers, groupes, currentU
     const prod = products.find(p=>p.id===pid);
     const cat = invConditioning(pid);
     const base = cat?.unitVente ?? prod?.unit ?? "";
-    const isFabric = base==="yards"||base==="mètres"||base==="metres";
-    if (isFabric && opts.includes(base)) return base;
+    if (opts.includes(base)) return base;
     if (opts.includes("Pièce")) return "Pièce";
     return opts[0];
   }
@@ -7390,9 +7389,8 @@ function POSView({ boutique, allBoutiques, currentUser, onUpdate, logAction }: {
     const opts = getSellOptions(p);
     const cat2 = posConditioning(p);
     const baseU = cat2?.unitVente ?? p.unit;
-    const isFabric = baseU === "yards" || baseU === "mètres" || baseU === "metres";
     const defaultUnit = inCart?.sellUnit ?? (
-      isFabric && opts.includes(baseU) ? baseU :
+      opts.includes(baseU) ? baseU :
       opts.includes("Pièce") ? "Pièce" :
       opts[0]
     );
