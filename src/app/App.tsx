@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { getData, saveData, checkBackend, stripImages, mergeImages, signQZ, sendInvoiceEmail, storePDFForSMS } from "../lib/api";
+import { getData, saveData, checkBackend, stripImages, mergeImages, signQZ, sendInvoiceEmail, storePDFForSMS, getCurrentAuthUser, hasAuthenticatedSession, signInWithPhone, signUpWithPhone, signOut as signOutFromSupabase, createBoutique, createUser, resetUserPassword } from "../lib/api";
 import { toast, Toaster } from "sonner";
 import {
   LayoutDashboard, Package, Users, Truck, FileText, ShieldCheck,
@@ -285,14 +285,7 @@ const INIT_BOUTIQUES: Boutique[] = [
   },
 ];
 
-const INIT_PLATFORM_USERS: PlatformUser[] = [
-  { id: "sa1", phone: "+221 70 000 0000", password: "admin123", nom: "Ibou Diallo",      initials: "ID", color: "#C9A227", isSuperAdmin: true,  assignments: [] },
-  { id: "u1",  phone: "+221 77 111 0001", password: "1234",     nom: "Moussa Konaté",   initials: "MK", color: "#C9A227", isSuperAdmin: false, assignments: [{ boutiqueId: "b1", role: "Propriétaire", droits: { dashboard:true, stock:true, fournisseurs:true, clients:true, factures:true, remboursement:true, charges:true, compta:true, vente:true, inventaire:true } }] },
-  { id: "u2",  phone: "+221 77 111 0002", password: "5678",     nom: "Ibrahima Bah",    initials: "IB", color: "#3b82f6", isSuperAdmin: false, assignments: [{ boutiqueId: "b1", role: "Vendeur",       droits: { dashboard:true, stock:true, fournisseurs:false, clients:true, factures:true, remboursement:false, charges:false, compta:false, vente:true, inventaire:false } }] },
-  { id: "u3",  phone: "+221 77 111 0003", password: "4321",     nom: "Kadiatou Diallo", initials: "KD", color:SEM.success.accent, isSuperAdmin: false, assignments: [{ boutiqueId: "b1", role: "Vendeuse",      droits: { dashboard:true, stock:true, fournisseurs:false, clients:true, factures:false, remboursement:false, charges:false, compta:false, vente:true, inventaire:false } }] },
-  { id: "u4",  phone: "+225 07 200 0001", password: "2222",     nom: "Aïssatou Koné",  initials: "AK", color: "#3b82f6", isSuperAdmin: false, assignments: [{ boutiqueId: "b2", role: "Propriétaire", droits: { dashboard:true, stock:true, fournisseurs:true, clients:true, factures:true, remboursement:true, charges:true, compta:true, vente:true, inventaire:true } }] },
-  { id: "u5",  phone: "+223 76 300 0001", password: "3333",     nom: "Sékou Traoré",   initials: "ST", color:SEM.success.accent, isSuperAdmin: false, assignments: [{ boutiqueId: "b3", role: "Propriétaire", droits: { dashboard:true, stock:true, fournisseurs:true, clients:true, factures:true, remboursement:true, charges:true, compta:true, vente:true, inventaire:true } }] },
-];
+const INIT_PLATFORM_USERS: PlatformUser[] = [];
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 
@@ -1078,11 +1071,32 @@ function SubmitBtn({ color = "#C9A227", label, onClick, disabled }: { color?: st
 
 // ─── SCREEN: LOGIN ────────────────────────────────────────────────────────────
 
-function LoginScreen({ platformUsers, onLogin }: { platformUsers: PlatformUser[]; onLogin: (u: PlatformUser) => void }) {
-  const [phone, setPhone] = useState("+221 "); const [pwd, setPwd] = useState(""); const [show, setShow] = useState(false); const [err, setErr] = useState("");
-  function login() {
-    const u = platformUsers.find(u => cleanPhone(u.phone) === cleanPhone(phone) && u.password === pwd);
-    if (u) { setErr(""); onLogin(u); } else setErr("Numéro ou mot de passe incorrect");
+function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
+  const [phone, setPhone] = useState("+221 "); const [name, setName] = useState(""); const [pwd, setPwd] = useState(""); const [show, setShow] = useState(false); const [registration, setRegistration] = useState(false); const [err, setErr] = useState(""); const [loading, setLoading] = useState(false);
+  async function login() {
+    setLoading(true);
+    try {
+      await signInWithPhone(phone, pwd);
+      setErr("");
+      onAuthenticated();
+    } catch (error) {
+      setErr(error instanceof Error ? error.message : "Numéro ou mot de passe incorrect");
+    } finally {
+      setLoading(false);
+    }
+  }
+  async function register() {
+    setLoading(true);
+    try {
+      const session = await signUpWithPhone(phone, pwd, name);
+      setErr("");
+      if (session.access_token) onAuthenticated();
+      else setErr("Compte créé. La confirmation d’e-mail doit être activée dans Supabase avant la première connexion.");
+    } catch (error) {
+      setErr(error instanceof Error ? error.message : "Création du compte impossible");
+    } finally {
+      setLoading(false);
+    }
   }
   return (
     <div className="bg-background text-foreground min-h-screen flex flex-col" style={{ fontFamily:"'Inter', sans-serif" }}>
@@ -1092,6 +1106,10 @@ function LoginScreen({ platformUsers, onLogin }: { platformUsers: PlatformUser[]
         <p className="text-sm text-muted-foreground">Gestion simplifiée pour les commerçants</p>
       </div>
       <div className="flex-1 px-6 space-y-4">
+        {registration&&<div>
+          <label className="text-xs font-black mb-2 block tracking-wider" style={{ color:"#C9A227" }}>NOM COMPLET</label>
+          <input value={name} onChange={e=>{setName(e.target.value);setErr("");}} placeholder="Votre nom" className={inputCls} />
+        </div>}
         <div>
           <label className="text-xs font-black mb-2 block tracking-wider" style={{ color:"#C9A227" }}>NUMÉRO DE TÉLÉPHONE</label>
           <div className="relative"><Smartphone size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -1104,7 +1122,8 @@ function LoginScreen({ platformUsers, onLogin }: { platformUsers: PlatformUser[]
             <button onClick={()=>setShow(v=>!v)} className="absolute right-3.5 top-1/2 -translate-y-1/2">{show?<EyeOff size={18} className="text-muted-foreground"/>:<Eye size={18} className="text-muted-foreground"/>}</button></div>
         </div>
         {err&&<div className="flex items-center gap-2 px-4 py-3 rounded-xl" style={{ background:"#ef444415" }}><X size={14} style={{ color:"#ef4444" }}/><p className="text-sm font-semibold" style={{ color:"#ef4444" }}>{err}</p></div>}
-        <button onClick={login} className="w-full py-4 rounded-2xl text-base font-black active:scale-95" style={{ background:"#C9A227", color:"#fff", fontFamily:"'Nunito', sans-serif" }}>Se connecter →</button>
+        <button onClick={registration?register:login} disabled={loading} className="w-full py-4 rounded-2xl text-base font-black active:scale-95 disabled:opacity-60" style={{ background:"#C9A227", color:"#fff", fontFamily:"'Nunito', sans-serif" }}>{loading ? "Veuillez patienter…" : registration ? "Créer le compte →" : "Se connecter →"}</button>
+        <button onClick={()=>{setRegistration(v=>!v);setErr("");}} className="w-full text-sm font-semibold underline text-muted-foreground">{registration ? "J’ai déjà un compte" : "Premier accès ? Créer le compte administrateur"}</button>
 
       </div>
     </div>
@@ -1171,13 +1190,13 @@ function SuperAdminScreen({ boutiques, platformUsers, groupes, onEnterBoutique, 
     setEditB(null);
   }
   function submitUser() {
-    if (!uNom.trim()||!uPhone.trim()||!uPwd.trim()) return;
+    if (!uNom.trim()||!uPhone.trim()||uPwd.length<12) return;
     const color = USER_COLORS[platformUsers.length%USER_COLORS.length];
     onCreateUser({ phone:uPhone.trim(), password:uPwd, nom:uNom.trim(), initials:ini(uNom.trim()), color, isSuperAdmin:false, assignments:[], groupeId:uGroupe||undefined, isCompteMere:uCompteMere||undefined });
     setUNom(""); setUPhone("+221 "); setUPwd(""); setUGroupe(""); setUCompteMere(false); setNewU(false);
   }
   function submitReset() {
-    if (!resetTarget||newPwd.length<4) return;
+    if (!resetTarget||newPwd.length<12) return;
     onResetPassword(resetTarget.id,newPwd); setResetDone(true);
     setTimeout(()=>{ setResetTarget(null); setNewPwd(""); setResetDone(false); setShowP(false); },1200);
   }
@@ -1420,7 +1439,7 @@ function SuperAdminScreen({ boutiques, platformUsers, groupes, onEnterBoutique, 
             <input value={uPhone} onChange={e=>{const v=e.target.value;setUPhone(v.startsWith("+221 ")?v:"+221 ");}} placeholder="+221 77 000 0000" type="tel" className={inputCls+" pl-11"} onKeyDown={e=>e.key==="Enter"&&submitUser()}/>
           </div>
         </Field>
-        <Field label="MOT DE PASSE" color="#ef4444"><input value={uPwd} onChange={e=>setUPwd(e.target.value)} placeholder="Mot de passe sécurisé" type="password" className={inputCls} onKeyDown={e=>e.key==="Enter"&&submitUser()}/></Field>
+        <Field label="MOT DE PASSE" color="#ef4444"><input value={uPwd} onChange={e=>setUPwd(e.target.value)} placeholder="12 caractères minimum" minLength={12} type="password" className={inputCls} onKeyDown={e=>e.key==="Enter"&&submitUser()}/></Field>
         {groupes.length>0&&<Field label="GROUPE (optionnel)" color="#0891b2">
           <select value={uGroupe} onChange={e=>setUGroupe(e.target.value)} className={inputCls} style={{ appearance:"none" }}>
             <option value="">-- Aucun groupe --</option>
@@ -1447,7 +1466,7 @@ function SuperAdminScreen({ boutiques, platformUsers, groupes, onEnterBoutique, 
           : <>
             <Field label="NOUVEAU MOT DE PASSE" color="#C9A227">
               <div className="relative"><Lock size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground"/>
-                <input value={newPwd} onChange={e=>setNewPwd(e.target.value)} placeholder="Nouveau mot de passe" type={showP?"text":"password"} className={inputCls+" pl-11 pr-12"} autoFocus onKeyDown={e=>e.key==="Enter"&&submitReset()}/>
+                <input value={newPwd} onChange={e=>setNewPwd(e.target.value)} placeholder="12 caractères minimum" minLength={12} type={showP?"text":"password"} className={inputCls+" pl-11 pr-12"} autoFocus onKeyDown={e=>e.key==="Enter"&&submitReset()}/>
                 <button onClick={()=>setShowP(v=>!v)} className="absolute right-3.5 top-1/2 -translate-y-1/2">{showP?<EyeOff size={16} className="text-muted-foreground"/>:<Eye size={16} className="text-muted-foreground"/>}</button>
               </div>
             </Field>
@@ -8358,7 +8377,7 @@ const ALL_NAV: Array<{ id:Tab; label:string; Icon:typeof LayoutDashboard; color:
 
 export default function App() {
   const [screen,           setScreen]           = useState<Screen>("login");
-  const [boutiques,        setBoutiques]        = useState<Boutique[]>(INIT_BOUTIQUES);
+  const [boutiques,        setBoutiques]        = useState<Boutique[]>([]);
   const [platformUsers,    setPlatformUsers]    = useState<PlatformUser[]>(INIT_PLATFORM_USERS);
   const [groupes,          setGroupes]          = useState<Groupe[]>([]);
   const [currentUser,      setCurrentUser]      = useState<PlatformUser|null>(null);
@@ -8550,8 +8569,12 @@ export default function App() {
 
   useEffect(() => {
     async function load() {
+      if (!hasAuthenticatedSession()) {
+        setSynced(true);
+        return;
+      }
       let finalUsers = INIT_PLATFORM_USERS;
-      let finalBoutiques = INIT_BOUTIQUES;
+      let finalBoutiques: Boutique[] = [];
       try {
         const ok = await checkBackend();
         setBackendOk(ok);
@@ -8566,38 +8589,35 @@ export default function App() {
           finalBoutiques = mergeImages(remoteB, remoteImgs ?? {}) as Boutique[];
           setBoutiques(finalBoutiques);
           checkRecurringCharges(finalBoutiques);
-        } else if (ok) saveData("boutiques", INIT_BOUTIQUES);
+        }
         if (remoteU && remoteU.length > 0) {
           lastRemoteU.current = JSON.stringify(remoteU);
           finalUsers = remoteU;
           setPlatformUsers(remoteU);
-        } else if (ok) saveData("platform_users", INIT_PLATFORM_USERS);
+        }
         if (remoteG && remoteG.length > 0) setGroupes(remoteG);
       } catch (e) {
         setBackendOk(false);
         toast.error("Backend inaccessible : " + String(e), { duration: 8000 });
       } finally {
         setSynced(true);
-        // Restore session from localStorage
-        const stored = loadSession();
-        if (stored?.userId) {
-          const u = finalUsers.find(x => x.id === stored.userId);
+        // Supabase owns the authenticated session. The browser storage below is
+        // used only to remember the last boutique, never as proof of identity.
+        const authUser = getCurrentAuthUser();
+        if (authUser?.id) {
+          const u = finalUsers.find(x => x.id === authUser.id);
           if (u) {
             setCurrentUser(u);
             if (u.isSuperAdmin) { setScreen("superadmin"); return; }
-            if (stored.boutiqueId && stored.assignJson) {
-              const b = finalBoutiques.find(x => x.id === stored.boutiqueId);
-              if (b) {
-                try {
-                  const assign: BoutiqueAssignment = JSON.parse(stored.assignJson);
-                  setActiveBoutiqueId(stored.boutiqueId);
-                  if (stored.boutiqueId) loadAuthSettings(stored.boutiqueId);
-                  setActiveAssign(assign);
-                  setTab("dashboard");
-                  setScreen("app");
-                  return;
-                } catch {}
-              }
+            const assignments = u.assignments.filter(a => finalBoutiques.some(b => b.id === a.boutiqueId));
+            if (assignments.length === 1) {
+              const assign = assignments[0];
+              setActiveBoutiqueId(assign.boutiqueId);
+              setActiveAssign(assign);
+              loadAuthSettings(assign.boutiqueId);
+              setTab("dashboard");
+              setScreen("app");
+              return;
             }
             setScreen("boutique-select");
           }
@@ -8620,7 +8640,7 @@ export default function App() {
 
   // Start polling after initial load — every 5 s + immediate pull on tab focus
   useEffect(() => {
-    if (!synced) return;
+    if (!synced || !hasAuthenticatedSession()) return;
     pollTimer.current = setInterval(pullRemote, 2000);
     const onVisible = () => { if (document.visibilityState === "visible") pullRemote(); };
     document.addEventListener("visibilitychange", onVisible);
@@ -8699,6 +8719,7 @@ export default function App() {
   }
   function handleLogout() {
     if (activeBoutiqueId && currentUser) logTech(activeBoutiqueId, { level:"info", cat:"session", msg:`Déconnexion : ${currentUser.nom}` });
+    void signOutFromSupabase();
     clearSession(); setCurrentUser(null); setActiveBoutiqueId(null); setActiveAssign(null); setScreen("login");
   }
 
@@ -8723,13 +8744,37 @@ export default function App() {
     }
   }
 
-  function handleCreateBoutique(nom: string, ville: string, ownerId: string) {
-    const bid = "b"+Date.now();
-    const color = SUP_COLORS[boutiques.length%SUP_COLORS.length];
-    const initials = nom.split(" ").map(w=>w[0]).slice(0,2).join("").toUpperCase();
-    setBoutiques(prev=>[...prev,{ id:bid, nom, ville, color, initials, products:[], entries:[], suppliers:[], clients:[], invoices:[], auditLog:[], charges:[] }]);
-    const ownerAssign: BoutiqueAssignment = { boutiqueId:bid, role:"Propriétaire", droits:{ dashboard:true, stock:true, fournisseurs:true, clients:true, factures:true, remboursement:true, charges:true, compta:true, vente:true, inventaire:true, marges:true } };
-    setPlatformUsers(prev=>prev.map(u=>u.id!==ownerId?u:{...u,assignments:[...u.assignments,ownerAssign]}));
+  async function handleCreateBoutique(nom: string, ville: string, ownerId: string) {
+    try {
+      const { boutiqueId } = await createBoutique(nom, ville, ownerId);
+      const color = SUP_COLORS[boutiques.length%SUP_COLORS.length];
+      const initials = nom.split(" ").map(w=>w[0]).slice(0,2).join("").toUpperCase();
+      setBoutiques(prev=>[...prev,{ id:boutiqueId, nom, ville, color, initials, products:[], entries:[], suppliers:[], clients:[], invoices:[], auditLog:[], charges:[] }]);
+      const ownerAssign: BoutiqueAssignment = { boutiqueId, role:"Propriétaire", droits:{ dashboard:true, stock:true, fournisseurs:true, clients:true, factures:true, remboursement:true, charges:true, compta:true, vente:true, inventaire:true, marges:true } };
+      setPlatformUsers(prev=>prev.map(u=>u.id!==ownerId?u:{...u,assignments:[...u.assignments,ownerAssign]}));
+      toast.success("Boutique créée");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Création de boutique impossible");
+    }
+  }
+
+  async function handleCreateUser(user: Omit<PlatformUser,"id">) {
+    try {
+      const { userId } = await createUser(user.phone, user.nom, user.password);
+      setPlatformUsers(prev=>[...prev,{...user,id:userId,password:""}]);
+      toast.success("Compte utilisateur créé");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Création du compte impossible");
+    }
+  }
+
+  async function handleResetPassword(userId: string, password: string) {
+    try {
+      await resetUserPassword(userId, password);
+      toast.success("Mot de passe réinitialisé");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Réinitialisation impossible");
+    }
   }
 
   // Nav
@@ -8751,19 +8796,19 @@ export default function App() {
   const headLabel: Record<Tab,string> = { dashboard:"Accueil", stock:"Stock", fournisseurs:"Fournisseurs", clients:"Clients", factures:"Factures", pos:"Vente", charges:"Charges", compta:"Rapport", admin:"Admin", inventaire:"Inventaire physique", transferts:"Transferts B2B" };
 
 
-  if (screen==="login") return <LoginScreen platformUsers={platformUsers} onLogin={handleLogin}/>;
+  if (screen==="login") return <LoginScreen onAuthenticated={() => window.location.reload()}/>;
   if (screen==="superadmin"&&currentUser) return (
     <SuperAdminScreen boutiques={boutiques} platformUsers={platformUsers} groupes={groupes}
       onEnterBoutique={handleEnterBoutiqueAsAdmin}
       onCreateBoutique={handleCreateBoutique}
       onUpdateBoutique={handleUpdateBoutique}
       onDeleteBoutique={handleDeleteBoutique}
-      onCreateUser={u=>setPlatformUsers(prev=>[...prev,{...u,id:"u"+Date.now()}])}
+      onCreateUser={handleCreateUser}
       onUpdateUser={(uid,updates)=>setPlatformUsers(prev=>prev.map(u=>u.id===uid?{...u,...updates}:u))}
       onCreateGroupe={nom=>setGroupes(prev=>[...prev,{id:"g"+Date.now(),nom}])}
       onUpdateGroupe={(gid,nom)=>setGroupes(prev=>prev.map(g=>g.id===gid?{...g,nom}:g))}
       onDeleteGroupe={gid=>{ setGroupes(prev=>prev.filter(g=>g.id!==gid)); setPlatformUsers(prev=>prev.map(u=>u.groupeId===gid?{...u,groupeId:undefined,isCompteMere:undefined}:u)); }}
-      onResetPassword={(uid,pwd)=>setPlatformUsers(prev=>prev.map(u=>u.id===uid?{...u,password:pwd}:u))}
+      onResetPassword={handleResetPassword}
       onResetBackend={handleResetBackend}
       onLogout={handleLogout}
       backendOk={backendOk}

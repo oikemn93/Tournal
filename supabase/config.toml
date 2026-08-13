@@ -1,8 +1,2 @@
-# Supabase project configuration
-# https://supabase.com/docs/guides/cli/config
-
-[functions.cleanup-invoice-pdfs]
-# Runs every day at 03:00 UTC — deletes invoice PDFs older than 72h from
-# the invoice-pdfs bucket (signed URLs expire after 48h).
-schedule = "0 3 * * *"
-verify_jwt = false
+[functions.admin-provision]
+verify_jwt = true

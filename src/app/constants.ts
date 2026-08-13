@@ -171,11 +171,4 @@ export const INIT_BOUTIQUES: Boutique[] = [
   },
 ];
 
-export const INIT_PLATFORM_USERS: PlatformUser[] = [
-  { id: "sa1", phone: "+221 70 000 0000", password: "admin123", nom: "Ibou Diallo",      initials: "ID", color: "#C9A227", isSuperAdmin: true,  assignments: [] },
-  { id: "u1",  phone: "+221 77 111 0001", password: "1234",     nom: "Moussa Konaté",   initials: "MK", color: "#C9A227", isSuperAdmin: false, assignments: [{ boutiqueId: "b1", role: "Propriétaire", droits: { dashboard:true, stock:true, fournisseurs:true, clients:true, factures:true, remboursement:true, charges:true, compta:true, vente:true } }] },
-  { id: "u2",  phone: "+221 77 111 0002", password: "5678",     nom: "Ibrahima Bah",    initials: "IB", color: "#3b82f6", isSuperAdmin: false, assignments: [{ boutiqueId: "b1", role: "Vendeur",       droits: { dashboard:true, stock:true, fournisseurs:false, clients:true, factures:true, remboursement:false, charges:false, compta:false, vente:true } }] },
-  { id: "u3",  phone: "+221 77 111 0003", password: "4321",     nom: "Kadiatou Diallo", initials: "KD", color:SEM.success.accent, isSuperAdmin: false, assignments: [{ boutiqueId: "b1", role: "Vendeuse",      droits: { dashboard:true, stock:true, fournisseurs:false, clients:true, factures:false, remboursement:false, charges:false, compta:false, vente:true } }] },
-  { id: "u4",  phone: "+225 07 200 0001", password: "2222",     nom: "Aïssatou Koné",  initials: "AK", color: "#3b82f6", isSuperAdmin: false, assignments: [{ boutiqueId: "b2", role: "Propriétaire", droits: { dashboard:true, stock:true, fournisseurs:true, clients:true, factures:true, remboursement:true, charges:true, compta:true, vente:true } }] },
-  { id: "u5",  phone: "+223 76 300 0001", password: "3333",     nom: "Sékou Traoré",   initials: "ST", color:SEM.success.accent, isSuperAdmin: false, assignments: [{ boutiqueId: "b3", role: "Propriétaire", droits: { dashboard:true, stock:true, fournisseurs:true, clients:true, factures:true, remboursement:true, charges:true, compta:true, vente:true } }] },
-];
+export const INIT_PLATFORM_USERS: PlatformUser[] = [];
