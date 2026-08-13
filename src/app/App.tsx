@@ -5195,11 +5195,18 @@ function FacturesView({ boutique, allBoutiques, platformUsers, groupes, currentU
   const [lPrix,setLPrix]=useState("");
   const [lSellUnit,setLSellUnit]=useState(""); // mirrors POS: "Lot" | "Pièce" | baseUnit
 
+  function invConditioning(pid: number): ProductParam | Category | undefined {
+    const prod = products.find(p => p.id === pid);
+    if (!prod) return undefined;
+    return (boutique.productParams ?? []).find(x => x.productId === pid)
+      ?? (boutique.categories ?? []).find(c => c.nom === prod.categorie);
+  }
+
   // Sell options for the invoice line form — mirrors getSellOptions in POS
   function getInvSellOptions(pid: number): string[] {
     const prod = products.find(p=>p.id===pid);
     if (!prod) return [];
-    const cat = (boutique.categories??[]).find(c=>c.nom===prod.categorie);
+    const cat = invConditioning(pid);
     if (!cat || cat.nbPiecesParLot<=0) return [prod.unit];
     const opts: string[] = ["Lot"];
     if (cat.unitVente !== "pièces") opts.push("Pièce");
@@ -5209,7 +5216,7 @@ function FacturesView({ boutique, allBoutiques, platformUsers, groupes, currentU
   function invToBaseQty(sellQty: number, sellUnit: string, pid: number): number {
     const prod = products.find(p=>p.id===pid);
     if (!prod) return sellQty;
-    const cat = (boutique.categories??[]).find(c=>c.nom===prod.categorie);
+    const cat = invConditioning(pid);
     if (!cat || cat.nbPiecesParLot<=0) return sellQty;
     if (sellUnit==="Lot") return cat.unitVente==="pièces"
       ? sellQty*cat.nbPiecesParLot
@@ -5221,7 +5228,7 @@ function FacturesView({ boutique, allBoutiques, platformUsers, groupes, currentU
     const opts = getInvSellOptions(pid);
     if (opts.length===0) return "";
     const prod = products.find(p=>p.id===pid);
-    const cat = (boutique.categories??[]).find(c=>c.nom===prod?.categorie);
+    const cat = invConditioning(pid);
     const base = cat?.unitVente ?? prod?.unit ?? "";
     const isFabric = base==="yards"||base==="mètres"||base==="metres";
     if (isFabric && opts.includes(base)) return base;
@@ -5236,7 +5243,7 @@ function FacturesView({ boutique, allBoutiques, platformUsers, groupes, currentU
 
   function addLine() {
     const prod = products.find(p=>p.id===lPid); if (!prod||!lQty) return;
-    const cat = (boutique.categories??[]).find(c=>c.nom===prod.categorie);
+    const cat = invConditioning(lPid);
     const baseUnit = cat?.unitVente ?? prod.unit;
     const opts = getInvSellOptions(lPid);
     const effectiveUnit = lSellUnit || invDefaultUnit(lPid) || opts[0] || prod.unit;
@@ -5655,7 +5662,7 @@ function FacturesView({ boutique, allBoutiques, platformUsers, groupes, currentU
               {products.map(p=><option key={p.id} value={p.id}>{p.nom} (stock: {productQty(p.id,entries)} {p.unit})</option>)}
             </select>
             {getInvSellOptions(lPid).length>1&&(()=>{
-              const cat2=(boutique.categories??[]).find(c=>c.nom===products.find(p=>p.id===lPid)?.categorie);
+              const cat2=invConditioning(lPid);
               const effUnit=lSellUnit||invDefaultUnit(lPid);
               return(<div className="flex gap-2 flex-wrap">{getInvSellOptions(lPid).map(u=>{
                 const lbl=u==="Lot"?(cat2?'Lot ('+cat2.nbPiecesParLot+'p)':'Lot'):u==="Pièce"?"Pièce":u;
@@ -7270,8 +7277,13 @@ function POSView({ boutique, allBoutiques, currentUser, onUpdate, logAction }: {
   const [addSellUnit, setAddSellUnit] = useState("");
   const posCats = boutique.categories ?? [];
 
+  function posConditioning(p: Product): ProductParam | Category | undefined {
+    return (boutique.productParams ?? []).find(x => x.productId === p.id)
+      ?? posCats.find(c => c.nom === p.categorie);
+  }
+
   function getSellOptions(p: Product): string[] {
-    const cat = posCats.find(c => c.nom === p.categorie);
+    const cat = posConditioning(p);
     if (!cat || cat.nbPiecesParLot <= 0) return [p.unit];
     const opts: string[] = ["Lot"];
     if (cat.unitVente !== "pièces") opts.push("Pièce");
@@ -7280,7 +7292,7 @@ function POSView({ boutique, allBoutiques, currentUser, onUpdate, logAction }: {
   }
 
   function toBaseQty(sellQty: number, sellUnit: string, p: Product): number {
-    const cat = posCats.find(c => c.nom === p.categorie);
+    const cat = posConditioning(p);
     if (!cat || cat.nbPiecesParLot <= 0) return sellQty;
     if (sellUnit === "Lot")
       return cat.unitVente === "pièces"
@@ -7292,7 +7304,7 @@ function POSView({ boutique, allBoutiques, currentUser, onUpdate, logAction }: {
   }
 
   function sellConversion(sellQty: number, sellUnit: string, p: Product): string | null {
-    const cat = posCats.find(c => c.nom === p.categorie);
+    const cat = posConditioning(p);
     if (!cat || !sellQty) return null;
     const base = toBaseQty(sellQty, sellUnit, p);
     if (base === sellQty && sellUnit === cat.unitVente) return null;
@@ -7376,7 +7388,7 @@ function POSView({ boutique, allBoutiques, currentUser, onUpdate, logAction }: {
   function openAdd(p: Product) {
     const inCart = cart.find(i => i.productId === p.id);
     const opts = getSellOptions(p);
-    const cat2 = posCats.find(c => c.nom === p.categorie);
+    const cat2 = posConditioning(p);
     const baseU = cat2?.unitVente ?? p.unit;
     const isFabric = baseU === "yards" || baseU === "mètres" || baseU === "metres";
     const defaultUnit = inCart?.sellUnit ?? (
@@ -7394,7 +7406,7 @@ function POSView({ boutique, allBoutiques, currentUser, onUpdate, logAction }: {
     const sellQtyN = Number(addQty);
     const prix = Number(addPrice);
     const opts = getSellOptions(addModal);
-    const cat = posCats.find(c => c.nom === addModal.categorie);
+    const cat = posConditioning(addModal);
     const baseUnit = cat?.unitVente ?? addModal.unit;
     const isSell = opts.length > 1 && addSellUnit !== baseUnit;
     const baseQty = isSell ? toBaseQty(sellQtyN, addSellUnit, addModal) : sellQtyN;
