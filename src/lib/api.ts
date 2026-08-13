@@ -1,4 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
 /**
  * Small browser-only client for the Tournal Supabase project.
@@ -13,7 +13,7 @@ type AuthSession = { access_token: string; refresh_token: string; user: AuthUser
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL ?? "https://cnxtylngddwmhugxkzju.supabase.co";
 const PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? "sb_publishable_Jeo4Bx2IsTPCkzsQMYTuFQ_VKPQc9Aq";
 const SESSION_STORAGE_KEY = "tournal.supabase.session";
-const realtimeClient = createClient(SUPABASE_URL, PUBLISHABLE_KEY, {
+const realtimeClient = createSupabaseClient(SUPABASE_URL, PUBLISHABLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
@@ -165,17 +165,23 @@ export function subscribeToBoutiqueChanges(boutiqueId: string, onChange: () => v
   const session = readSession();
   if (!session?.access_token || !boutiqueId) return () => undefined;
 
-  realtimeClient.realtime.setAuth(session.access_token);
-  const filter = `boutique_id=eq.${boutiqueId}`;
-  let channel = realtimeClient.channel(`tournal:${boutiqueId}`);
-  // Each subscription is scoped to one boutique and only to relational tables.
-  // This deliberately avoids both the former global JSON blob and polling.
-  for (const table of ["products", "stock_entries", "invoices", "invoice_lines", "clients", "charges", "caisse_sessions"]) {
-    channel = channel.on("postgres_changes", { event: "*", schema: "public", table, filter }, onChange);
+  try {
+    realtimeClient.realtime.setAuth(session.access_token);
+    const filter = `boutique_id=eq.${boutiqueId}`;
+    let channel = realtimeClient.channel(`tournal:${boutiqueId}`);
+    // Each subscription is scoped to one boutique and only to relational tables.
+    // This deliberately avoids both the former global JSON blob and polling.
+    for (const table of ["products", "stock_entries", "invoices", "invoice_lines", "clients", "charges", "caisse_sessions"]) {
+      channel = channel.on("postgres_changes", { event: "*", schema: "public", table, filter }, onChange);
+    }
+    channel = channel.subscribe();
+    return () => { void realtimeClient.removeChannel(channel); };
+  } catch (error) {
+    // Realtime is an enhancement. A transient channel issue must never block
+    // the relational data already loaded for the selected boutique.
+    console.warn("Realtime indisponible pour cette boutique", error);
+    return () => undefined;
   }
-  channel = channel.subscribe();
-
-  return () => { void realtimeClient.removeChannel(channel); };
 }
 
 export async function createBoutique(nom: string, ville: string, ownerId: string) {
