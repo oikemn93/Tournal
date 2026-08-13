@@ -16,6 +16,7 @@ import {
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, Cell, PieChart, Pie } from "recharts";
 import { StockView as RelationalStockView } from "./screens/StockView";
 import { FacturesView as RelationalFacturesView } from "./screens/FacturesView";
+import { POSView as RelationalPOSView } from "./screens/POSView";
 
 const ReadOnlyCtx = React.createContext(false);
 const useReadOnly = () => React.useContext(ReadOnlyCtx);
@@ -9001,7 +9002,7 @@ export default function App() {
         {safeTab==="fournisseurs" && canAccess("fournisseurs") && <FournisseursView boutique={boutique} onUpdate={updateBoutique} logAction={logAction}/>}
         {safeTab==="clients"      && canAccess("clients")      && <ClientsView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} currentUser={currentUser!} onUpdate={updateBoutique} logAction={logAction} initialTab={navFilter.clientTab as ClientType|undefined}/>}
         {safeTab==="factures"     && canAccess("factures")     && <RelationalFacturesView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} currentUser={currentUser} canReturn={canAccess("remboursement")} onUpdate={updateBoutique} onUpdateOtherBoutique={updateOtherBoutique} logAction={logAction} initialStatus={navFilter.statusFilter as InvoiceStatus|"all"|undefined}/>}
-        {safeTab==="pos"          && canAccess("vente")        && <POSView boutique={boutique} allBoutiques={boutiques} currentUser={currentUser} onUpdate={updateBoutique} logAction={logAction}/>}
+        {safeTab==="pos"          && canAccess("vente")        && <RelationalPOSView boutique={boutique} allBoutiques={boutiques} currentUser={currentUser} onUpdate={updateBoutique} logAction={logAction}/>}
         {safeTab==="charges"      && canAccess("charges")      && <ChargesView boutique={boutique} onUpdate={updateBoutique} logAction={logAction}/>}
         {safeTab==="compta"       && canAccess("compta")       && <ComptabiliteView boutique={boutique} currentUser={currentUser??undefined}/>}
         {safeTab==="inventaire"   && canAccess("inventaire")   && currentUser && <InventaireView boutique={boutique} currentUser={currentUser} onUpdate={updateBoutique} logAction={logAction} onClose={()=>setTab("stock")}/>}

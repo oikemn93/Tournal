@@ -338,6 +338,20 @@ export async function createSale(params: { boutiqueId: string; client: string; c
   });
 }
 
+export async function openCaisseSession(params: { boutiqueId: string; fondOuverture: number }) {
+  return dataRequest<{ session_id:string; opened_at:string; fond_ouverture:number; already_open:boolean }>("rpc/open_caisse_session", {
+    method: "POST", headers: { Prefer: "return=representation" },
+    body: JSON.stringify({ p_boutique_id:params.boutiqueId, p_idempotency_key:crypto.randomUUID(), p_fond_ouverture:params.fondOuverture }),
+  });
+}
+
+export async function closeCaisseSession(params: { boutiqueId:string; sessionId:string; fondFermeture?:number; totalVentes:number; totalCharges?:number }) {
+  return dataRequest<{ session_id:string; closed_at:string }>("rpc/close_caisse_session", {
+    method: "POST", headers: { Prefer: "return=representation" },
+    body: JSON.stringify({ p_boutique_id:params.boutiqueId, p_session_id:params.sessionId, p_idempotency_key:crypto.randomUUID(), p_fond_fermeture:params.fondFermeture ?? null, p_total_ventes:params.totalVentes, p_total_charges:params.totalCharges ?? 0 }),
+  });
+}
+
 export async function recordPayment(params: { boutiqueId:string; invoiceId:string; amount:number; paymentMethod:string }) {
   return dataRequest<{ invoice_id:string; acompte:number; status:string }>("rpc/record_payment", {
     method:"POST", headers:{ Prefer:"return=representation" },

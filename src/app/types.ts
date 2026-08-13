@@ -7,7 +7,7 @@ export type InvoiceStatus = "payé" | "acompte" | "en attente" | "en retard";
 export type PaymentMethod = "Espèces" | "Wave" | "Orange Money" | "Autre";
 export type Permission = "dashboard" | "stock" | "fournisseurs" | "clients" | "factures" | "remboursement" | "charges" | "compta" | "vente";
 export type ChargeCategorie = "Loyer" | "Salaires" | "Électricité" | "Transport" | "Achat stock" | "Marketing" | "Taxes" | "Autre";
-export type CaisseSession = { id: number; openedAt: string; openedBy: string; fondDeCaisse: number; closedAt?: string; closedBy?: string };
+export type CaisseSession = { id: string | number; openedAt: string; openedBy: string; fondDeCaisse: number; closedAt?: string; closedBy?: string };
 export type Charge = { id: number; label: string; montant: number; date: string; dateRaw: string; categorie: ChargeCategorie; recurrence: "unique" | "mensuelle" | "hebdomadaire"; note?: string; fournisseur?: string };
 export type ClientType = "B2C" | "B2B" | "Grossiste";
 

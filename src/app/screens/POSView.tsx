@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from "react";
-import { Search, Plus, Minus, ChevronRight, ShoppingBag, Store, Trash2, CheckCircle, AlertCircle, X, Smartphone, Edit2, ClipboardList } from "lucide-react";
+import { Search, Plus, Minus, ChevronRight, ShoppingBag, Store, Trash2, CheckCircle, AlertCircle, X, Smartphone, ClipboardList } from "lucide-react";
 import type { Boutique, CartItem, Invoice, CaisseSession, Product, PlatformUser } from "../types";
 import { SEM, inputCls, PAYMENT_METHODS, PM_ICON, PM_COLOR } from "../constants";
 import { fmt, today, imgSrc } from "../utils/formatting";
-import { productQty, lineTotal, lineDispQty, lineDispUnit, genInvoiceId } from "../utils/inventory";
+import { productQty, lineTotal, lineDispQty, lineDispUnit } from "../utils/inventory";
 import { silentPrint, buildOrderTicketHtml, printCaisseReport, agentPrint, connectQZ, PA } from "../utils/invoice";
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
+import { closeCaisseSession, createSale, openCaisseSession } from "../../lib/api";
 
 export function POSView({ boutique, allBoutiques, currentUser, onUpdate, logAction }: {
   boutique: Boutique; allBoutiques: Boutique[]; currentUser: PlatformUser;
@@ -22,6 +23,7 @@ export function POSView({ boutique, allBoutiques, currentUser, onUpdate, logActi
   // Caisse open/close
   const [fondCaisse, setFondCaisse] = useState("0");
   const [closeModal, setCloseModal] = useState(false);
+  const [savingCaisse, setSavingCaisse] = useState(false);
 
   // Order taking
   const [search, setSearch] = useState("");
@@ -65,9 +67,8 @@ export function POSView({ boutique, allBoutiques, currentUser, onUpdate, logActi
   const [clientTel, setClientTel] = useState("+221 ");
   const [done, setDone] = useState(false);
   const [lastInv, setLastInv] = useState<Invoice|null>(null);
-  const [editingId, setEditingId] = useState<string|null>(null);
   const [posTab, setPosTab] = useState<"produits"|"commandes">("produits");
-  const [deleteOrderId, setDeleteOrderId] = useState<string|null>(null);
+  const [submittingOrder, setSubmittingOrder] = useState(false);
   const [printJob, setPrintJob] = useState<{status:"printing"|"ok"|"fail"|"fallback";html:string;label:string}|null>(null);
 
   // Auto-connect QZ Tray if configured
@@ -119,20 +120,38 @@ export function POSView({ boutique, allBoutiques, currentUser, onUpdate, logActi
   const cartTotal = cart.reduce((s, i) => s + lineTotal(i), 0);
   const cartCount = cart.reduce((s, i) => s + i.qty, 0);
 
-  function openCaisse() {
-    const s: CaisseSession = { id: Date.now(), openedAt: new Date().toISOString(), openedBy: currentUser.nom, fondDeCaisse: Number(fondCaisse) || 0 };
-    onUpdate({ caisseSession: s });
-    logAction("Ouverture caisse", `Fond : ${fmt(s.fondDeCaisse)}`, "🏪");
+  async function openCaisse() {
+    if (savingCaisse) return;
+    setSavingCaisse(true);
+    try {
+      const saved = await openCaisseSession({ boutiqueId:boutique.id, fondOuverture:Number(fondCaisse) || 0 });
+      const s: CaisseSession = { id:saved.session_id, openedAt:saved.opened_at, openedBy:currentUser.nom, fondDeCaisse:saved.fond_ouverture };
+      onUpdate({ caisseSession:s });
+      logAction("Ouverture caisse", `Fond : ${fmt(s.fondDeCaisse)}`, "🏪");
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Impossible d’ouvrir la caisse");
+    } finally {
+      setSavingCaisse(false);
+    }
   }
 
-  function closeCaisse() {
+  async function closeCaisse() {
     if (!session) return;
-    const closed: CaisseSession = { ...session, closedAt: new Date().toISOString(), closedBy: currentUser.nom };
-    const history = [...(boutique.caisseHistory ?? []), closed];
-    printCaisseReport(closed, boutique, invoices);
-    onUpdate({ caisseSession: closed, caisseHistory: history });
-    logAction("Fermeture caisse", `Total encaissé : ${fmt(totalJour)}`, "🔒");
-    setCloseModal(false);
+    if (savingCaisse) return;
+    setSavingCaisse(true);
+    try {
+      const saved = await closeCaisseSession({ boutiqueId:boutique.id, sessionId:String(session.id), totalVentes:totalJour });
+      const closed: CaisseSession = { ...session, closedAt:saved.closed_at, closedBy:currentUser.nom };
+      const history = [...(boutique.caisseHistory ?? []), closed];
+      printCaisseReport(closed, boutique, invoices);
+      onUpdate({ caisseSession:closed, caisseHistory:history });
+      logAction("Fermeture caisse", `Total encaissé : ${fmt(totalJour)}`, "🔒");
+      setCloseModal(false);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Impossible de fermer la caisse");
+    } finally {
+      setSavingCaisse(false);
+    }
   }
 
   function openAdd(p: Product) {
@@ -182,62 +201,40 @@ export function POSView({ boutique, allBoutiques, currentUser, onUpdate, logActi
     }));
   }
 
-  function editOrder(inv: Invoice) {
-    if (inv.acompte > 0) return; // déjà encaissée : non modifiable
-    setCart((inv.lines ?? []).map(l => ({
-      productId: l.productId, nom: l.nom,
-      img: products.find(p => p.id === l.productId)?.img ?? "",
-      unit: l.unit, qty: l.qty, prixUnit: l.prixUnit, sellUnit: l.sellUnit, sellQty: l.sellQty,
-    })));
-    setClientNom(inv.client === "Client comptoir" ? "" : inv.client);
-    setClientTel(inv.clientTel ?? "+221 ");
-    setEditingId(inv.id);
-    setDone(false); setLastInv(null);
-    setCheckoutOpen(true);
-  }
-
   function resetCheckout() {
     setCart([]); setClientNom(""); setClientTel("+221 ");
-    setCheckoutOpen(false); setDone(false); setLastInv(null); setEditingId(null);
+    setCheckoutOpen(false); setDone(false); setLastInv(null);
   }
 
-  function checkout() {
-    if (cart.length === 0) return;
+  async function checkout() {
+    if (cart.length === 0 || submittingOrder) return;
     const client = clientNom.trim() || "Client comptoir";
     const orderLines = cart.map(i => ({ productId: i.productId, nom: i.nom, qty: i.qty, unit: i.unit, prixUnit: i.prixUnit, sellUnit: i.sellUnit, sellQty: i.sellQty }));
-
-    if (editingId) {
-      // Modification d'une commande existante non encaissée — stock unchanged (will deduct on encaissement)
-      const existing = invoices.find(i => i.id === editingId);
-      if (!existing || existing.acompte > 0) { setEditingId(null); return; }
-      const updatedInv: Invoice = { ...existing, client, clientTel: clientTel.trim()||undefined, lines: orderLines, montant: cartTotal };
-      onUpdate({ invoices: invoices.map(i => i.id === editingId ? updatedInv : i) });
-      logAction("Commande modifiée", `${editingId} · ${client} · ${fmt(cartTotal)}`, "✏️");
-      setLastInv(updatedInv);
+    setSubmittingOrder(true);
+    try {
+      const saved = await createSale({ boutiqueId:boutique.id, client, clientTel:clientTel.trim() || undefined, lines:orderLines });
+      const newInv: Invoice = {
+        id:saved.invoice_id, client, clientTel:clientTel.trim() || undefined, lines:orderLines,
+        montant:saved.total, acompte:0, date:today(), dateRaw:new Date().toISOString(),
+        status:"en attente", type:"vente", operatorNom:currentUser.nom, operatorColor:currentUser.color,
+      };
+      onUpdate({ invoices:[...invoices, newInv] });
+      logAction("Commande PDV", `${newInv.id} · ${client} · ${fmt(saved.total)}`, "🛒");
+      setLastInv(newInv);
       setDone(true);
-      setTimeout(() => doPrint(buildOrderTicketHtml(updatedInv, boutique, currentUser.nom), "Bon de commande"), 200);
-      return;
+      setTimeout(() => doPrint(buildOrderTicketHtml(newInv, boutique, currentUser.nom), "Bon de commande"), 200);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Impossible d’enregistrer la commande");
+    } finally {
+      setSubmittingOrder(false);
     }
-
-    const id = genInvoiceId(boutique, allBoutiques, invoices);
-    const newInv: Invoice = {
-      id, client, clientTel: clientTel.trim()||undefined,
-      lines: orderLines,
-      montant: cartTotal, acompte: 0, date: today(), dateRaw: new Date().toISOString().split("T")[0],
-      status: "en attente", type: "B2C", operatorNom: currentUser.nom, operatorColor: currentUser.color,
-    };
-    onUpdate({ invoices: [...invoices, newInv] });
-    logAction("Commande PDV", `${id} · ${client} · ${fmt(cartTotal)}`, "🛒");
-    setLastInv(newInv);
-    setDone(true);
-    setTimeout(() => doPrint(buildOrderTicketHtml(newInv, boutique, currentUser.nom), "Bon de commande"), 200);
   }
 
   // ── If caisse not open ───────────────────────────────────────────────────────
   if (!isSessionOpen) {
     const lastClosed = (boutique.caisseHistory ?? []).slice(-1)[0];
     return (
-      <div className="space-y-5 pb-24 flex flex-col items-center justify-center min-h-[60vh]">
+      <div data-screen-source="relational-pos" className="space-y-5 pb-24 flex flex-col items-center justify-center min-h-[60vh]">
         <div className="w-20 h-20 rounded-3xl flex items-center justify-center" style={{ background:POS_COLOR+"15" }}>
           <Store size={36} style={{ color:POS_COLOR }}/>
         </div>
@@ -254,8 +251,8 @@ export function POSView({ boutique, allBoutiques, currentUser, onUpdate, logActi
           <Field label="FOND DE CAISSE (F CFA)" color={POS_COLOR}>
             <input value={fondCaisse} onChange={e=>setFondCaisse(e.target.value)} type="number" placeholder="0" className={inputCls+" text-center text-xl font-black"} autoFocus onKeyDown={e=>e.key==="Enter"&&openCaisse()}/>
           </Field>
-          <button onClick={openCaisse} className="w-full py-4 rounded-2xl font-black text-base flex items-center justify-center gap-2 active:scale-95 transition-transform" style={{ background:POS_COLOR, color:"#fff", fontFamily:"'Nunito', sans-serif" }}>
-            <Store size={20}/> Ouvrir la caisse
+          <button disabled={savingCaisse} onClick={openCaisse} className="w-full py-4 rounded-2xl font-black text-base flex items-center justify-center gap-2 active:scale-95 transition-transform disabled:opacity-60" style={{ background:POS_COLOR, color:"#fff", fontFamily:"'Nunito', sans-serif" }}>
+            <Store size={20}/> {savingCaisse ? "Ouverture…" : "Ouvrir la caisse"}
           </button>
         </div>
       </div>
@@ -264,7 +261,7 @@ export function POSView({ boutique, allBoutiques, currentUser, onUpdate, logActi
 
   // ── Session open ─────────────────────────────────────────────────────────────
   return (
-    <div className="space-y-3 pb-36">
+    <div data-screen-source="relational-pos" className="space-y-3 pb-36">
 
       {/* Caisse header bar */}
       <div className="flex items-center gap-3 px-4 py-3 rounded-2xl" style={{ background:SEM.success.bg, border:"1px solid "+SEM.success.accent+"44" }}>
@@ -454,16 +451,8 @@ export function POSView({ boutique, allBoutiques, currentUser, onUpdate, logActi
                   </div>
                 )}
                 <div className="flex border-t" style={{ borderColor:SEM.warning.accent+"22" }}>
-                  <button onClick={()=>editOrder(inv)} className="flex-1 flex items-center justify-center gap-2 py-3 font-black text-sm active:scale-95" style={{ color:SEM.warning.accent }}>
-                    <Edit2 size={14}/> Modifier
-                  </button>
-                  <div className="w-px" style={{ background:SEM.warning.accent+"22" }}/>
                   <button onClick={()=>{ silentPrint(buildOrderTicketHtml(inv, boutique, currentUser.nom, true)); }} className="flex-1 flex items-center justify-center gap-2 py-3 font-black text-sm active:scale-95" style={{ color:"#6b7280" }}>
                     🖨 Réimprimer
-                  </button>
-                  <div className="w-px" style={{ background:SEM.warning.accent+"22" }}/>
-                  <button onClick={()=>setDeleteOrderId(inv.id)} className="flex-1 flex items-center justify-center gap-2 py-3 font-black text-sm active:scale-95" style={{ color:"#ef4444" }}>
-                    <Trash2 size={14}/> Supprimer
                   </button>
                 </div>
               </div>
@@ -492,7 +481,7 @@ export function POSView({ boutique, allBoutiques, currentUser, onUpdate, logActi
 
       {/* Checkout modal */}
       {checkoutOpen && (
-        <Modal title={editingId ? `Modifier ${editingId}` : "Nouvelle commande"} color={POS_COLOR} onClose={resetCheckout}>
+        <Modal title="Nouvelle commande" color={POS_COLOR} onClose={resetCheckout}>
           {!done ? (<>
             <div className="space-y-2">
               {cart.map(item => {
@@ -556,14 +545,14 @@ export function POSView({ boutique, allBoutiques, currentUser, onUpdate, logActi
             <Field label="TÉLÉPHONE (optionnel)" color={POS_COLOR}>
               <input value={clientTel} onChange={e=>{ const v=e.target.value; setClientTel(v.startsWith("+221 ")?v:"+221 "); }} placeholder="+221 77 000 0000" className={inputCls} onKeyDown={e=>e.key==="Enter"&&checkout()}/>
             </Field>
-            <button onClick={checkout} className="w-full py-4 rounded-2xl font-black text-base flex items-center justify-center gap-2 active:scale-95" style={{ background:POS_COLOR, color:"#fff", fontFamily:"'Nunito', sans-serif" }}>
-              <ClipboardList size={18}/> {editingId ? "Enregistrer les modifications" : "Enregistrer la commande"}
+            <button disabled={submittingOrder || cart.length===0} onClick={checkout} className="w-full py-4 rounded-2xl font-black text-base flex items-center justify-center gap-2 active:scale-95 disabled:opacity-60" style={{ background:POS_COLOR, color:"#fff", fontFamily:"'Nunito', sans-serif" }}>
+              <ClipboardList size={18}/> {submittingOrder ? "Enregistrement…" : "Enregistrer la commande"}
             </button>
           </>) : (<>
             <div className="flex flex-col items-center gap-3 py-5 rounded-2xl" style={{ background:SEM.success.bg }}>
               <CheckCircle size={40} style={{ color:SEM.success.accent }}/>
               <div className="text-center">
-                <p className="font-black text-lg" style={{ color:SEM.success.accent, fontFamily:"'Nunito', sans-serif" }}>{editingId ? "Commande modifiée ✓" : "Commande enregistrée ✓"}</p>
+                <p className="font-black text-lg" style={{ color:SEM.success.accent, fontFamily:"'Nunito', sans-serif" }}>Commande enregistrée ✓</p>
                 <p className="text-sm text-muted-foreground mt-0.5">{lastInv?.id} · {lastInv?.client} · {fmt(lastInv?.montant ?? 0)}</p>
               </div>
             </div>
@@ -630,31 +619,12 @@ export function POSView({ boutique, allBoutiques, currentUser, onUpdate, logActi
               </div>
             </div>
             <p className="text-xs text-center text-muted-foreground">Un rapport sera imprimé automatiquement à la fermeture</p>
-            <button onClick={closeCaisse} className="w-full py-4 rounded-2xl font-black text-base flex items-center justify-center gap-2 active:scale-95" style={{ background:POS_COLOR, color:"#fff", fontFamily:"'Nunito', sans-serif" }}>
-              🔒 Confirmer la fermeture
+            <button disabled={savingCaisse} onClick={closeCaisse} className="w-full py-4 rounded-2xl font-black text-base flex items-center justify-center gap-2 active:scale-95 disabled:opacity-60" style={{ background:POS_COLOR, color:"#fff", fontFamily:"'Nunito', sans-serif" }}>
+              🔒 {savingCaisse ? "Fermeture…" : "Confirmer la fermeture"}
             </button>
           </div>
         </Modal>
       )}
-      {/* Delete order confirmation */}
-      {deleteOrderId && (
-        <Modal title="Supprimer la commande" color={SEM.danger.accent} onClose={()=>setDeleteOrderId(null)}>
-          <div className="space-y-4">
-            <div className="flex items-center gap-3 p-4 rounded-2xl" style={{ background:"#ef444415" }}>
-              <Trash2 size={22} style={{ color:"#ef4444", flexShrink:0 }}/>
-              <div>
-                <p className="font-black text-sm">Supprimer {deleteOrderId} ?</p>
-                <p className="text-xs text-muted-foreground mt-0.5">Cette action est irréversible. La commande sera définitivement supprimée.</p>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <button onClick={()=>setDeleteOrderId(null)} className="py-3.5 rounded-2xl font-black text-sm border-2 border-border active:scale-95">Annuler</button>
-              <button onClick={()=>{ onUpdate({ invoices: invoices.filter(i=>i.id!==deleteOrderId) }); logAction("Commande supprimée", deleteOrderId, "🗑️"); setDeleteOrderId(null); }} className="py-3.5 rounded-2xl font-black text-sm active:scale-95 text-white" style={{ background:"#ef4444" }}>Supprimer</button>
-            </div>
-          </div>
-        </Modal>
-      )}
-
       {/* Quick-add modal — must be LAST so it renders above checkout modal */}
       {addModal && (
         <Modal title={addModal.nom} color={POS_COLOR} onClose={() => setAddModal(null)}>
