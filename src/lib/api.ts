@@ -297,6 +297,13 @@ export async function returnSale(params: { boutiqueId:string; invoiceId:string; 
   });
 }
 
+export async function recordStockMovement(params:{ boutiqueId:string; productId:number; qty:number; type:"achat"|"ajustement"|"retour"|"inventaire"; prixUnit?:number; note?:string }) {
+  return dataRequest<{ product_id:number; stock:number }>("rpc/record_stock_movement", {
+    method:"POST", headers:{ Prefer:"return=representation" },
+    body:JSON.stringify({ p_boutique_id:params.boutiqueId, p_product_id:params.productId, p_idempotency_key:crypto.randomUUID(), p_qty:params.qty, p_type:params.type, p_prix_unit:params.prixUnit ?? 0, p_note:params.note ?? null }),
+  });
+}
+
 export async function checkBackend(): Promise<boolean> {
   try {
     await fetch(`${SUPABASE_URL}/auth/v1/health`, { headers: { apikey: PUBLISHABLE_KEY } });

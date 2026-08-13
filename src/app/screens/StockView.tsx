@@ -7,6 +7,7 @@ import { productQty, productMontant, productMontantNet, stockStatus, stockDot } 
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
+import { recordStockMovement } from "../../lib/api";
 
 export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
   boutique: Boutique; onUpdate: (u: Partial<Boutique>) => void;
@@ -118,12 +119,18 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
     }
   }
 
-  function submitEntry() {
+  async function submitEntry() {
     if (!detail) return;
     const qty = dLotMode ? dLotQty : Number(dQty);
     if (!qty || qty <= 0) return;
     const isPieces = dUnit === "pièces";
     const lotExtra = dLotMode ? { nbLots: Number(dLots) || 1, nbPieces: Number(dPieces) || 0, ...(isPieces ? {} : { longueurPiece: Number(dLongueur) || 0 }) } : {};
+    try {
+      await recordStockMovement({ boutiqueId:boutique.id, productId:detail.id, qty, type:"achat", prixUnit:(Number(dMontant) || 0) / qty, note:dFourn });
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Entrée de stock impossible");
+      return;
+    }
     onUpdate({ entries: [...entries, { id: Date.now(), productId: detail.id, qty, unit: dUnit, montantDu: Number(dMontant) || 0, date: today(), fournisseur: dFourn, ...lotExtra, ...(dSku.trim() ? { sku: dSku.trim() } : {}) }] });
     const lab = dLotMode
       ? (isPieces ? `${dLots}lot×${dPieces}p=+${qty}p` : `${dLots}lot×${dPieces}p×${dLongueur}${dUnit}=+${qty}${dUnit}`)
