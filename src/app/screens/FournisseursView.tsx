@@ -8,6 +8,7 @@ import { imgSrc } from "../utils/formatting";
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
+import { createSupplier } from "../../lib/api";
 import { PhoneField } from "../components/PhoneField";
 
 export function FournisseursView({ boutique, onUpdate, logAction }: {
@@ -18,9 +19,12 @@ export function FournisseursView({ boutique, onUpdate, logAction }: {
   const [search,setSearch]=useState("");
   const [expanded,setExpanded]=useState<number|null>(null); const [modal,setModal]=useState(false);
   const [nom,setNom]=useState(""); const [ville,setVille]=useState(""); const [dialCode,setDialCode]=useState("+221"); const [tel,setTel]=useState("");
-  function submit() {
+  async function submit() {
     if (!nom.trim()) return;
-    onUpdate({ suppliers:[...suppliers,{ id:Date.now(), nom:nom.trim(), ville:ville.trim(), lastDelivery:today(), tel:tel.trim(), initials:ini(nom.trim()), color:SUP_COLORS[suppliers.length%SUP_COLORS.length] }] });
+    let persisted;
+    try { persisted = await createSupplier({ boutiqueId:boutique.id,name:nom.trim(),phone:tel.trim() || undefined,city:ville.trim() || undefined }); }
+    catch (error) { alert(error instanceof Error ? error.message : "Création du fournisseur impossible"); return; }
+    onUpdate({ suppliers:[...suppliers,{ id:persisted.supplier_id, nom:nom.trim(), ville:ville.trim(), lastDelivery:today(), tel:tel.trim(), initials:ini(nom.trim()), color:SUP_COLORS[suppliers.length%SUP_COLORS.length] }] });
     logAction("Nouveau fournisseur",`${nom.trim()} · ${ville.trim()}`,"🚛");
     setNom(""); setVille(""); setTel("+221 "); setModal(false);
   }

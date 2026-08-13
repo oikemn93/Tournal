@@ -9,6 +9,7 @@ import { getSiblings } from "../utils/inventory";
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
+import { createClient } from "../../lib/api";
 import { PhoneField } from "../components/PhoneField";
 
 export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser, onUpdate, logAction, initialTab }: {
@@ -28,10 +29,13 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
   const siblings = getSiblings(boutique.id, allBoutiques, platformUsers);
   const filtered = clients.filter(c=>c.type===tab&&(c.nom.toLowerCase().includes(search.toLowerCase())||c.tel.includes(search)||c.ville.toLowerCase().includes(search.toLowerCase())));
   const counts = { "B2C":clients.filter(c=>c.type==="B2C").length, "B2B":clients.filter(c=>c.type==="B2B").length, "Grossiste":clients.filter(c=>c.type==="Grossiste").length };
-  function submit() {
+  async function submit() {
     if (!nom.trim()) return;
     const fullTel = tel.trim() ? dialCode + " " + tel.trim() : "";
-    onUpdate({ clients:[...clients,{ id:Date.now(), nom:nom.trim(), type, tel:fullTel, total:0, last:today(), ville:ville.trim(), adresse:adresse.trim()||undefined, email:email.trim()||undefined, contact:contact.trim()||undefined }] });
+    let persisted;
+    try { persisted = await createClient({ boutiqueId:boutique.id,name:nom.trim(),type:type === "Grossiste" ? "B2B" : type,phone:fullTel,email:email.trim() || undefined,city:ville.trim() || undefined }); }
+    catch (error) { alert(error instanceof Error ? error.message : "Création du client impossible"); return; }
+    onUpdate({ clients:[...clients,{ id:persisted.client_id, nom:nom.trim(), type, tel:fullTel, total:0, last:today(), ville:ville.trim(), adresse:adresse.trim()||undefined, email:email.trim()||undefined, contact:contact.trim()||undefined }] });
     logAction("Nouveau client",`${nom.trim()} (${type}) · ${ville.trim()}`,"👥");
     setNom(""); setDialCode("+221"); setTel(""); setVille(""); setAdresse(""); setEmail(""); setContact(""); setModal(false);
   }
