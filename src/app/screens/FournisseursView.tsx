@@ -31,7 +31,7 @@ export function FournisseursView({ boutique, onUpdate, logAction }: {
   const filteredSuppliers = suppliers.filter(s=>s.nom.toLowerCase().includes(search.toLowerCase())||s.ville.toLowerCase().includes(search.toLowerCase()));
 
   return (
-    <div className="space-y-3 pb-24">
+    <div data-screen-source="relational-suppliers" className="space-y-3 pb-24">
       <div className="relative"><Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground"/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Chercher un fournisseur…" className={inputCls+" pl-11"}/></div>
       {filteredSuppliers.map(s=>{
         const isOpen=expanded===s.id; const balance=supplierBalance(s.nom,entries,boutique.charges); const se=entries.filter(e=>e.fournisseur===s.nom&&e.qty>0).sort((a,b)=>b.id-a.id);

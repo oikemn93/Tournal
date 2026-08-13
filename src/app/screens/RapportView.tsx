@@ -155,7 +155,7 @@ ${invLines}
   ];
 
   return (
-    <div className="space-y-4 pb-24">
+    <div data-screen-source="relational-comptabilite" className="space-y-4 pb-24">
       {/* Period selector */}
       <div className="flex gap-1.5 bg-card rounded-2xl p-1.5 border border-border">
         {periodBtns.map(p=>(

@@ -17,6 +17,10 @@ import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, Cell, PieCha
 import { StockView as RelationalStockView } from "./screens/StockView";
 import { FacturesView as RelationalFacturesView } from "./screens/FacturesView";
 import { POSView as RelationalPOSView } from "./screens/POSView";
+import { ClientsView as RelationalClientsView } from "./screens/ClientsView";
+import { FournisseursView as RelationalFournisseursView } from "./screens/FournisseursView";
+import { ChargesView as RelationalChargesView } from "./screens/ChargesView";
+import { ComptabiliteView as RelationalComptabiliteView } from "./screens/RapportView";
 
 const ReadOnlyCtx = React.createContext(false);
 const useReadOnly = () => React.useContext(ReadOnlyCtx);
@@ -8999,12 +9003,12 @@ export default function App() {
       <main className="flex-1 overflow-y-auto px-4 py-4 pb-20" style={{ scrollbarWidth:"none" }}>
         {safeTab==="dashboard"    && canAccess("dashboard") && <DashboardView boutique={boutique} onNavigate={(t,f)=>{setNavFilter(f??{});setTab(t);}}/>}
         {safeTab==="stock"        && canAccess("stock")        && <RelationalStockView boutique={boutique} onUpdate={updateBoutique} logAction={logAction} initialFilter={navFilter.stockFilter}/>}
-        {safeTab==="fournisseurs" && canAccess("fournisseurs") && <FournisseursView boutique={boutique} onUpdate={updateBoutique} logAction={logAction}/>}
-        {safeTab==="clients"      && canAccess("clients")      && <ClientsView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} currentUser={currentUser!} onUpdate={updateBoutique} logAction={logAction} initialTab={navFilter.clientTab as ClientType|undefined}/>}
+        {safeTab==="fournisseurs" && canAccess("fournisseurs") && <RelationalFournisseursView boutique={boutique} onUpdate={updateBoutique} logAction={logAction}/>}
+        {safeTab==="clients"      && canAccess("clients")      && <RelationalClientsView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} currentUser={currentUser!} onUpdate={updateBoutique} logAction={logAction} initialTab={navFilter.clientTab as ClientType|undefined}/>}
         {safeTab==="factures"     && canAccess("factures")     && <RelationalFacturesView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} currentUser={currentUser} canReturn={canAccess("remboursement")} onUpdate={updateBoutique} onUpdateOtherBoutique={updateOtherBoutique} logAction={logAction} initialStatus={navFilter.statusFilter as InvoiceStatus|"all"|undefined}/>}
         {safeTab==="pos"          && canAccess("vente")        && <RelationalPOSView boutique={boutique} allBoutiques={boutiques} currentUser={currentUser} onUpdate={updateBoutique} logAction={logAction}/>}
-        {safeTab==="charges"      && canAccess("charges")      && <ChargesView boutique={boutique} onUpdate={updateBoutique} logAction={logAction}/>}
-        {safeTab==="compta"       && canAccess("compta")       && <ComptabiliteView boutique={boutique} currentUser={currentUser??undefined}/>}
+        {safeTab==="charges"      && canAccess("charges")      && <RelationalChargesView boutique={boutique} onUpdate={updateBoutique} logAction={logAction}/>}
+        {safeTab==="compta"       && canAccess("compta")       && <RelationalComptabiliteView boutique={boutique}/>}
         {safeTab==="inventaire"   && canAccess("inventaire")   && currentUser && <InventaireView boutique={boutique} currentUser={currentUser} onUpdate={updateBoutique} logAction={logAction} onClose={()=>setTab("stock")}/>}
         {safeTab==="transferts"   && canAccess("stock")        && currentUser && <TransfertsView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} groupes={groupes} currentUser={currentUser} onUpdate={updateBoutique} onUpdateOtherBoutique={updateOtherBoutique} logAction={logAction}/>}
         {safeTab==="admin"        && isOwner                  && <AdminView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} currentUser={currentUser} onUpdate={updateBoutique} onUpdateUsers={handleUpdatePlatformUsers} onCreateUser={handleCreateUser}

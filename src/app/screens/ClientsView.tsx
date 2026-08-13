@@ -159,7 +159,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
   }
 
   return (
-    <div className="space-y-4 pb-24">
+    <div data-screen-source="relational-clients" className="space-y-4 pb-24">
       <div className="relative"><Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground"/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Chercher un client…" className={inputCls+" pl-11"}/></div>
       <div className="flex bg-card rounded-2xl p-1 border border-border gap-1">
         {tabDefs.map(t=>(

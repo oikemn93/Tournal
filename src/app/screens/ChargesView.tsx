@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Search, Wallet, RefreshCw, Plus, Trash2, CheckCircle } from "lucide-react";
+import { Search, Wallet, RefreshCw, Plus, CheckCircle } from "lucide-react";
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import type { Boutique, Charge, ChargeCategorie } from "../types";
 import { CHARGE_CATS, CHARGE_COLORS, SEM, inputCls } from "../constants";
@@ -50,12 +50,8 @@ export function ChargesView({ boutique, onUpdate, logAction }: {
     logAction("Nouvelle charge", `${label.trim()} · ${fmt(Number(montant))}${linkedFourn?" → "+linkedFourn:""}`, "💸");
     setLabel(""); setMontant(""); setNote(""); setFourn(""); setModal(false);
   }
-  function deleteCharge(id: number) {
-    onUpdate({ charges: charges.filter(c=>c.id!==id) });
-  }
-
   return (
-    <div className="space-y-4 pb-24">
+    <div data-screen-source="relational-charges" className="space-y-4 pb-24">
       {/* Summary bar */}
       <div className="grid grid-cols-2 gap-3">
         <div className="bg-card rounded-2xl p-4 border border-border">
@@ -114,7 +110,6 @@ export function ChargesView({ boutique, onUpdate, logAction }: {
             </div>
             <div className="text-right flex-shrink-0">
               <p className="font-black text-base" style={{color:"#ef4444",fontFamily:"'Nunito',sans-serif"}}>{fmt(c.montant)}</p>
-              <button onClick={()=>deleteCharge(c.id)} className="mt-1 p-1 rounded-lg active:scale-90" style={{background:"#ef444415"}}><Trash2 size={13} style={{color:"#ef4444"}}/></button>
             </div>
           </div>
         ))}
