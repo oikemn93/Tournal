@@ -8,6 +8,7 @@ import { supplierBalance } from "../utils/inventory";
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
+import { createCharge } from "../../lib/api";
 
 export function ChargesView({ boutique, onUpdate, logAction }: {
   boutique: Boutique; onUpdate: (u: Partial<Boutique>) => void;
@@ -35,13 +36,16 @@ export function ChargesView({ boutique, onUpdate, logAction }: {
     name: cat, value: charges.filter(c=>c.categorie===cat).reduce((s,c)=>s+c.montant,0), color: CHARGE_COLORS[cat]
   })).filter(c=>c.value>0);
 
-  function submit() {
+  async function submit() {
     if (!label.trim() || !montant) return;
     const now = new Date();
     const dateStr = now.toLocaleDateString("fr-FR",{day:"2-digit",month:"short"});
     const dateRaw = now.toISOString().split("T")[0];
     const linkedFourn = (cat === "Achat stock" && fourn) ? fourn : undefined;
-    const newCharge: Charge = { id: Date.now(), label: label.trim(), montant: Number(montant), date: dateStr, dateRaw, categorie: cat, recurrence, note: note.trim()||undefined, fournisseur: linkedFourn };
+    let persisted;
+    try { persisted = await createCharge({ boutiqueId:boutique.id, label:label.trim(), amount:Number(montant), category:cat, note:note.trim() || undefined }); }
+    catch (error) { alert(error instanceof Error ? error.message : "Création de charge impossible"); return; }
+    const newCharge: Charge = { id: persisted.charge_id, label: label.trim(), montant: Number(montant), date: dateStr, dateRaw, categorie: cat, recurrence, note: note.trim()||undefined, fournisseur: linkedFourn };
     onUpdate({ charges: [...charges, newCharge] });
     logAction("Nouvelle charge", `${label.trim()} · ${fmt(Number(montant))}${linkedFourn?" → "+linkedFourn:""}`, "💸");
     setLabel(""); setMontant(""); setNote(""); setFourn(""); setModal(false);
