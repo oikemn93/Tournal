@@ -424,7 +424,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
   ];
 
   return (
-    <div className="space-y-4 pb-24">
+    <div data-screen-source="relational-factures" className="space-y-4 pb-24">
       <div className="relative"><Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground"/><input value={invSearch} onChange={e=>setInvSearch(e.target.value)} placeholder="Chercher une facture ou un client…" className={inputCls+" pl-11"}/></div>
       <div className="flex gap-2" style={{ overflowX:"auto", scrollbarWidth:"none" }}>
         {pills.map(s=><button key={s.id} onClick={()=>setStatusFilter(s.id as InvoiceStatus|"all"|"impayé")}className="px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap flex-shrink-0" style={{ background:statusFilter===s.id?s.color:s.color+"22", color:statusFilter===s.id?"#fff":s.color }}>{s.label}</button>)}

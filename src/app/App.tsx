@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, Cell, PieChart, Pie } from "recharts";
 import { StockView as RelationalStockView } from "./screens/StockView";
+import { FacturesView as RelationalFacturesView } from "./screens/FacturesView";
 
 const ReadOnlyCtx = React.createContext(false);
 const useReadOnly = () => React.useContext(ReadOnlyCtx);
@@ -8999,7 +9000,7 @@ export default function App() {
         {safeTab==="stock"        && canAccess("stock")        && <RelationalStockView boutique={boutique} onUpdate={updateBoutique} logAction={logAction} initialFilter={navFilter.stockFilter}/>}
         {safeTab==="fournisseurs" && canAccess("fournisseurs") && <FournisseursView boutique={boutique} onUpdate={updateBoutique} logAction={logAction}/>}
         {safeTab==="clients"      && canAccess("clients")      && <ClientsView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} currentUser={currentUser!} onUpdate={updateBoutique} logAction={logAction} initialTab={navFilter.clientTab as ClientType|undefined}/>}
-        {safeTab==="factures"     && canAccess("factures")     && <FacturesView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} groupes={groupes} currentUser={currentUser} canReturn={canAccess("remboursement")} onUpdate={updateBoutique} onUpdateOtherBoutique={updateOtherBoutique} logAction={logAction} initialStatus={navFilter.statusFilter as InvoiceStatus|"all"|undefined}/>}
+        {safeTab==="factures"     && canAccess("factures")     && <RelationalFacturesView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} currentUser={currentUser} canReturn={canAccess("remboursement")} onUpdate={updateBoutique} onUpdateOtherBoutique={updateOtherBoutique} logAction={logAction} initialStatus={navFilter.statusFilter as InvoiceStatus|"all"|undefined}/>}
         {safeTab==="pos"          && canAccess("vente")        && <POSView boutique={boutique} allBoutiques={boutiques} currentUser={currentUser} onUpdate={updateBoutique} logAction={logAction}/>}
         {safeTab==="charges"      && canAccess("charges")      && <ChargesView boutique={boutique} onUpdate={updateBoutique} logAction={logAction}/>}
         {safeTab==="compta"       && canAccess("compta")       && <ComptabiliteView boutique={boutique} currentUser={currentUser??undefined}/>}
