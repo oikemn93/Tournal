@@ -259,8 +259,11 @@ export async function connectQZ(savedPrinter?: string): Promise<void> {
     if (!qz.websocket.isActive()) {
       await qz.websocket.connect({
         host:"localhost",
-        port:{ secure:[8181,8182], insecure:[8181,8182] },
-        usingSecure: false, keepAlive: 60, retries: 1,
+        // The application is served over HTTPS.  Use QZ Tray's WSS endpoint
+        // first; forcing ws:// here is blocked by modern browsers as mixed
+        // content even when QZ Tray is correctly installed.
+        port:{ secure:[8181,8282], insecure:[8182,8283] },
+        usingSecure: true, keepAlive: 60, retries: 1,
       });
     }
     PA.qz = qz; PA.status = "connected";
