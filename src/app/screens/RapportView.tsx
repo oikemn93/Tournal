@@ -18,18 +18,19 @@ export function ComptabiliteView({ boutique }: { boutique: Boutique }) {
   const filtInv = filterByPeriod(invoices, period, customFrom, customTo);
   const filtCh  = filterByPeriod(charges, period, customFrom, customTo);
 
+  const invoiceSign = (invoice: typeof filtInv[number]) => invoice.type === "Retour" || invoice.type === "retour" ? -1 : 1;
   const encaisséInv  = filtInv.filter(i => i.acompte > 0);
-  const ca           = filtInv.reduce((s,i)=>s+i.acompte,0);
-  const caTotal      = filtInv.reduce((s,i)=>s+i.montant,0);
+  const ca           = filtInv.reduce((s,i)=>s + invoiceSign(i) * i.acompte,0);
+  const caTotal      = filtInv.reduce((s,i)=>s + invoiceSign(i) * i.montant,0);
   const nbVentes     = encaisséInv.length;
   const panierMoyen  = nbVentes > 0 ? ca / nbVentes : 0;
-  const impayé       = filtInv.reduce((s,i)=>s+(i.montant-i.acompte),0);
+  const impayé       = filtInv.filter(i=>invoiceSign(i)>0).reduce((s,i)=>s+(i.montant-i.acompte),0);
   const totalCharges = filtCh.reduce((s,c)=>s+c.montant,0);
   const margeBrute   = ca - totalCharges;
   const tauxMarge    = ca > 0 ? (margeBrute/ca*100).toFixed(1) : "0";
 
   const byMethode = PAYMENT_METHODS.map(m => ({
-    m, total: encaisséInv.filter(i=>i.paymentMethod===m).reduce((s,i)=>s+i.acompte,0),
+    m, total: encaisséInv.filter(i=>i.paymentMethod===m).reduce((s,i)=>s + invoiceSign(i) * i.acompte,0),
     count: encaisséInv.filter(i=>i.paymentMethod===m).length,
   })).filter(r=>r.count>0);
 
