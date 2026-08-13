@@ -258,6 +258,11 @@ export async function getData<T>(key: string): Promise<T | null> {
           openedBy: s.opened_by ?? "",
           closedBy: s.closed_by ?? "",
         })),
+      caisseSession: sessions
+        .filter(s => s.boutique_id === b.id && !s.closed_at)
+        .sort((a, b) => new Date(b.opened_at).getTime() - new Date(a.opened_at).getTime())
+        .slice(0, 1)
+        .map(s => ({ id:s.id, openedAt:s.opened_at, fondDeCaisse:Number(s.fond_ouverture ?? 0), openedBy:s.opened_by ?? "" }))[0],
       auditLog: [],
     })) as T;
   }
