@@ -205,7 +205,7 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
   });
 
   return (
-    <div className="space-y-4 pb-24">
+    <div data-screen-source="relational-stock" className="space-y-4 pb-24">
       <div className="relative">
         <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground"/>
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Chercher un produit…" className={inputCls + " pl-11"}/>
