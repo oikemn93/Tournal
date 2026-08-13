@@ -1170,7 +1170,7 @@ function SuperAdminScreen({ boutiques, platformUsers, groupes, onEnterBoutique, 
   const [manageGId,setManageGId]=useState<string|null>(null); const [addMemberUid,setAddMemberUid]=useState("");
 
   const nonAdmin = platformUsers.filter(u=>!u.isSuperAdmin);
-  const unassigned = nonAdmin.filter(u=>u.assignments.length===0);
+  const unassigned = platformUsers.filter(u=>u.assignments.length===0);
 
   const filteredBoutiques = boutiques.filter(b=>b.nom.toLowerCase().includes(bSearch.toLowerCase())||b.ville.toLowerCase().includes(bSearch.toLowerCase()));
   const filteredUsers = nonAdmin.filter(u=>u.nom.toLowerCase().includes(uSearch.toLowerCase())||u.phone.includes(uSearch));
