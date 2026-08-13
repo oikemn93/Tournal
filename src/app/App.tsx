@@ -5199,7 +5199,6 @@ function FacturesView({ boutique, allBoutiques, platformUsers, groupes, currentU
   function getInvSellOptions(pid: number): string[] {
     const prod = products.find(p=>p.id===pid);
     if (!prod) return [];
-    if (prod.unit === "pièces" || prod.unit === "Pièce") return ["Pièce"];
     const cat = (boutique.categories??[]).find(c=>c.nom===prod.categorie);
     if (!cat || cat.nbPiecesParLot<=0) return [prod.unit];
     const opts: string[] = ["Lot"];
@@ -7272,7 +7271,6 @@ function POSView({ boutique, allBoutiques, currentUser, onUpdate, logAction }: {
   const posCats = boutique.categories ?? [];
 
   function getSellOptions(p: Product): string[] {
-    if (p.unit === "pièces" || p.unit === "Pièce") return ["Pièce"];
     const cat = posCats.find(c => c.nom === p.categorie);
     if (!cat || cat.nbPiecesParLot <= 0) return [p.unit];
     const opts: string[] = ["Lot"];
