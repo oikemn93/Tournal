@@ -429,7 +429,17 @@ export function mergeImages<T>(boutiques: T, _images: Record<string, string>) {
   return boutiques;
 }
 
-export async function signQZ(_toSign: string): Promise<string> {
+export async function signQZ(toSign: string): Promise<string> {
+  const session = readSession();
+  if (!session?.access_token) throw new Error("Connexion requise");
+  const response = await fetch(`${SUPABASE_URL}/functions/v1/qz-sign`, {
+    method: "POST",
+    headers: { apikey: PUBLISHABLE_KEY, Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ request: toSign }),
+  });
+  const signature = await response.text();
+  if (!response.ok || !signature) throw new Error("Signature QZ indisponible");
+  return signature;
   throw new Error("La signature QZ doit être configurée dans une fonction Supabase dédiée.");
 }
 
