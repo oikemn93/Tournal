@@ -9021,18 +9021,7 @@ export default function App() {
         {safeTab==="compta"       && canAccess("compta")       && <RelationalComptabiliteView boutique={boutique}/>}
         {safeTab==="inventaire"   && canAccess("inventaire")   && <RelationalMigrationNotice title="Inventaire"/>}
         {safeTab==="transferts"   && canAccess("stock")        && <RelationalMigrationNotice title="Transferts"/>}
-        {safeTab==="admin"        && isOwner                  && <AdminView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} currentUser={currentUser} onUpdate={updateBoutique} onUpdateUsers={handleUpdatePlatformUsers} onCreateUser={handleCreateUser}
-              onSaveAuthSettings={async (lockMin: number, sessMin: number) => {
-                const bid = activeBoutiqueId;
-                if (!bid) return;
-                setLockTimeoutMs(lockMin * 60 * 1000);
-                setSessionExpiryMs(sessMin * 60 * 1000);
-                try { await saveData(`settings:auth:${bid}`, { lockMinutes: lockMin, sessionMinutes: sessMin }); } catch {}
-              }}
-              lockMinutesInit={Math.round(lockTimeoutMs/60000)}
-              sessionMinutesInit={Math.round(sessionExpiryMs/60000)}
-              backendOk={backendOk} lastSyncAt={lastSyncAt}
-              logAction={logAction}/>}
+        {safeTab==="admin"        && isOwner                  && <RelationalMigrationNotice title="Administration"/>}
       </main>
       {/* More menu overlay */}
       {moreOpen && createPortal(
