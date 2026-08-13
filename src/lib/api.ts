@@ -392,6 +392,14 @@ export async function createProduct(params:{ boutiqueId:string; name:string; uni
   return dataRequest<{product_id:number}>("rpc/create_product", { method:"POST", body:JSON.stringify({ p_boutique_id:params.boutiqueId,p_idempotency_key:crypto.randomUUID(),p_nom:params.name,p_unit:params.unit,p_category_id:params.categoryId ?? null,p_prix_achat:params.purchasePrice ?? 0,p_prix_vente:params.salePrice ?? 0 }) });
 }
 
+export async function updateBoutiqueProfile(params: { boutiqueId:string; nom:string; ville:string; adresse?:string; email?:string; tel?:string }) {
+  await dataRequest(`boutiques?id=eq.${encodeURIComponent(params.boutiqueId)}`, {
+    method: "PATCH",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({ nom: params.nom, ville: params.ville, adresse: params.adresse ?? null, email: params.email ?? null, tel: params.tel ?? null }),
+  });
+}
+
 export async function checkBackend(): Promise<boolean> {
   try {
     await fetch(`${SUPABASE_URL}/auth/v1/health`, { headers: { apikey: PUBLISHABLE_KEY } });

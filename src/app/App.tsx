@@ -21,6 +21,8 @@ import { ClientsView as RelationalClientsView } from "./screens/ClientsView";
 import { FournisseursView as RelationalFournisseursView } from "./screens/FournisseursView";
 import { ChargesView as RelationalChargesView } from "./screens/ChargesView";
 import { ComptabiliteView as RelationalComptabiliteView } from "./screens/RapportView";
+import { InventoryView as RelationalInventoryView } from "./screens/InventoryView";
+import { AdministrationView as RelationalAdministrationView } from "./screens/AdministrationView";
 
 const ReadOnlyCtx = React.createContext(false);
 const useReadOnly = () => React.useContext(ReadOnlyCtx);
@@ -9019,9 +9021,9 @@ export default function App() {
         {safeTab==="pos"          && canAccess("vente")        && <RelationalPOSView boutique={boutique} allBoutiques={boutiques} currentUser={currentUser} onUpdate={updateBoutique} logAction={logAction}/>}
         {safeTab==="charges"      && canAccess("charges")      && <RelationalChargesView boutique={boutique} onUpdate={updateBoutique} logAction={logAction}/>}
         {safeTab==="compta"       && canAccess("compta")       && <RelationalComptabiliteView boutique={boutique}/>}
-        {safeTab==="inventaire"   && canAccess("inventaire")   && <RelationalMigrationNotice title="Inventaire"/>}
+        {safeTab==="inventaire"   && canAccess("inventaire")   && <RelationalInventoryView boutique={boutique} onUpdate={updateBoutique} logAction={logAction}/>}
         {safeTab==="transferts"   && canAccess("stock")        && <RelationalMigrationNotice title="Transferts"/>}
-        {safeTab==="admin"        && isOwner                  && <RelationalMigrationNotice title="Administration"/>}
+        {safeTab==="admin"        && isOwner                  && <RelationalAdministrationView boutique={boutique} onUpdate={updateBoutique} logAction={logAction}/>}
       </main>
       {/* More menu overlay */}
       {moreOpen && createPortal(
