@@ -290,6 +290,13 @@ export async function recordPayment(params: { boutiqueId:string; invoiceId:strin
   });
 }
 
+export async function returnSale(params: { boutiqueId:string; invoiceId:string; lines:Array<{productId:number;qty:number}> }) {
+  return dataRequest<{ return_invoice_id:string; total:number }>("rpc/return_sale", {
+    method:"POST", headers:{ Prefer:"return=representation" },
+    body:JSON.stringify({ p_boutique_id:params.boutiqueId, p_invoice_id:params.invoiceId, p_idempotency_key:crypto.randomUUID(), p_lines:params.lines }),
+  });
+}
+
 export async function checkBackend(): Promise<boolean> {
   try {
     await fetch(`${SUPABASE_URL}/auth/v1/health`, { headers: { apikey: PUBLISHABLE_KEY } });

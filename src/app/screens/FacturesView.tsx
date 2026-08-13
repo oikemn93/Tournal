@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Search, Plus, Send, FileText, Eye, Mail, MessageCircle, Smartphone, Phone, Wallet, CreditCard, RotateCcw, ShoppingCart, Receipt, AlertCircle, Trash2, CheckCircle, Minus, Store } from "lucide-react";
 import type { Boutique, Invoice, InvoiceStatus, InvoiceLine, StockEntry, PaymentMethod, Client, PlatformUser } from "../types";
 import { SEM, inputCls, PAYMENT_METHODS, PM_ICON, PM_COLOR, PLACEHOLDER_IMGS } from "../constants";
-import { createSale, recordPayment } from "../../lib/api";
+import { createSale, recordPayment, returnSale } from "../../lib/api";
 import { fmt, today, imgSrc } from "../utils/formatting";
 import { invBadge, lineTotal, lineDispQty, lineDispUnit, genInvoiceId, productQty, getSiblings } from "../utils/inventory";
 import { buildReceiptHtml, openInvoicePDF, buildInvoiceMessage, agentPrint, printReceipt } from "../utils/invoice";
@@ -341,13 +341,20 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
     setDetailInv(null);
   }
 
-  function submitReturn() {
+  async function submitReturn() {
     if (!returnInv || !returnInv.lines) return;
     const lines = returnInv.lines;
     const returnLines = lines.map((l,i) => ({ ...l, qty: returnQtys[i] ?? 0 })).filter(l => l.qty > 0);
     if (returnLines.length === 0) return;
+    let persisted;
+    try {
+      persisted = await returnSale({ boutiqueId:boutique.id, invoiceId:returnInv.id, lines:returnLines.map(l=>({ productId:l.productId, qty:l.qty })) });
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Retour impossible");
+      return;
+    }
     const refundTotal = returnLines.reduce((s, l) => s + l.qty * l.prixUnit, 0);
-    const retId = "R-" + String(Date.now()).slice(-5);
+    const retId = persisted.return_invoice_id;
     const retInv: Invoice = {
       id: retId, client: returnInv.client, clientTel: returnInv.clientTel,
       lines: returnLines, montant: refundTotal, acompte: refundTotal,
