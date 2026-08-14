@@ -8923,7 +8923,7 @@ export default function App() {
 
   async function handleCreateUser(user: Omit<PlatformUser,"id">): Promise<PlatformUser|null> {
     try {
-      const { userId } = await createUser(user.phone, user.nom, user.password);
+      const { userId } = await createUser(user.phone, user.nom, user.password, boutique.id);
       const created = {...user,id:userId,password:""};
       setPlatformUsers(prev=>[...prev,created]);
       toast.success("Compte utilisateur créé");
@@ -9224,3 +9224,4 @@ export default function App() {
   </NotifCtx.Provider>
   );
 }
+

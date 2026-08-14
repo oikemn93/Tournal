@@ -228,8 +228,8 @@ export async function createBoutique(nom: string, ville: string, ownerId: string
   return adminProvision<{ boutiqueId: string }>("create_boutique", { nom, ville, ownerId });
 }
 
-export async function createUser(phone: string, fullName: string, password: string) {
-  return adminProvision<{ userId: string }>("create_user", { phone, fullName, password });
+export async function createUser(phone: string, fullName: string, password: string, boutiqueId?: string) {
+  return adminProvision<{ userId: string }>("create_user", { phone, fullName, password, boutiqueId });
 }
 
 export async function resetUserPassword(userId: string, password: string) {
@@ -560,3 +560,5 @@ export async function sendInvoiceEmail(_params: unknown): Promise<void> {
 export async function storePDFForSMS(_params: unknown): Promise<string | null> {
   return null;
 }
+
+

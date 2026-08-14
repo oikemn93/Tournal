@@ -63,7 +63,7 @@ Deno.serve(async (request) => {
     .select("id, is_super_admin")
     .eq("id", userData.user.id)
     .maybeSingle();
-  if (callerError || !caller?.is_super_admin) return reply(request, { error: "Droits administrateur requis" }, 403);
+  if (callerError || !caller) return reply(request, { error: "Droits administrateur requis" }, 403);
 
   try {
     const payload = await request.json() as Record<string, unknown>;
@@ -101,7 +101,20 @@ Deno.serve(async (request) => {
       const phone = text(payload.phone, "Numéro de téléphone", 32);
       const fullName = text(payload.fullName, "Nom", 120);
       const password = text(payload.password, "Mot de passe", 256);
+      const boutiqueId = typeof payload.boutiqueId === "string" ? payload.boutiqueId.trim() : "";
       if (password.length < 12) return reply(request, { error: "Le mot de passe doit contenir au moins 12 caractères" }, 422);
+
+      if (boutiqueId && !caller?.is_super_admin) {
+        const { data: boutique, error: boutiqueError } = await admin
+          .from("boutiques")
+          .select("owner_id")
+          .eq("id", boutiqueId)
+          .maybeSingle();
+        if (boutiqueError || !boutique) return reply(request, { error: "Boutique introuvable" }, 422);
+        if (boutique.owner_id !== userData.user.id) {
+          return reply(request, { error: "Seul le propri�taire de cette boutique peut cr�er ce compte" }, 403);
+        }
+      }
 
       const { data, error } = await admin.auth.admin.createUser({
         email: phoneToEmail(phone), password, email_confirm: true,
@@ -159,3 +172,4 @@ Deno.serve(async (request) => {
     return reply(request, { error: error instanceof Error ? error.message : "Erreur serveur" }, 400);
   }
 });
+
