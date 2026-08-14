@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Search, Plus, Send, FileText, Eye, Mail, MessageCircle, Smartphone, Phone, Wallet, CreditCard, RotateCcw, ShoppingCart, Receipt, AlertCircle, Trash2, CheckCircle, Minus, Store } from "lucide-react";
 import type { Boutique, Invoice, InvoiceStatus, InvoiceLine, StockEntry, PaymentMethod, Client, PlatformUser } from "../types";
 import { SEM, inputCls, PAYMENT_METHODS, PM_ICON, PM_COLOR, PLACEHOLDER_IMGS } from "../constants";
@@ -204,6 +204,27 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
 }) {
   const { invoices, clients, products, entries } = boutique;
   const siblings = getSiblings(boutique.id, allBoutiques, platformUsers);
+
+  // Quantities already returned, per source invoice and product. Every return
+  // restores stock via an entry tagged "Retour <sourceInvoiceId>", mirroring the
+  // return_sale RPC, so summing those entries tells us how much of each line has
+  // already been sent back. This prevents returning the same invoice repeatedly.
+  const returnedByInvoiceProduct = useMemo(() => {
+    const map = new Map<string, number>();
+    const prefix = "Retour ";
+    for (const e of entries) {
+      const note = e.fournisseur ?? "";
+      if (!note.startsWith(prefix)) continue;
+      const sourceId = note.slice(prefix.length);
+      const key = `${sourceId}::${e.productId}`;
+      map.set(key, (map.get(key) ?? 0) + Number(e.qty || 0));
+    }
+    return map;
+  }, [entries]);
+  const remainingReturnable = (inv: Invoice, line: InvoiceLine) =>
+    Math.max(0, line.qty - (returnedByInvoiceProduct.get(`${inv.id}::${line.productId}`) ?? 0));
+  const invoiceHasReturnable = (inv: Invoice) =>
+    !!inv.lines && inv.lines.some(l => remainingReturnable(inv, l) > 0);
   const [statusFilter,setStatusFilter] = useState<InvoiceStatus|"all"|"impayé">(initialStatus ?? "all");
   const [invSearch, setInvSearch] = useState("");
   const [modal,setModal]   = useState(false);
@@ -359,8 +380,12 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
 
   function openReturn(inv: Invoice) {
     if (!inv.lines || inv.lines.length === 0) return;
+    if (!invoiceHasReturnable(inv)) {
+      alert("Cette facture a déjà été entièrement retournée.");
+      return;
+    }
     const initQtys: Record<number,number> = {};
-    inv.lines.forEach((l,i) => { initQtys[i] = l.qty; });
+    inv.lines.forEach((l,i) => { initQtys[i] = remainingReturnable(inv, l); });
     setReturnQtys(initQtys);
     setReturnDone(false);
     setReturnInv(inv);
@@ -372,6 +397,12 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
     const lines = returnInv.lines;
     const returnLines = lines.map((l,i) => ({ ...l, qty: returnQtys[i] ?? 0 })).filter(l => l.qty > 0);
     if (returnLines.length === 0) return;
+    // Never let a line send back more than what is still returnable.
+    const overLine = lines.find((l,i) => (returnQtys[i] ?? 0) > remainingReturnable(returnInv, l));
+    if (overLine) {
+      alert("La quantité retournée dépasse ce qui reste à retourner pour cette facture.");
+      return;
+    }
     let persisted;
     try {
       persisted = await returnSale({ boutiqueId:boutique.id, invoiceId:returnInv.id, lines:returnLines.map(l=>({ productId:l.productId, qty:l.qty })) });
@@ -615,10 +646,15 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
             <AlertCircle size={13}/> Ticket de caisse disponible après encaissement de la commande
           </div>
         )}
-        {canReturn && detailInv.acompte > 0 && detailInv.type !== "Retour" && detailInv.lines && detailInv.lines.length > 0 && (
+        {canReturn && detailInv.acompte > 0 && detailInv.type !== "Retour" && detailInv.lines && detailInv.lines.length > 0 && invoiceHasReturnable(detailInv) && (
           <button onClick={()=>openReturn(detailInv)} className="w-full py-3.5 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 active:scale-95" style={{ background:"#ef444415", color:"#ef4444" }}>
             <RotateCcw size={16}/> Retour articles
           </button>
+        )}
+        {canReturn && detailInv.acompte > 0 && detailInv.type !== "Retour" && detailInv.lines && detailInv.lines.length > 0 && !invoiceHasReturnable(detailInv) && (
+          <div className="w-full py-3 rounded-2xl text-xs font-bold flex items-center justify-center gap-2" style={{ background:SEM.neutral.bg, color:SEM.neutral.accent }}>
+            <RotateCcw size={14}/> Facture entièrement retournée
+          </div>
         )}
       </Modal>}
 
@@ -695,20 +731,25 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
             <p className="text-xs" style={{ color:"#ef4444" }}>Les articles retournés seront remis en stock automatiquement.</p>
           </div>
           <div className="space-y-2">
-            {returnInv.lines.map((l, i) => (
-              <div key={i} className="flex items-center gap-3 bg-muted rounded-2xl p-3">
+            {returnInv.lines.map((l, i) => {
+              const rem = remainingReturnable(returnInv, l);
+              const alreadyReturned = l.qty - rem;
+              return (
+              <div key={i} className="flex items-center gap-3 bg-muted rounded-2xl p-3" style={rem<=0?{opacity:0.55}:{}}>
                 {(() => { const prod = products.find(p=>p.id===l.productId); return prod ? <div className="w-12 h-12 rounded-xl overflow-hidden flex-shrink-0"><img src={imgSrc(prod.img,96,96)} alt={l.nom} className="w-full h-full object-cover"/></div> : null; })()}
                 <div className="flex-1 min-w-0">
                   <p className="font-bold text-sm truncate">{l.nom}</p>
                   <p className="text-xs text-muted-foreground">{lineDispQty(l)} {lineDispUnit(l)} vendus · {fmt(l.prixUnit)} / {lineDispUnit(l)}</p>
+                  {alreadyReturned > 0 && <p className="text-xs font-semibold" style={{ color:"#ef4444" }}>{rem > 0 ? `Reste à retourner : ${rem}` : "Déjà retourné en totalité"}</p>}
                 </div>
                 <div className="flex items-center gap-1.5 flex-shrink-0">
-                  <button onClick={()=>setReturnQtys(q=>({...q,[i]:Math.max(0,(q[i]??0)-1)}))} className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background:"#ef444422" }}><Minus size={12} style={{ color:"#ef4444" }}/></button>
+                  <button disabled={rem<=0} onClick={()=>setReturnQtys(q=>({...q,[i]:Math.max(0,(q[i]??0)-1)}))} className="w-8 h-8 rounded-xl flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed" style={{ background:"#ef444422" }}><Minus size={12} style={{ color:"#ef4444" }}/></button>
                   <span className="w-8 text-center font-black text-sm" style={{ color:"#ef4444" }}>{returnQtys[i] ?? 0}</span>
-                  <button onClick={()=>setReturnQtys(q=>({...q,[i]:Math.min(l.qty,(q[i]??0)+1)}))} className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background:"#ef444422" }}><Plus size={12} style={{ color:"#ef4444" }}/></button>
+                  <button disabled={(returnQtys[i] ?? 0) >= rem} onClick={()=>setReturnQtys(q=>({...q,[i]:Math.min(rem,(q[i]??0)+1)}))} className="w-8 h-8 rounded-xl flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed" style={{ background:"#ef444422" }}><Plus size={12} style={{ color:"#ef4444" }}/></button>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
           {(() => {
             const total = returnInv.lines.reduce((s,l,i)=>s+(returnQtys[i]??0)*l.prixUnit,0);
