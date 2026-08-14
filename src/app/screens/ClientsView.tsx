@@ -9,7 +9,7 @@ import { getSiblings } from "../utils/inventory";
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
-import { createClient, recordClientPayment } from "../../lib/api";
+import { createClient, recordClientPayment, updateClientContact, WHOLESALE_MARKER } from "../../lib/api";
 import { PhoneField } from "../components/PhoneField";
 import { formatPreciseDateTime, invoicePaidAmount, invoiceRemainingAmount } from "../utils/payments";
 
@@ -35,9 +35,16 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
   async function submit() {
     if (!nom.trim()) return;
     const fullTel = tel.trim() ? dialCode + " " + tel.trim() : "";
+    const isWholesale = type === "Grossiste";
     let persisted;
-    try { persisted = await createClient({ boutiqueId:boutique.id,name:nom.trim(),type:type === "Grossiste" ? "B2B" : type,phone:fullTel,email:email.trim() || undefined,city:ville.trim() || undefined }); }
+    try { persisted = await createClient({ boutiqueId:boutique.id,name:nom.trim(),type:isWholesale ? "B2B" : type,phone:fullTel,email:email.trim() || undefined,city:ville.trim() || undefined }); }
     catch (error) { alert(error instanceof Error ? error.message : "Création du client impossible"); return; }
+    // Wholesale clients: tag the persisted row so the type survives a reload.
+    if (isWholesale) {
+      const markedContact = `${contact.trim()} ${WHOLESALE_MARKER}`.trim();
+      try { await updateClientContact(persisted.client_id, markedContact); }
+      catch { /* non-blocking: client is created, tag is best-effort */ }
+    }
     onUpdate({ clients:[...clients,{ id:persisted.client_id, nom:nom.trim(), type, tel:fullTel, total:0, last:today(), ville:ville.trim(), adresse:adresse.trim()||undefined, email:email.trim()||undefined, contact:contact.trim()||undefined }] });
     logAction("Nouveau client",`${nom.trim()} (${type}) · ${ville.trim()}`,"👥");
     setNom(""); setDialCode("+221"); setTel(""); setVille(""); setAdresse(""); setEmail(""); setContact(""); setModal(false);

@@ -4,7 +4,7 @@ import type { Boutique, Invoice, InvoiceStatus, InvoiceLine, StockEntry, Payment
 import { SEM, inputCls, PAYMENT_METHODS, PM_ICON, PM_COLOR, PLACEHOLDER_IMGS } from "../constants";
 import { createSale, recordPayment, returnSale } from "../../lib/api";
 import { fmt, today, imgSrc } from "../utils/formatting";
-import { invBadge, lineTotal, lineDispQty, lineDispUnit, genInvoiceId, productQty, getSiblings } from "../utils/inventory";
+import { invBadge, lineTotal, lineDispQty, lineDispUnit, genInvoiceId, productQty, getSiblings, invoiceMargin } from "../utils/inventory";
 import { buildReceiptHtml, openInvoicePDF, buildInvoiceMessage, agentPrint, printReceipt } from "../utils/invoice";
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
@@ -192,9 +192,10 @@ function ShareInvoiceModal({ inv, boutique, clients, onClose }: { inv: Invoice; 
 
 // ─── FACTURES VIEW ────────────────────────────────────────────────────────────
 
-export function FacturesView({ boutique, allBoutiques, platformUsers, currentUser, canReturn, onUpdate, onUpdateOtherBoutique, logAction, initialStatus, initialInvoiceId, initialClientId }: {
+export function FacturesView({ boutique, allBoutiques, platformUsers, currentUser, canReturn, canSeeMargin = false, onUpdate, onUpdateOtherBoutique, logAction, initialStatus, initialInvoiceId, initialClientId }: {
   boutique: Boutique; allBoutiques: Boutique[]; platformUsers: PlatformUser[]; currentUser: PlatformUser;
   canReturn: boolean;
+  canSeeMargin?: boolean;
   onUpdate: (u: Partial<Boutique>) => void;
   onUpdateOtherBoutique: (boutiqueId: string, u: Partial<Boutique>) => void;
   logAction: (action: string, detail: string, icon: string) => void;
@@ -615,6 +616,32 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
           </div>)}</div>
         </div>}
 
+        {/* Margin — only after cashing in, only for users with the "Voir les marges" right. */}
+        {canSeeMargin && detailInv.acompte > 0 && (() => {
+          const m = invoiceMargin(detailInv, entries, products);
+          if (!m.hasData) return null;
+          const isReturn = detailInv.type === "Retour";
+          const accent = m.marge >= 0 ? SEM.success.accent : "#ef4444";
+          const bg = m.marge >= 0 ? SEM.success.bg : "#ef444415";
+          return (
+            <div className="rounded-2xl p-4" style={{ background:bg }}>
+              <p className="text-xs font-black tracking-wider mb-2" style={{ color:accent }}>
+                {isReturn ? "MARGE ANNULÉE (RETOUR)" : "MARGE RÉALISÉE"}
+              </p>
+              <div className="flex items-end justify-between gap-3">
+                <div>
+                  <p className="text-2xl font-black" style={{ color:accent, fontFamily:"'Nunito', sans-serif" }}>{fmt(m.marge)}</p>
+                  <p className="text-xs font-semibold text-muted-foreground mt-0.5">Soit {m.pct}% du chiffre d'affaires</p>
+                </div>
+                <div className="text-right text-xs font-semibold text-muted-foreground">
+                  <p>Vente : {fmt(m.ca)}</p>
+                  <p>Coût (FIFO) : {fmt(m.cost)}</p>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
         {/* All payments use the same transactional RPC and cashier trace. */}
         {detailInv.status !== "payé" && (
           <button onClick={()=>{setEncaissInv(detailInv);setEncaissAmt(String(invoiceRemainingAmount(detailInv)));setDetailInv(null);}}
@@ -825,9 +852,25 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
             <button type="button" onClick={()=>setEncaissAmt(String(Math.round(invoiceRemainingAmount(encaissInv)/2)))} className="flex-1 py-2.5 rounded-xl text-xs font-bold" style={{background:"#C9A22722",color:"#C9A227"}}>50%</button>
           </div>
           {encaissDone ? (
-            <div className="flex items-center justify-center gap-3 py-4 rounded-2xl" style={{background:SEM.success.bg}}>
-              <CheckCircle size={22} style={{color:SEM.success.accent}}/>
-              <p className="font-black text-sm" style={{color:SEM.success.accent,fontFamily:"'Nunito',sans-serif"}}>Encaissement enregistré ✓</p>
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-center gap-3 py-4 rounded-2xl" style={{background:SEM.success.bg}}>
+                <CheckCircle size={22} style={{color:SEM.success.accent}}/>
+                <p className="font-black text-sm" style={{color:SEM.success.accent,fontFamily:"'Nunito', sans-serif"}}>Encaissement enregistré ✓</p>
+              </div>
+              {canSeeMargin && (() => {
+                const m = invoiceMargin(encaissInv, entries, products);
+                if (!m.hasData) return null;
+                const accent = m.marge >= 0 ? SEM.success.accent : "#ef4444";
+                return (
+                  <div className="rounded-2xl p-3 flex items-center justify-between gap-3" style={{ background:SEM.neutral.bg }}>
+                    <div>
+                      <p className="text-xs font-black tracking-wider" style={{ color:accent }}>MARGE RÉALISÉE</p>
+                      <p className="text-xs font-semibold text-muted-foreground mt-0.5">{m.pct}% du CA · coût FIFO {fmt(m.cost)}</p>
+                    </div>
+                    <p className="text-xl font-black" style={{ color:accent, fontFamily:"'Nunito', sans-serif" }}>{fmt(m.marge)}</p>
+                  </div>
+                );
+              })()}
             </div>
           ) : (
             <SubmitBtn color={boutique.color} label={submittingPayment ? "Encaissement…" : "Confirmer l'encaissement"} onClick={submitEncaiss} disabled={submittingPayment || !Number(encaissAmt)||Number(encaissAmt)<=0}/>
