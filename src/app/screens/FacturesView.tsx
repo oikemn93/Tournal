@@ -335,9 +335,23 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
       }],
     };
 
-    // Stock was already deducted atomically by create_sale. Payment must not deduct it again.
-    onUpdate({ invoices: invoices.map(i => i.id === encaissInv.id ? updatedInv : i) });
-    logAction("Encaissement", `${encaissInv.id} · +${fmt(montantEncaiss)} · ${encaissMethod}`, "💵");
+    const saleEntries: StockEntry[] = persisted.stock_deducted
+      ? (encaissInv.lines ?? []).map((line, index) => ({
+          id: Date.now() + index,
+          productId: line.productId,
+          qty: -line.qty,
+          unit: line.unit,
+          montantDu: 0,
+          date: today(),
+          fournisseur: `Vente ${encaissInv.id}`,
+          invoiceId: encaissInv.id,
+        }))
+      : [];
+    onUpdate({
+      invoices: invoices.map(i => i.id === encaissInv.id ? updatedInv : i),
+      ...(saleEntries.length ? { entries: [...entries, ...saleEntries] } : {}),
+    });
+    logAction("Encaissement", `${encaissInv.id} · +${fmt(persisted.applied_amount)} · ${encaissMethod}`, "💵");
     setTimeout(() => agentPrint(buildReceiptHtml(updatedInv, boutique, currentUser.nom)), 200);
     setEncaissDone(true);
     setTimeout(() => { setEncaissInv(null); setEncaissAmt(""); setEncaissDone(false); setSubmittingPayment(false); }, 1400);
@@ -411,8 +425,18 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
     }
     const paidAtCreation = initialPayment?.acompte ?? 0;
     const s: InvoiceStatus = paidAtCreation>=montant&&montant>0?"payé":paidAtCreation>0?"acompte":status;
-    // Deduct stock from current boutique
-    const saleEntries: StockEntry[] = lines.map((l,i)=>({ id:Date.now()+i, productId:l.productId, qty:-l.qty, unit:l.unit, montantDu:0, date:today(), fournisseur:`Transfert → ${client}` }));
+    const saleEntries: StockEntry[] = initialPayment?.stock_deducted
+      ? lines.map((line,index)=>({
+          id:Date.now()+index,
+          productId:line.productId,
+          qty:-line.qty,
+          unit:line.unit,
+          montantDu:0,
+          date:today(),
+          fournisseur:`Vente ${id}`,
+          invoiceId:id,
+        }))
+      : [];
     const selectedClient = clients.find(c=>c.nom===client);
     const newInv: Invoice = {
       id, clientId:selectedClient?.id, client, clientTel:cTel, clientType:selectedClient?.type,
@@ -425,7 +449,10 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
         batchId:initialPayment.payment.batch_id, source:initialPayment.payment.source,
       }] : [],
     };
-    onUpdate({ invoices:[...invoices, newInv], entries:[...entries,...saleEntries] });
+    onUpdate({
+      invoices:[...invoices, newInv],
+      ...(saleEntries.length ? { entries:[...entries,...saleEntries] } : {}),
+    });
     // Inter-tenant: add incoming stock entries to sibling boutique
     if (isSiblingTransfer && siblingClient) {
       const sbProducts = [...siblingClient.products];

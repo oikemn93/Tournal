@@ -16,9 +16,11 @@ export function getSiblings(currentId: string, allBoutiques: Boutique[], allUser
   return allBoutiques.filter(b => ids.includes(b.id));
 }
 
-export function lineDispQty(l: InvoiceLine | CartItem) { return l.sellQty ?? l.qty; }
-export function lineDispUnit(l: InvoiceLine | CartItem) { return l.sellUnit ?? l.unit; }
-export function lineTotal(l: InvoiceLine | CartItem) { return (l.sellQty ?? l.qty) * l.prixUnit; }
+export function lineDispQty(l: InvoiceLine | CartItem) {
+  return l.sellUnit && l.sellQty != null ? l.sellQty : l.qty;
+}
+export function lineDispUnit(l: InvoiceLine | CartItem) { return l.sellUnit || l.unit; }
+export function lineTotal(l: InvoiceLine | CartItem) { return lineDispQty(l) * l.prixUnit; }
 export function productQty(pid: number, entries: StockEntry[]) { return entries.filter(e => e.productId === pid).reduce((s, e) => s + e.qty, 0); }
 export function productMontant(pid: number, entries: StockEntry[]) { return entries.filter(e => e.productId === pid && e.qty > 0).reduce((s, e) => s + e.montantDu, 0); }
 export function productMontantNet(pid: number, entries: StockEntry[], charges: Charge[]) {

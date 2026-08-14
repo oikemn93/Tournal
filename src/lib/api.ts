@@ -99,7 +99,7 @@ export async function signInWithPhone(phone: string, password: string) {
 }
 
 export async function changeOwnPassword(password: string) {
-  if (password.length < 12) throw new Error("Utilisez au moins 12 caractères pour le mot de passe");
+  if (!/^\d{6}$/.test(password)) throw new Error("Utilisez un code à 6 chiffres");
   const session = readSession();
   if (!session?.access_token) throw new Error("Connexion requise");
   await authRequest("/user", {
@@ -114,7 +114,7 @@ export async function changeOwnPassword(password: string) {
 }
 
 export async function signUpWithPhone(phone: string, password: string, fullName: string) {
-  if (password.length < 12) throw new Error("Utilisez au moins 12 caractères pour le mot de passe");
+  if (!/^\d{6}$/.test(password)) throw new Error("Utilisez un code à 6 chiffres");
   const body = await authRequest("/signup", {
     method: "POST",
     body: JSON.stringify({
@@ -454,7 +454,7 @@ export async function closeCaisseSession(params: { boutiqueId:string; sessionId:
 }
 
 export async function recordPayment(params: { boutiqueId:string; invoiceId:string; amount:number; paymentMethod:string }) {
-  return dataRequest<{ invoice_id:string; acompte:number; applied_amount:number; status:string; payment:{ id:number; amount:number; payment_method:string; paid_at:string; operator_id:string; operator_name:string; batch_id:string; source:"invoice" } }>("rpc/record_payment", {
+  return dataRequest<{ invoice_id:string; acompte:number; applied_amount:number; status:string; stock_deducted:boolean; payment:{ id:number; amount:number; payment_method:string; paid_at:string; operator_id:string; operator_name:string; batch_id:string; source:"invoice" } }>("rpc/record_payment", {
     method:"POST", headers:{ Prefer:"return=representation" },
     body:JSON.stringify({ p_boutique_id:params.boutiqueId, p_invoice_id:params.invoiceId, p_idempotency_key:crypto.randomUUID(), p_amount:params.amount, p_payment_method:params.paymentMethod }),
   });
@@ -560,5 +560,3 @@ export async function sendInvoiceEmail(_params: unknown): Promise<void> {
 export async function storePDFForSMS(_params: unknown): Promise<string | null> {
   return null;
 }
-
-
