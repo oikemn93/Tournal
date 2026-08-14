@@ -5,6 +5,7 @@ import { SEM, inputCls, PAYMENT_METHODS, PM_ICON, PM_COLOR, CHARGE_CATS, CHARGE_
 import { fmt } from "../utils/formatting";
 import { invBadge, lineDispQty, lineDispUnit, lineTotal, filterByPeriod } from "../utils/inventory";
 import { Modal } from "../components/Modal";
+import { filterPaymentEventsByPeriod, invoicePaidAmount, invoiceRemainingAmount } from "../utils/payments";
 
 export function ComptabiliteView({ boutique }: { boutique: Boutique }) {
   const RC = boutique.color;
@@ -16,22 +17,22 @@ export function ComptabiliteView({ boutique }: { boutique: Boutique }) {
   const [exportModal, setExportModal] = useState<"summary"|"full"|null>(null);
 
   const filtInv = filterByPeriod(invoices, period, customFrom, customTo);
+  const filtPayments = filterPaymentEventsByPeriod(invoices, period, customFrom, customTo);
   const filtCh  = filterByPeriod(charges, period, customFrom, customTo);
 
   const invoiceSign = (invoice: typeof filtInv[number]) => invoice.type === "Retour" || invoice.type === "retour" ? -1 : 1;
-  const encaisséInv  = filtInv.filter(i => i.acompte > 0);
-  const ca           = filtInv.reduce((s,i)=>s + invoiceSign(i) * i.acompte,0);
+  const ca           = filtPayments.reduce((sum,payment)=>sum + payment.signedAmount,0);
   const caTotal      = filtInv.reduce((s,i)=>s + invoiceSign(i) * i.montant,0);
-  const nbVentes     = encaisséInv.length;
+  const nbVentes     = new Set(filtPayments.filter(payment=>payment.signedAmount>0).map(payment=>payment.invoiceId)).size;
   const panierMoyen  = nbVentes > 0 ? ca / nbVentes : 0;
-  const impayé       = filtInv.filter(i=>invoiceSign(i)>0).reduce((s,i)=>s+(i.montant-i.acompte),0);
+  const impayé       = filtInv.filter(i=>invoiceSign(i)>0).reduce((s,i)=>s+invoiceRemainingAmount(i),0);
   const totalCharges = filtCh.reduce((s,c)=>s+c.montant,0);
   const margeBrute   = ca - totalCharges;
   const tauxMarge    = ca > 0 ? (margeBrute/ca*100).toFixed(1) : "0";
 
   const byMethode = PAYMENT_METHODS.map(m => ({
-    m, total: encaisséInv.filter(i=>i.paymentMethod===m).reduce((s,i)=>s + invoiceSign(i) * i.acompte,0),
-    count: encaisséInv.filter(i=>i.paymentMethod===m).length,
+    m, total: filtPayments.filter(payment=>payment.paymentMethod===m).reduce((sum,payment)=>sum + payment.signedAmount,0),
+    count: filtPayments.filter(payment=>payment.paymentMethod===m).length,
   })).filter(r=>r.count>0);
 
   const byCategorie = CHARGE_CATS.map(cat=>({
@@ -63,10 +64,10 @@ h1{font-size:22px;font-weight:900;margin:0 0 2px}
 <h1>${boutique.nom}</h1>
 <div class="sub">Rapport — ${periodLabel[period]}${period==="custom"?` (${customFrom} → ${customTo})`:""} · Généré le ${new Date().toLocaleDateString("fr-FR",{day:"2-digit",month:"long",year:"numeric"})}</div>
 <div class="kpis">
-  <div class="kpi"><div class="label">CA encaissé</div><div class="value green">${fmt(ca)}</div></div>
+  <div class="kpi"><div class="label">CA encaissé (date de paiement)</div><div class="value green">${fmt(ca)}</div></div>
   <div class="kpi"><div class="label">Ventes</div><div class="value">${nbVentes}</div></div>
   <div class="kpi"><div class="label">Panier moyen</div><div class="value">${fmt(panierMoyen)}</div></div>
-  <div class="kpi"><div class="label">CA facturé</div><div class="value muted">${fmt(caTotal)}</div></div>
+  <div class="kpi"><div class="label">CA facturé (date de facture)</div><div class="value muted">${fmt(caTotal)}</div></div>
   <div class="kpi"><div class="label">Impayé</div><div class="value orange">${fmt(impayé)}</div></div>
   <div class="kpi"><div class="label">Marge brute</div><div class="value ${margeBrute>=0?"green":"red"}">${fmt(margeBrute)}</div></div>
 </div>
@@ -91,7 +92,7 @@ ${filtCh.map(c=>`<tr><td>${c.label}</td><td>${c.categorie}</td><td>${c.date}</td
     const invLines = filtInv.map(inv=>{
       const linesHtml = (inv.lines??[]).map(l=>`<tr style="background:#fafafa"><td style="padding-left:24px;color:#888">↳ ${l.nom}</td><td></td><td></td><td class="val muted">${lineDispQty(l)} ${lineDispUnit(l)} × ${fmt(l.prixUnit)}</td><td class="val muted">${fmt(lineTotal(l))}</td></tr>`).join("");
       const [tc,bc]=invBadge(inv.status);
-      return `<tr><td>${inv.id}</td><td>${inv.client}</td><td>${inv.date}</td><td><span style="background:${bc};color:${tc};padding:2px 7px;border-radius:20px;font-size:10px;font-weight:700">${inv.status}</span></td><td class="val">${fmt(inv.montant)}</td><td class="val green">${fmt(inv.acompte)}</td></tr>${linesHtml}`;
+      return `<tr><td>${inv.id}</td><td>${inv.client}</td><td>${inv.date}</td><td><span style="background:${bc};color:${tc};padding:2px 7px;border-radius:20px;font-size:10px;font-weight:700">${inv.status}</span></td><td class="val">${fmt(inv.montant)}</td><td class="val green">${fmt(invoicePaidAmount(inv))}</td></tr>${linesHtml}`;
     }).join("");
     return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Rapport complet — ${boutique.nom}</title>
 <style>
@@ -111,10 +112,10 @@ th{font-weight:700;color:#666;font-size:10px;text-transform:uppercase}
 <h1>${boutique.nom} — Rapport complet</h1>
 <div class="sub">${periodLabel[period]}${period==="custom"?` (${customFrom} → ${customTo})`:""} · ${new Date().toLocaleDateString("fr-FR",{day:"2-digit",month:"long",year:"numeric"})}</div>
 <div class="kpis">
-  <div class="kpi"><div class="label">CA encaissé</div><div class="value green">${fmt(ca)}</div></div>
+  <div class="kpi"><div class="label">CA encaissé (date de paiement)</div><div class="value green">${fmt(ca)}</div></div>
   <div class="kpi"><div class="label">Ventes</div><div class="value">${nbVentes}</div></div>
   <div class="kpi"><div class="label">Panier moyen</div><div class="value">${fmt(panierMoyen)}</div></div>
-  <div class="kpi"><div class="label">CA facturé</div><div class="value">${fmt(caTotal)}</div></div>
+  <div class="kpi"><div class="label">CA facturé (date de facture)</div><div class="value">${fmt(caTotal)}</div></div>
   <div class="kpi"><div class="label">Impayé</div><div class="value muted">${fmt(impayé)}</div></div>
   <div class="kpi"><div class="label">Marge brute</div><div class="value ${margeBrute>=0?"green":"red"}">${fmt(margeBrute)}</div></div>
 </div>
@@ -145,8 +146,8 @@ ${invLines}
   ];
 
   const rows = [
-    { label:"CA encaissé",   value:ca,           color:RC,                              bold:true },
-    { label:"CA facturé",    value:caTotal,       color:"#C9A227"                        },
+    { label:"CA encaissé · date de paiement", value:ca, color:RC, bold:true },
+    { label:"CA facturé · date de facture", value:caTotal, color:"#C9A227" },
     { label:"Nb ventes",     value:-1,            color:"#6b7280", txt:`${nbVentes}`     },
     { label:"Panier moyen",  value:panierMoyen,   color:"#a855f7"                        },
     { label:"Impayé",        value:impayé,        color:SEM.warning.accent                        },
@@ -175,7 +176,7 @@ ${invLines}
       {/* KPI cards */}
       <div className="grid grid-cols-2 gap-2">
         {[
-          { label:"CA encaissé", value:fmt(ca), color:RC },
+          { label:"CA encaissé (paiements)", value:fmt(ca), color:RC },
           { label:"Ventes", value:`${nbVentes}`, color:"#6b7280" },
           { label:"Panier moyen", value:fmt(panierMoyen), color:"#a855f7" },
           { label:"Marge brute", value:fmt(margeBrute), color:margeBrute>=0?SEM.success.accent:SEM.danger.accent },
@@ -244,7 +245,7 @@ ${invLines}
             <div key={inv.id} className="flex items-center justify-between px-4 py-3 border-b border-border last:border-0">
               <div><p className="text-sm font-semibold">{inv.client}</p><p className="text-xs text-muted-foreground">{inv.id} · {inv.date}</p></div>
               <div className="text-right">
-                <p className="text-sm font-black" style={{fontFamily:"'Nunito',sans-serif"}}>{fmt(inv.acompte > 0 ? inv.acompte : inv.montant)}</p>
+                <p className="text-sm font-black" style={{fontFamily:"'Nunito',sans-serif"}}>{fmt(invoicePaidAmount(inv) > 0 ? invoicePaidAmount(inv) : inv.montant)}</p>
                 <span className="text-xs px-2 py-0.5 rounded-full font-bold capitalize" style={{background:bc,color:tc}}>{inv.status}</span>
               </div>
             </div>

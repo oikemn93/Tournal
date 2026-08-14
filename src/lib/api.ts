@@ -186,7 +186,7 @@ export function subscribeToBoutiqueChanges(boutiqueId: string, onChange: () => v
     let channel = realtimeClient.channel(`tournal:${boutiqueId}`);
     // Each subscription is scoped to one boutique and only to relational tables.
     // This deliberately avoids both the former global JSON blob and polling.
-    for (const table of ["products", "stock_entries", "invoices", "invoice_lines", "clients", "charges", "caisse_sessions"]) {
+    for (const table of ["products", "stock_entries", "invoices", "invoice_lines", "invoice_payments", "clients", "charges", "caisse_sessions"]) {
       channel = channel.on("postgres_changes", { event: "*", schema: "public", table, filter }, onChange);
     }
     channel = channel.subscribe();
@@ -254,12 +254,12 @@ export async function getData<T>(key: string): Promise<T | null> {
   if (key === "boutiques") {
     // Compatibility projection: legacy screens still consume a Boutique object,
     // but its data now comes exclusively from the relational source of truth.
-    const [boutiques, categories, products, entries, clients, suppliers, invoices, lines, charges, sessions, users, auditLogs] = await Promise.all([
+    const [boutiques, categories, products, entries, clients, suppliers, invoices, lines, payments, charges, sessions, users, auditLogs] = await Promise.all([
       dataRequest<any[]>("boutiques?select=*&order=nom.asc"),
       dataRequest<any[]>("categories?select=*"), dataRequest<any[]>("products?select=*"),
       dataRequest<any[]>("stock_entries?select=*"), dataRequest<any[]>("clients?select=*"),
       dataRequest<any[]>("suppliers?select=*"), dataRequest<any[]>("invoices?select=*"),
-      dataRequest<any[]>("invoice_lines?select=*"), dataRequest<any[]>("charges?select=*"),
+      dataRequest<any[]>("invoice_lines?select=*"), dataRequest<any[]>("invoice_payments?select=*&order=paid_at.asc"), dataRequest<any[]>("charges?select=*"),
       dataRequest<any[]>("caisse_sessions?select=*"),
       dataRequest<any[]>("platform_users?select=id,nom,initials,color"),
       dataRequest<any[]>("audit_log?select=*&order=created_at.desc"),
@@ -287,7 +287,42 @@ export async function getData<T>(key: string): Promise<T | null> {
       entries: entries.filter(e => e.boutique_id === b.id).map(e => ({ id:e.id, productId:e.product_id, qty:e.qty, unit:"unité", montantDu:Number(e.qty)*Number(e.prix_unit ?? 0), date:day(e.entry_date), fournisseur:e.note ?? "", invoiceId:undefined })),
       clients: clients.filter(c => c.boutique_id === b.id).map(c => ({ id:c.id, nom:c.nom, type:c.type, tel:c.tel ?? "", total:c.total ?? 0, last:day(c.last_invoice_at), ville:c.ville ?? "", adresse:c.adresse ?? undefined, email:c.email ?? undefined, contact:c.contact ?? undefined })),
       suppliers: suppliers.filter(s => s.boutique_id === b.id).map(s => ({ id:s.id, nom:s.nom, ville:s.ville ?? "", lastDelivery:day(s.last_delivery_at), tel:s.tel ?? "", initials:s.initials ?? "", color:s.color ?? "#C9A227", email:s.email ?? undefined, contact:s.contact ?? undefined })),
-      invoices: invoices.filter(i => i.boutique_id === b.id).map(i => ({ id:i.id, client:i.client_nom ?? "Client comptoir", clientTel:i.client_tel ?? undefined, montant:Number(i.montant), acompte:Number(i.acompte), date:day(i.invoice_date), dateRaw:i.invoice_date, status:i.status === "payée" ? "payé" : i.status === "en_attente" ? "en attente" : i.status, type:i.type, paymentMethod:i.payment_method ?? undefined, lines:lines.filter(l=>l.boutique_id===b.id&&l.invoice_id===i.id).map(l=>({ productId:l.product_id, nom:l.nom, qty:Number(l.qty), unit:l.unit ?? "unité", prixUnit:Number(l.prix_unit), sellUnit:l.sell_unit ?? undefined, sellQty:l.sell_qty ? Number(l.sell_qty) : undefined })) })),
+      invoices: invoices.filter(i => i.boutique_id === b.id).map(i => {
+        const invoicePayments = payments.filter(p => p.boutique_id === b.id && p.invoice_id === i.id);
+        const paid = invoicePayments.length
+          ? invoicePayments.reduce((sum, p) => sum + Number(p.amount), 0)
+          : Number(i.acompte);
+        const operator = userById.get(i.operator_id) ?? {};
+        const clientRecord = clients.find(c => c.boutique_id === b.id && (c.id === i.client_id || (i.client_tel && c.tel === i.client_tel)));
+        return {
+          id:i.id,
+          clientId:i.client_id ?? clientRecord?.id ?? undefined,
+          client:i.client_nom ?? "Client comptoir",
+          clientTel:i.client_tel ?? undefined,
+          clientType:clientRecord?.type ?? undefined,
+          montant:Number(i.montant),
+          acompte:paid,
+          date:day(i.invoice_date),
+          dateRaw:i.invoice_date,
+          status:paid >= Number(i.montant) ? "payé" : paid > 0 ? "acompte" : i.status === "en_attente" ? "en attente" : i.status,
+          type:i.type,
+          operatorNom:operator.nom ?? undefined,
+          operatorColor:operator.color ?? undefined,
+          paymentMethod:i.payment_method ?? undefined,
+          payments:invoicePayments.map(p => ({
+            id:p.id,
+            amount:Number(p.amount),
+            paymentMethod:p.payment_method,
+            paidAt:p.paid_at,
+            recordedAt:p.recorded_at,
+            operatorId:p.operator_id ?? undefined,
+            operatorName:p.operator_name,
+            batchId:p.batch_id,
+            source:p.source,
+          })),
+          lines:lines.filter(l=>l.boutique_id===b.id&&l.invoice_id===i.id).map(l=>({ productId:l.product_id, nom:l.nom, qty:Number(l.qty), unit:l.unit ?? "unité", prixUnit:Number(l.prix_unit), sellUnit:l.sell_unit ?? undefined, sellQty:l.sell_qty ? Number(l.sell_qty) : undefined })),
+        };
+      }),
       charges: charges.filter(c => c.boutique_id === b.id).map(c => ({ id:c.id, label:c.label, montant:Number(c.montant), date:day(c.charge_date), dateRaw:c.charge_date, categorie:c.categorie ?? "Autre", recurrence:"unique", note:c.note ?? undefined })),
       caisseHistory: sessions
         .filter(s => s.boutique_id === b.id)
@@ -419,9 +454,23 @@ export async function closeCaisseSession(params: { boutiqueId:string; sessionId:
 }
 
 export async function recordPayment(params: { boutiqueId:string; invoiceId:string; amount:number; paymentMethod:string }) {
-  return dataRequest<{ invoice_id:string; acompte:number; status:string }>("rpc/record_payment", {
+  return dataRequest<{ invoice_id:string; acompte:number; applied_amount:number; status:string; payment:{ id:number; amount:number; payment_method:string; paid_at:string; operator_id:string; operator_name:string; batch_id:string; source:"invoice" } }>("rpc/record_payment", {
     method:"POST", headers:{ Prefer:"return=representation" },
     body:JSON.stringify({ p_boutique_id:params.boutiqueId, p_invoice_id:params.invoiceId, p_idempotency_key:crypto.randomUUID(), p_amount:params.amount, p_payment_method:params.paymentMethod }),
+  });
+}
+
+export async function recordClientPayment(params: { boutiqueId:string; clientId:number; amount:number; paymentMethod:string; paymentDate:string }) {
+  return dataRequest<{ client_id:number; requested_amount:number; applied_amount:number; remaining_due:number; paid_at:string; operator_id:string; operator_name:string; allocations:Array<{invoice_id:string;amount:number}> }>("rpc/record_client_payment", {
+    method:"POST", headers:{ Prefer:"return=representation" },
+    body:JSON.stringify({
+      p_boutique_id:params.boutiqueId,
+      p_client_id:params.clientId,
+      p_idempotency_key:crypto.randomUUID(),
+      p_amount:params.amount,
+      p_payment_method:params.paymentMethod,
+      p_payment_date:params.paymentDate,
+    }),
   });
 }
 

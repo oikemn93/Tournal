@@ -12,6 +12,17 @@ export type Charge = { id: number; label: string; montant: number; date: string;
 export type ClientType = "B2C" | "B2B" | "Grossiste";
 
 export type InvoiceLine = { productId: number; nom: string; qty: number; unit: string; prixUnit: number; sellUnit?: string; sellQty?: number };
+export type InvoicePayment = {
+  id: number;
+  amount: number;
+  paymentMethod: PaymentMethod;
+  paidAt: string;
+  recordedAt?: string;
+  operatorId?: string;
+  operatorName: string;
+  batchId: string;
+  source: "invoice" | "client_fifo" | "legacy_backfill";
+};
 
 export type AuditEntry = {
   id: number; userId: string; userNom: string; userColor: string;
@@ -27,7 +38,7 @@ export type Product    = { id: number; nom: string; img: string; unit: string; f
 export type StockEntry = { id: number; productId: number; qty: number; unit: string; montantDu: number; date: string; fournisseur: string; invoiceId?: string; nbLots?: number; nbPieces?: number; longueurPiece?: number; sku?: string };
 export type Supplier   = { id: number; nom: string; ville: string; lastDelivery: string; tel: string; initials: string; color: string };
 export type Client     = { id: number; nom: string; type: ClientType; tel: string; total: number; last: string; ville: string; adresse?: string; email?: string; contact?: string };
-export type Invoice    = { id: string; client: string; clientTel?: string; lines?: InvoiceLine[]; montant: number; acompte: number; date: string; dateRaw?: string; status: InvoiceStatus; type: string; operatorNom?: string; operatorColor?: string; paymentMethod?: PaymentMethod };
+export type Invoice    = { id: string; clientId?: number; client: string; clientTel?: string; clientType?: ClientType; lines?: InvoiceLine[]; payments?: InvoicePayment[]; montant: number; acompte: number; date: string; dateRaw?: string; status: InvoiceStatus; type: string; operatorNom?: string; operatorColor?: string; paymentMethod?: PaymentMethod };
 export type ProductParam = { productId: number; nbPiecesParLot: number; longueurParPiece: number; unitVente: string };
 export type Category   = { id: string; nom: string; unitVente: string; nbPiecesParLot: number; longueurParPiece: number };
 export type Boutique   = {

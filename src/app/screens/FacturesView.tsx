@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Search, Plus, Send, FileText, Eye, Mail, MessageCircle, Smartphone, Phone, Wallet, CreditCard, RotateCcw, ShoppingCart, Receipt, AlertCircle, Trash2, CheckCircle, Minus, Store } from "lucide-react";
 import type { Boutique, Invoice, InvoiceStatus, InvoiceLine, StockEntry, PaymentMethod, Client, PlatformUser } from "../types";
 import { SEM, inputCls, PAYMENT_METHODS, PM_ICON, PM_COLOR, PLACEHOLDER_IMGS } from "../constants";
@@ -9,6 +9,7 @@ import { buildReceiptHtml, openInvoicePDF, buildInvoiceMessage, agentPrint, prin
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
+import { formatPreciseDateTime, invoicePaidAmount, invoiceRemainingAmount } from "../utils/payments";
 
 // ─── SHARE INVOICE MODAL ──────────────────────────────────────────────────────
 
@@ -191,13 +192,15 @@ function ShareInvoiceModal({ inv, boutique, clients, onClose }: { inv: Invoice; 
 
 // ─── FACTURES VIEW ────────────────────────────────────────────────────────────
 
-export function FacturesView({ boutique, allBoutiques, platformUsers, currentUser, canReturn, onUpdate, onUpdateOtherBoutique, logAction, initialStatus }: {
+export function FacturesView({ boutique, allBoutiques, platformUsers, currentUser, canReturn, onUpdate, onUpdateOtherBoutique, logAction, initialStatus, initialInvoiceId, initialClientId }: {
   boutique: Boutique; allBoutiques: Boutique[]; platformUsers: PlatformUser[]; currentUser: PlatformUser;
   canReturn: boolean;
   onUpdate: (u: Partial<Boutique>) => void;
   onUpdateOtherBoutique: (boutiqueId: string, u: Partial<Boutique>) => void;
   logAction: (action: string, detail: string, icon: string) => void;
   initialStatus?: InvoiceStatus | "all" | "impayé";
+  initialInvoiceId?: string;
+  initialClientId?: number;
 }) {
   const { invoices, clients, products, entries } = boutique;
   const siblings = getSiblings(boutique.id, allBoutiques, platformUsers);
@@ -206,9 +209,6 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
   const [modal,setModal]   = useState(false);
   const [shareInv,setShareInv]   = useState<Invoice|null>(null);
   const [detailInv,setDetailInv] = useState<Invoice|null>(null);
-  const [soldeMode,setSoldeMode] = useState(false);
-  const [soldeAmount,setSoldeAmount] = useState("");
-  const [soldeDone,setSoldeDone] = useState(false);
   const [encaissInv,setEncaissInv] = useState<Invoice|null>(null);
   const [encaissAmt,setEncaissAmt] = useState("");
   const [encaissMethod,setEncaissMethod] = useState<PaymentMethod>("Espèces");
@@ -228,6 +228,23 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
   const [lQty,setLQty]=useState("");
   const [lPrix,setLPrix]=useState("");
   const [lSellUnit,setLSellUnit]=useState(""); // mirrors POS: "Lot" | "Pièce" | baseUnit
+
+  useEffect(() => {
+    if (initialInvoiceId) {
+      const invoice = invoices.find(item => item.id === initialInvoiceId);
+      if (invoice) setDetailInv(invoice);
+      return;
+    }
+    if (initialClientId != null) {
+      const selectedClient = clients.find(item => item.id === initialClientId);
+      if (selectedClient) {
+        setClient(selectedClient.nom);
+        setLines([]);
+        setAcompte("");
+        setModal(true);
+      }
+    }
+  }, [initialClientId, initialInvoiceId]);
 
   // Sell options for the invoice line form — mirrors getSellOptions in POS
   function getInvSellOptions(pid: number): string[] {
@@ -286,17 +303,6 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
   }
   function removeLine(i: number) { setLines(prev=>prev.filter((_,j)=>j!==i)); }
 
-  function submitSolde(inv: Invoice) {
-    const montantSolde = Number(soldeAmount) || 0;
-    if (montantSolde <= 0) return;
-    const reste = inv.montant - inv.acompte;
-    const newAcompte = Math.min(inv.acompte + montantSolde, inv.montant);
-    const newStatus: InvoiceStatus = newAcompte >= inv.montant ? "payé" : "acompte";
-    onUpdate({ invoices: invoices.map(i => i.id === inv.id ? { ...i, acompte: newAcompte, status: newStatus } : i) });
-    logAction("Solde reçu", `${inv.id} · +${fmt(montantSolde)} · reste: ${fmt(Math.max(0, reste - montantSolde))}`, "💰");
-    setSoldeDone(true);
-    setTimeout(() => { setSoldeMode(false); setSoldeAmount(""); setSoldeDone(false); setDetailInv(prev => prev ? { ...prev, acompte: newAcompte, status: newStatus } : null); }, 1200);
-  }
   async function submitEncaiss() {
     if (!encaissInv || submittingPayment) return;
     const montantEncaiss = Number(encaissAmt) || 0;
@@ -312,19 +318,25 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
     }
     const newAcompte = persisted.acompte;
     const newStatus: InvoiceStatus = persisted.status === "payée" ? "payé" : "acompte";
-    const updatedInv: Invoice = { ...encaissInv, acompte: newAcompte, status: newStatus, paymentMethod: encaissMethod };
+    const updatedInv: Invoice = {
+      ...encaissInv,
+      acompte:newAcompte,
+      status:newStatus,
+      paymentMethod:encaissMethod,
+      payments:[...(encaissInv.payments ?? []), {
+        id:persisted.payment.id,
+        amount:persisted.payment.amount,
+        paymentMethod:persisted.payment.payment_method as PaymentMethod,
+        paidAt:persisted.payment.paid_at,
+        operatorId:persisted.payment.operator_id,
+        operatorName:persisted.payment.operator_name,
+        batchId:persisted.payment.batch_id,
+        source:persisted.payment.source,
+      }],
+    };
 
-    // Deduct stock on FIRST encaissement (acompte was 0 before)
-    let updatedEntries = entries;
-    if (encaissInv.acompte === 0 && encaissInv.lines && encaissInv.lines.length > 0) {
-      const saleEntries: StockEntry[] = encaissInv.lines.map((l, i) => ({
-        id: Date.now() + i, productId: l.productId, qty: -l.qty, unit: l.unit,
-        montantDu: 0, date: today(), fournisseur: `Vente → ${encaissInv.client}`, invoiceId: encaissInv.id,
-      }));
-      updatedEntries = [...entries, ...saleEntries];
-    }
-
-    onUpdate({ invoices: invoices.map(i => i.id === encaissInv.id ? updatedInv : i), entries: updatedEntries });
+    // Stock was already deducted atomically by create_sale. Payment must not deduct it again.
+    onUpdate({ invoices: invoices.map(i => i.id === encaissInv.id ? updatedInv : i) });
     logAction("Encaissement", `${encaissInv.id} · +${fmt(montantEncaiss)} · ${encaissMethod}`, "💵");
     setTimeout(() => agentPrint(buildReceiptHtml(updatedInv, boutique, currentUser.nom)), 200);
     setEncaissDone(true);
@@ -358,7 +370,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
     const retInv: Invoice = {
       id: retId, client: returnInv.client, clientTel: returnInv.clientTel,
       lines: returnLines, montant: refundTotal, acompte: refundTotal,
-      date: today(), dateRaw: new Date().toISOString().split("T")[0], status: "payé", type: "Retour",
+      date: today(), dateRaw: new Date().toISOString(), status: "payé", type: "Retour",
       operatorNom: currentUser.nom, operatorColor: currentUser.color,
     };
     // Restore stock
@@ -387,10 +399,32 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
       return;
     }
     const id = persisted.invoice_id;
-    const s: InvoiceStatus = aNum>=montant&&montant>0?"payé":aNum>0?"acompte":status;
+    let initialPayment: Awaited<ReturnType<typeof recordPayment>> | null = null;
+    if (aNum > 0) {
+      try {
+        initialPayment = await recordPayment({ boutiqueId:boutique.id, invoiceId:id, amount:Math.min(aNum,montant), paymentMethod:"Espèces" });
+      } catch (error) {
+        setSubmittingInvoice(false);
+        alert(`La facture ${id} a été créée, mais l'acompte n'a pas pu être enregistré : ${error instanceof Error ? error.message : "erreur inconnue"}`);
+        return;
+      }
+    }
+    const paidAtCreation = initialPayment?.acompte ?? 0;
+    const s: InvoiceStatus = paidAtCreation>=montant&&montant>0?"payé":paidAtCreation>0?"acompte":status;
     // Deduct stock from current boutique
     const saleEntries: StockEntry[] = lines.map((l,i)=>({ id:Date.now()+i, productId:l.productId, qty:-l.qty, unit:l.unit, montantDu:0, date:today(), fournisseur:`Transfert → ${client}` }));
-    const newInv: Invoice = { id, client, clientTel:cTel, lines, montant, acompte:aNum, date:today(), dateRaw:new Date().toISOString().split("T")[0], status:s, type:ct, operatorNom:currentUser.nom, operatorColor:currentUser.color };
+    const selectedClient = clients.find(c=>c.nom===client);
+    const newInv: Invoice = {
+      id, clientId:selectedClient?.id, client, clientTel:cTel, clientType:selectedClient?.type,
+      lines, montant, acompte:paidAtCreation, date:today(), dateRaw:new Date().toISOString(), status:s, type:ct,
+      operatorNom:currentUser.nom, operatorColor:currentUser.color,
+      paymentMethod:initialPayment ? "Espèces" : undefined,
+      payments:initialPayment ? [{
+        id:initialPayment.payment.id, amount:initialPayment.payment.amount, paymentMethod:initialPayment.payment.payment_method as PaymentMethod,
+        paidAt:initialPayment.payment.paid_at, operatorId:initialPayment.payment.operator_id, operatorName:initialPayment.payment.operator_name,
+        batchId:initialPayment.payment.batch_id, source:initialPayment.payment.source,
+      }] : [],
+    };
     onUpdate({ invoices:[...invoices, newInv], entries:[...entries,...saleEntries] });
     // Inter-tenant: add incoming stock entries to sibling boutique
     if (isSiblingTransfer && siblingClient) {
@@ -413,7 +447,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
   }
 
   const UNPAID: InvoiceStatus[] = ["en attente","acompte","en retard"];
-  const filtered = [...invoices].reverse().filter(i=>(statusFilter==="all"||statusFilter==="impayé"?statusFilter==="impayé"?UNPAID.includes(i.status):true:i.status===statusFilter)&&(i.client.toLowerCase().includes(invSearch.toLowerCase())||i.id.toLowerCase().includes(invSearch.toLowerCase())));
+  const filtered = [...invoices].sort((a,b)=>(b.dateRaw??b.date).localeCompare(a.dateRaw??a.date)).filter(i=>(statusFilter==="all"||statusFilter==="impayé"?statusFilter==="impayé"?UNPAID.includes(i.status):true:i.status===statusFilter)&&(i.client.toLowerCase().includes(invSearch.toLowerCase())||i.id.toLowerCase().includes(invSearch.toLowerCase())));
   const pills: Array<{id:InvoiceStatus|"all"|"impayé";label:string;color:string}> = [
     {id:"all",      label:"Tout",     color:SEM.neutral.accent},
     {id:"impayé",   label:"Impayés",  color:SEM.danger.accent},
@@ -435,20 +469,20 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
           const isReturn = inv.type === "Retour";
           return (
             <div key={inv.id} className="bg-card rounded-2xl p-4 border border-border" style={isReturn?{borderColor:"#ef444433"}:{}}>
-              <div className="w-full text-left cursor-pointer" onClick={()=>{ if (!isReturn && inv.status !== "payé") { setEncaissInv(inv); setEncaissAmt(String(inv.montant-inv.acompte)); } else { setDetailInv(inv); } }}>
+              <div className="w-full text-left cursor-pointer" onClick={()=>{ if (!isReturn && inv.status !== "payé") { setEncaissInv(inv); setEncaissAmt(String(invoiceRemainingAmount(inv))); } else { setDetailInv(inv); } }}>
                 <div className="flex items-start justify-between">
                   <div>
                     <div className="flex items-center gap-2">
                       <p className="font-bold text-sm">{inv.client}</p>
                       {isReturn && <span className="text-xs px-1.5 py-0.5 rounded font-bold flex items-center gap-1" style={{ background:SEM.danger.bg, color:SEM.danger.text }}><RotateCcw size={9}/> Retour</span>}
                     </div>
-                    <p className="text-xs text-muted-foreground mt-0.5">{inv.id} · {inv.date} · {inv.type}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">{inv.id} · {formatPreciseDateTime(inv.dateRaw)} · {inv.type}</p>
                     {inv.lines&&inv.lines.length>0&&<p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1"><ShoppingCart size={10}/> {inv.lines.length} produit{inv.lines.length>1?"s":""}</p>}
                   </div>
                   <div className="flex items-center gap-2 ml-3">
                     <div className="text-right"><p className="text-base font-black" style={{ fontFamily:"'Nunito', sans-serif" }}>{fmt(inv.montant)}</p><span className="text-xs px-2 py-0.5 rounded-full font-bold capitalize inline-block mt-0.5" style={{ background:bc,color:tc }}>{inv.status}</span></div>
                     {!isReturn && inv.status !== "payé" && (
-                      <button onClick={e=>{e.stopPropagation();setEncaissInv(inv);setEncaissAmt(String(inv.montant-inv.acompte));}} className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background:SEM.success.bg }} title="Encaisser">
+                      <button onClick={e=>{e.stopPropagation();setEncaissInv(inv);setEncaissAmt(String(invoiceRemainingAmount(inv)));}} className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background:SEM.success.bg }} title="Encaisser">
                         <Wallet size={15} style={{ color:SEM.success.text }}/>
                       </button>
                     )}
@@ -457,7 +491,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
                     </button>
                   </div>
                 </div>
-                {inv.acompte>0&&inv.acompte<inv.montant&&<p className="text-xs text-muted-foreground mt-2">Acompte versé : <span className="font-semibold text-foreground">{fmt(inv.acompte)}</span></p>}
+                {invoicePaidAmount(inv)>0&&invoiceRemainingAmount(inv)>0&&<p className="text-xs text-muted-foreground mt-2">Acompte versé : <span className="font-semibold text-foreground">{fmt(invoicePaidAmount(inv))}</span></p>}
               </div>
             </div>
           );
@@ -465,7 +499,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
       </div>
 
       {/* Invoice detail modal */}
-      {detailInv&&<Modal title={detailInv.id} color="#374151" onClose={()=>{ setDetailInv(null); setSoldeMode(false); setSoldeAmount(""); setSoldeDone(false); }}>
+      {detailInv&&<Modal title={detailInv.id} color="#374151" onClose={()=>setDetailInv(null)}>
         <div className="flex items-start justify-between">
           <div>
             <p className="font-bold">{detailInv.client}</p>
@@ -503,82 +537,37 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
           <div className="space-y-2">
             <div className="flex justify-between bg-muted rounded-xl px-4 py-3">
               <span className="text-sm text-muted-foreground">Acompte versé</span>
-              <span className="text-sm font-bold" style={{ color:"#C9A227" }}>{fmt(detailInv.acompte)}</span>
+              <span className="text-sm font-bold" style={{ color:"#C9A227" }}>{fmt(invoicePaidAmount(detailInv))}</span>
             </div>
             <div className="flex justify-between bg-muted rounded-xl px-4 py-3">
               <span className="text-sm text-muted-foreground">Reste à payer</span>
-              <span className="text-sm font-bold" style={{ color:detailInv.montant-detailInv.acompte>0?SEM.danger.accent:SEM.success.accent }}>{fmt(Math.max(0,detailInv.montant-detailInv.acompte))}</span>
+              <span className="text-sm font-bold" style={{ color:invoiceRemainingAmount(detailInv)>0?SEM.danger.accent:SEM.success.accent }}>{fmt(invoiceRemainingAmount(detailInv))}</span>
             </div>
           </div>
           <div className="mt-2 h-2 bg-muted rounded-full overflow-hidden">
-            <div className="h-full rounded-full" style={{ width:`${detailInv.montant>0?Math.round(detailInv.acompte/detailInv.montant*100):0}%`, background:invBadge(detailInv.status)[0] }}/>
+            <div className="h-full rounded-full" style={{ width:`${detailInv.montant>0?Math.round(invoicePaidAmount(detailInv)/detailInv.montant*100):0}%`, background:invBadge(detailInv.status)[0] }}/>
           </div>
         </div>
 
-        {/* Solde section — only for acompte / en attente / en retard */}
+        {(detailInv.payments?.length ?? 0)>0&&<div>
+          <p className="text-xs font-black tracking-wider text-muted-foreground mb-2">HISTORIQUE DES ENCAISSEMENTS</p>
+          <div className="space-y-2">{detailInv.payments!.map(payment=><div key={payment.id} className="bg-muted rounded-xl px-3 py-2.5 flex items-center justify-between gap-3">
+            <div className="min-w-0"><p className="text-xs font-bold">{payment.paymentMethod} · {formatPreciseDateTime(payment.paidAt)}</p><p className="text-xs text-muted-foreground truncate">Caissier : {payment.operatorName}</p></div>
+            <p className="text-sm font-black" style={{color:SEM.success.accent}}>{fmt(payment.amount)}</p>
+          </div>)}</div>
+        </div>}
+
+        {/* All payments use the same transactional RPC and cashier trace. */}
         {detailInv.status !== "payé" && (
-          <div>
-            {!soldeMode ? (
-              <button onClick={()=>{ setSoldeMode(true); setSoldeAmount(String(detailInv.montant - detailInv.acompte)); }}
-                className="w-full py-4 rounded-2xl font-black text-base flex items-center justify-center gap-2 active:scale-95"
-                style={{ background:SEM.success.accent, color:"#fff", fontFamily:"'Nunito', sans-serif" }}>
-                <CreditCard size={18}/> Enregistrer un paiement
-              </button>
-            ) : soldeDone ? (
-              <div className="flex items-center justify-center gap-3 py-4 rounded-2xl" style={{ background:SEM.success.bg }}>
-                <CheckCircle size={22} style={{ color:SEM.success.accent }}/>
-                <p className="font-black text-sm" style={{ color:SEM.success.accent, fontFamily:"'Nunito', sans-serif" }}>Paiement enregistré ✓</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-black tracking-wider" style={{ color:SEM.success.accent }}>MONTANT REÇU (F CFA)</p>
-                  <button onClick={()=>setSoldeMode(false)} className="text-xs text-muted-foreground underline">Annuler</button>
-                </div>
-                {/* Quick amount buttons */}
-                <div className="flex gap-2">
-                  {[
-                    { label:"Solde total", val: detailInv.montant - detailInv.acompte },
-                    { label:"50%", val: Math.round((detailInv.montant - detailInv.acompte) * 0.5) },
-                  ].map(opt=>(
-                    <button key={opt.label} onClick={()=>setSoldeAmount(String(opt.val))}
-                      className="flex-1 py-2.5 rounded-xl text-xs font-bold"
-                      style={{ background:Number(soldeAmount)===opt.val?SEM.success.accent:SEM.success.bg, color:Number(soldeAmount)===opt.val?"#fff":SEM.success.accent }}>
-                      {opt.label}<br/><span className="opacity-80">{fmt(opt.val)}</span>
-                    </button>
-                  ))}
-                </div>
-                <div className="relative">
-                  <input
-                    value={soldeAmount}
-                    onChange={e=>setSoldeAmount(e.target.value)}
-                    placeholder="Montant personnalisé"
-                    type="number"
-                    className={inputCls}
-                    autoFocus
-                    onKeyDown={e=>e.key==="Enter"&&submitSolde(detailInv)}
-                  />
-                </div>
-                {Number(soldeAmount)>0&&(
-                  <div className="flex justify-between text-xs px-1">
-                    <span className="text-muted-foreground">Nouveau reste :</span>
-                    <span className="font-bold" style={{ color: Math.max(0, detailInv.montant - detailInv.acompte - Number(soldeAmount)) === 0 ? SEM.success.accent : SEM.warning.accent }}>
-                      {fmt(Math.max(0, detailInv.montant - detailInv.acompte - Number(soldeAmount)))}
-                    </span>
-                  </div>
-                )}
-                <button onClick={()=>submitSolde(detailInv)} disabled={!Number(soldeAmount)||Number(soldeAmount)<=0}
-                  className="w-full py-4 rounded-2xl font-black text-base active:scale-95"
-                  style={{ background:Number(soldeAmount)>0?SEM.success.accent:"#c7bfa0", color:"#fff", fontFamily:"'Nunito', sans-serif", opacity:Number(soldeAmount)>0?1:0.5 }}>
-                  ✓ Confirmer {Number(soldeAmount)>0?fmt(Number(soldeAmount)):""}
-                </button>
-              </div>
-            )}
-          </div>
+          <button onClick={()=>{setEncaissInv(detailInv);setEncaissAmt(String(invoiceRemainingAmount(detailInv)));setDetailInv(null);}}
+            className="w-full py-4 rounded-2xl font-black text-base flex items-center justify-center gap-2 active:scale-95"
+            style={{ background:SEM.success.accent, color:"#fff", fontFamily:"'Nunito', sans-serif" }}>
+            <CreditCard size={18}/> Enregistrer un paiement
+          </button>
         )}
 
         <div className="flex gap-2">
-          <button onClick={()=>{setDetailInv(null);setSoldeMode(false);setSoldeAmount("");setShareInv(detailInv);}} className="flex-1 py-3.5 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 active:scale-95" style={{ background:"#a855f722", color:"#a855f7" }}>
+          <button onClick={()=>{setDetailInv(null);setShareInv(detailInv);}} className="flex-1 py-3.5 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 active:scale-95" style={{ background:"#a855f722", color:"#a855f7" }}>
             <Send size={16}/> Envoyer
           </button>
           <button onClick={()=>{ if(detailInv) openInvoicePDF(detailInv, boutique, clients); }} className="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 active:scale-95" style={{ background:"#37415115", color:"#374151" }} title="Aperçu PDF">
@@ -742,11 +731,11 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
             </div>
             <div className="flex justify-between items-baseline mt-1">
               <span className="text-xs text-muted-foreground">Déjà encaissé</span>
-              <span className="font-bold text-sm" style={{color:SEM.success.accent}}>{fmt(encaissInv.acompte)}</span>
+              <span className="font-bold text-sm" style={{color:SEM.success.accent}}>{fmt(invoicePaidAmount(encaissInv))}</span>
             </div>
             <div className="flex justify-between items-baseline mt-1 pt-2 border-t border-border">
               <span className="text-xs font-bold">Reste dû</span>
-              <span className="font-black text-base" style={{color:"#ef4444",fontFamily:"'Nunito',sans-serif"}}>{fmt(encaissInv.montant - encaissInv.acompte)}</span>
+              <span className="font-black text-base" style={{color:"#ef4444",fontFamily:"'Nunito',sans-serif"}}>{fmt(invoiceRemainingAmount(encaissInv))}</span>
             </div>
           </div>
           <Field label="MODE DE PAIEMENT">
@@ -764,8 +753,8 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
             <input value={encaissAmt} onChange={e=>setEncaissAmt(e.target.value)} onKeyDown={e=>e.key==="Enter"&&Number(encaissAmt)>0&&submitEncaiss()} type="number" placeholder="0" className={inputCls+" text-center font-black text-lg"} autoFocus/>
           </Field>
           <div className="flex gap-2">
-            <button type="button" onClick={()=>setEncaissAmt(String(encaissInv.montant-encaissInv.acompte))} className="flex-1 py-2.5 rounded-xl text-xs font-bold" style={{background:SEM.success.bg,color:SEM.success.accent}}>Solde total</button>
-            <button type="button" onClick={()=>setEncaissAmt(String(Math.round((encaissInv.montant-encaissInv.acompte)/2)))} className="flex-1 py-2.5 rounded-xl text-xs font-bold" style={{background:"#C9A22722",color:"#C9A227"}}>50%</button>
+            <button type="button" onClick={()=>setEncaissAmt(String(invoiceRemainingAmount(encaissInv)))} className="flex-1 py-2.5 rounded-xl text-xs font-bold" style={{background:SEM.success.bg,color:SEM.success.accent}}>Solde total</button>
+            <button type="button" onClick={()=>setEncaissAmt(String(Math.round(invoiceRemainingAmount(encaissInv)/2)))} className="flex-1 py-2.5 rounded-xl text-xs font-bold" style={{background:"#C9A22722",color:"#C9A227"}}>50%</button>
           </div>
           {encaissDone ? (
             <div className="flex items-center justify-center gap-3 py-4 rounded-2xl" style={{background:SEM.success.bg}}>

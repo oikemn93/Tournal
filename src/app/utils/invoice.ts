@@ -4,6 +4,7 @@ import type { Invoice, Boutique, Client, CaisseSession } from "../types";
 import { lineDispQty, lineDispUnit, lineTotal } from "./inventory";
 import { PAYMENT_METHODS, PM_ICON } from "../constants";
 import { fmt } from "./formatting";
+import { invoicePaymentEvents } from "./payments";
 
 // ─── INVOICE MESSAGE ──────────────────────────────────────────────────────────
 
@@ -311,15 +312,15 @@ export function buildReceiptHtml(inv: Invoice, boutique: Boutique, fallbackOpera
 <title>Ticket ${inv.id}</title>
 <style>
   @page { size: 80mm auto; margin: 4mm 4mm 8mm 4mm; }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+  * { margin: 0; padding: 0; box-sizing: border-box; color: #000 !important; }
   html, body { width: 72mm; font-family: 'Courier New', Courier, monospace; font-size: 9pt; line-height: 1.45; color: #000; background: #fff; }
   .center { text-align: center; }
   .right  { text-align: right; }
   .bold   { font-weight: 700; }
   .big    { font-size: 13pt; letter-spacing: 1.5px; }
-  .small  { font-size: 7.5pt; color: #444; }
+  .small  { font-size: 7.5pt; color: #000; }
   .sep-solid { border-top: 1px solid #000; margin: 3mm 0; }
-  .sep-dash  { border-top: 1px dashed #555; margin: 2.5mm 0; }
+  .sep-dash  { border-top: 1px dashed #000; margin: 2.5mm 0; }
   pre { font-family: inherit; font-size: inherit; white-space: pre-wrap; word-break: break-all; }
   .row { display: flex; justify-content: space-between; margin: 0.8mm 0; }
   .row .label { flex: 1; }
@@ -327,7 +328,7 @@ export function buildReceiptHtml(inv: Invoice, boutique: Boutique, fallbackOpera
   .total-block { margin: 2mm 0; padding: 1.5mm 0; border-top: 2px solid #000; border-bottom: 2px solid #000; }
   .total-block .row .value { font-size: 11pt; }
   .status { display: inline-block; border: 1px solid currentColor; border-radius: 2mm; padding: 0.5mm 2mm; font-size: 8pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
-  .footer { font-size: 7.5pt; color: #555; text-align: center; margin-top: 3mm; }
+  .footer { font-size: 7.5pt; color: #000; text-align: center; margin-top: 3mm; }
 </style>
 </head><body>
 <div class="center">
@@ -369,11 +370,11 @@ ${lines.map(l => `
   </div>
   <div class="row">
     <span class="label">Reste à payer</span>
-    <span class="value" style="color:${reste > 0 ? "#c00" : "#000"};">${fnum(reste)}&nbsp;F</span>
+    <span class="value">${fnum(reste)}&nbsp;F</span>
   </div>
   ${inv.paymentMethod ? `<div class="row"><span class="label">Mode de paiement</span><span class="value">${inv.paymentMethod}</span></div>` : ""}
   <div style="text-align:right;margin-top:1.5mm;">
-    <span class="status" style="color:${reste > 0 ? "#c00" : "#000"};">${inv.status.toUpperCase()}</span>
+    <span class="status">${inv.status.toUpperCase()}</span>
   </div>
 </div>
 <div class="sep-solid"></div>
@@ -399,19 +400,19 @@ export function buildOrderTicketHtml(inv: Invoice, boutique: Boutique, operatorN
 <title>Bon ${inv.id}</title>
 <style>
   @page { size: 80mm auto; margin: 4mm 4mm 8mm 4mm; }
-  * { margin:0; padding:0; box-sizing:border-box; }
+  * { margin:0; padding:0; box-sizing:border-box; color:#000 !important; }
   html, body { width:72mm; font-family:'Courier New',Courier,monospace; font-size:9pt; line-height:1.45; color:#000; background:#fff; }
-  .center{text-align:center}.bold{font-weight:700}.big{font-size:13pt;letter-spacing:1.5px}.small{font-size:7.5pt;color:#444}
-  .sep-solid{border-top:1px solid #000;margin:3mm 0}.sep-dash{border-top:1px dashed #555;margin:2.5mm 0}
+  .center{text-align:center}.bold{font-weight:700}.big{font-size:13pt;letter-spacing:1.5px}.small{font-size:7.5pt;color:#000}
+  .sep-solid{border-top:1px solid #000;margin:3mm 0}.sep-dash{border-top:1px dashed #000;margin:2.5mm 0}
   .row{display:flex;justify-content:space-between;margin:0.8mm 0}.row .value{font-weight:700;text-align:right;padding-left:2mm}
   .total-block{margin:2mm 0;padding:1.5mm 0;border-top:2px solid #000;border-bottom:2px solid #000}.total-block .value{font-size:11pt}
   .alert{text-align:center;border:1.5px solid #000;border-radius:1.5mm;padding:2mm;margin:2.5mm 0;font-weight:700;font-size:8pt;letter-spacing:0.5px}
-  .footer{font-size:7.5pt;color:#555;text-align:center;margin-top:3mm}
+  .footer{font-size:7.5pt;color:#000;text-align:center;margin-top:3mm}
 </style></head><body>
 <div class="center"><div class="bold big">${boutique.nom.toUpperCase()}</div><div class="small">${boutique.ville}</div>${boutique.adresse ? `<div class="small">${boutique.adresse}</div>` : ""}${boutique.tel ? `<div class="small">Tél: ${boutique.tel}</div>` : ""}${boutique.email ? `<div class="small">${boutique.email}</div>` : ""}</div>
 <div class="sep-solid"></div>
 <div class="center bold" style="font-size:10pt;">BON DE COMMANDE</div>
-${isDuplicate ? '<div class="center bold" style="font-size:9pt;letter-spacing:2px;border:1.5px solid #c00;color:#c00;padding:1.5mm 3mm;margin:2mm 0;">DUPLICATA</div>' : ""}
+${isDuplicate ? '<div class="center bold" style="font-size:9pt;letter-spacing:2px;border:1.5px solid #000;padding:1.5mm 3mm;margin:2mm 0;">DUPLICATA</div>' : ""}
 <div class="row"><span>N°</span><span class="value">${inv.id}</span></div>
 <div class="row"><span>Date</span><span class="value">${now.toLocaleDateString("fr-FR")} ${now.toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"})}</span></div>
 <div class="row"><span>Client</span><span class="value">${inv.client}${inv.clientTel?" · "+inv.clientTel:""}</span></div>
@@ -434,19 +435,19 @@ export function printOrderTicket(inv: Invoice, boutique: Boutique, operatorNom: 
 
 export function printCaisseReport(session: CaisseSession, boutique: Boutique, invoices: Invoice[]) {
   const todayStr = new Date().toISOString().split("T")[0];
-  const todayPaid = invoices.filter(i => i.dateRaw === todayStr && i.acompte > 0);
+  const todayPaid = invoicePaymentEvents(invoices).filter(payment => payment.paidAt.slice(0,10) === todayStr);
   const byMethod = PAYMENT_METHODS.map(m => ({
-    m, total: todayPaid.filter(i => i.paymentMethod === m).reduce((s, i) => s + i.acompte, 0),
-    count: todayPaid.filter(i => i.paymentMethod === m).length,
+    m, total: todayPaid.filter(payment => payment.paymentMethod === m).reduce((sum, payment) => sum + payment.signedAmount, 0),
+    count: todayPaid.filter(payment => payment.paymentMethod === m).length,
   }));
-  const totalEnc = todayPaid.reduce((s, i) => s + i.acompte, 0);
+  const totalEnc = todayPaid.reduce((sum, payment) => sum + payment.signedAmount, 0);
   const totalCaisse = session.fondDeCaisse + byMethod.find(b => b.m === "Espèces")!.total;
   const now = new Date();
   const fnum = (n: number) => n.toLocaleString("fr-FR");
   const pad = (l: string, r: string, t = 32) => l + " ".repeat(Math.max(1, t - l.length - r.length)) + r;
   const rows = byMethod.filter(b => b.count > 0).map(b => `<div>${pad(`${PM_ICON[b.m]} ${b.m} (${b.count})`, fnum(b.total) + " F")}</div>`).join("");
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Fermeture caisse</title>
-<style>body{font-family:'Courier New',monospace;font-size:12px;padding:4mm 6mm;max-width:80mm;margin:0 auto;line-height:1.6}.center{text-align:center}.bold{font-weight:900}.sep{border:none;border-top:1px dashed #000;margin:4px 0}.pre{white-space:pre-wrap}</style></head>
+<style>*{color:#000!important}body{font-family:'Courier New',monospace;font-size:12px;padding:4mm 6mm;max-width:80mm;margin:0 auto;line-height:1.6;color:#000}.center{text-align:center}.bold{font-weight:900}.sep{border:none;border-top:1px dashed #000;margin:4px 0}.pre{white-space:pre-wrap}</style></head>
 <body>
 <div class="center bold">${boutique.nom}</div>
 <div class="center">RAPPORT DE FERMETURE DE CAISSE</div>
@@ -463,7 +464,7 @@ export function printCaisseReport(session: CaisseSession, boutique: Boutique, in
 <div class="pre bold">${pad("TOTAL ENCAISSÉ", fnum(totalEnc) + " F")}</div>
 <div class="pre bold">${pad("TOTAL EN CAISSE (espèces)", fnum(totalCaisse) + " F")}</div>
 <hr class="sep"/>
-<div>Transactions : ${todayPaid.length}</div>
+<div>Transactions : ${new Set(todayPaid.map(payment => payment.invoiceId)).size}</div>
 </body></html>`;
   silentPrint(html);
 }

@@ -21,6 +21,7 @@ import { ClientsView as RelationalClientsView } from "./screens/ClientsView";
 import { FournisseursView as RelationalFournisseursView } from "./screens/FournisseursView";
 import { ChargesView as RelationalChargesView } from "./screens/ChargesView";
 import { ComptabiliteView as RelationalComptabiliteView } from "./screens/RapportView";
+import { filterPaymentEventsByPeriod, invoicePaymentEvents, invoiceRemainingAmount } from "./utils/payments";
 
 const ReadOnlyCtx = React.createContext(false);
 const useReadOnly = () => React.useContext(ReadOnlyCtx);
@@ -87,7 +88,8 @@ type StockEntry = { id: number; productId: number; qty: number; unit: string; mo
 type Supplier   = { id: number; nom: string; ville: string; lastDelivery: string; tel: string; initials: string; color: string; email?: string; contact?: string };
 type Client     = { id: number; nom: string; type: ClientType; tel: string; total: number; last: string; ville: string; adresse?: string; email?: string; contact?: string };
 type PaymentEntry = { method: PaymentMethod; amount: number };
-type Invoice    = { id: string; client: string; clientTel?: string; lines?: InvoiceLine[]; montant: number; acompte: number; date: string; dateRaw?: string; status: InvoiceStatus; type: string; operatorNom?: string; operatorColor?: string; paymentMethod?: PaymentMethod; paymentSplit?: PaymentEntry[] };
+type InvoicePayment = { id:number; amount:number; paymentMethod:PaymentMethod; paidAt:string; recordedAt?:string; operatorId?:string; operatorName:string; batchId:string; source:"invoice"|"client_fifo"|"legacy_backfill" };
+type Invoice    = { id: string; clientId?:number; client: string; clientTel?: string; clientType?:ClientType; lines?: InvoiceLine[]; payments?:InvoicePayment[]; montant: number; acompte: number; date: string; dateRaw?: string; status: InvoiceStatus; type: string; operatorNom?: string; operatorColor?: string; paymentMethod?: PaymentMethod; paymentSplit?: PaymentEntry[] };
 type ProductParam = { productId: number; nbPiecesParLot: number; longueurParPiece: number; unitVente: string };
 type Category   = { id: string; nom: string; unitVente: string; nbPiecesParLot: number; longueurParPiece: number };
 type TransferItem = { productId: number; nom: string; qty: number; unit: string; montantDu: number; img?: string; prixCession?: number; remise?: number; nbLots?: number; nbPieces?: number };
@@ -2196,6 +2198,9 @@ function DashboardView({ boutique, onNavigate }: { boutique: Boutique; onNavigat
   const [customTo, setCustomTo] = useState("");
 
   const filtInv = filterByPeriod(invoices, period, customFrom, customTo);
+  const paymentEvents = invoicePaymentEvents(invoices);
+  const filtPayments = filterPaymentEventsByPeriod(invoices, period, customFrom, customTo)
+    .filter(payment => payment.invoiceType !== "Transfert interne" && payment.invoiceType !== "B2B Achat");
   const filtCh  = filterByPeriod(charges, period, customFrom, customTo);
 
   // ── Robust date parser ────────────────────────────────────────────────────────
@@ -2231,6 +2236,18 @@ function DashboardView({ boutique, onNavigate }: { boutique: Boutique; onNavigat
     }
     return [];
   })();
+  const prevPayments = (() => {
+    const now = new Date();
+    return paymentEvents.filter(payment => {
+      if (payment.invoiceType === "Transfert interne" || payment.invoiceType === "B2B Achat") return false;
+      const d = new Date(payment.paidAt);
+      if (period === "jour") { const y=new Date(now); y.setDate(now.getDate()-1); return d.toDateString()===y.toDateString(); }
+      if (period === "semaine") { const w0=new Date(now); w0.setDate(now.getDate()-14); const w1=new Date(now); w1.setDate(now.getDate()-7); return d>=w0&&d<w1; }
+      if (period === "mois") { const pm=now.getMonth()===0?11:now.getMonth()-1; const py=now.getMonth()===0?now.getFullYear()-1:now.getFullYear(); return d.getMonth()===pm&&d.getFullYear()===py; }
+      if (period === "annee") return d.getFullYear()===now.getFullYear()-1;
+      return false;
+    });
+  })();
   function trend(curr: number, prev: number): { delta: number; pct: string; up: boolean } | null {
     if (prev === 0) return null;
     const delta = curr - prev;
@@ -2239,19 +2256,19 @@ function DashboardView({ boutique, onNavigate }: { boutique: Boutique; onNavigat
   }
 
   const caInv       = filtInv.filter(i => i.type !== "Transfert interne" && i.type !== "B2B Achat");
-  const ca          = caInv.reduce((s,i) => s + signedInvoicePaid(i), 0); // encaissé réel, retours déduits
+  const ca          = filtPayments.reduce((sum,payment) => sum + payment.signedAmount, 0);
   const caTotal     = caInv.reduce((s,i) => s + signedInvoiceAmount(i), 0);
   // B2B debt charges count only their paid portion (acompte); regular charges count fully
   const totalCharges= filtCh.reduce((s,c) => s + (c.isB2BDebt ? (c.acompte ?? 0) : c.montant), 0);
   const margeBrute  = ca - totalCharges;
-  const prevCa      = prevInv.filter(i => i.type !== "Transfert interne" && i.type !== "B2B Achat").reduce((s,i) => s + signedInvoicePaid(i), 0);
+  const prevCa      = prevPayments.reduce((sum,payment) => sum + payment.signedAmount, 0);
   const prevTotal   = prevInv.filter(i => i.type !== "Transfert interne" && i.type !== "B2B Achat").reduce((s,i) => s + signedInvoiceAmount(i), 0);
   const trendCa     = trend(ca, prevCa);
   const trendTotal  = trend(caTotal, prevTotal);
   const margeNette  = margeBrute; // can extend with taxes
   const tauxMarge   = ca > 0 ? Math.round((margeBrute/ca)*100) : 0;
   const impayées    = caInv.filter(i=>i.status!=="payé");
-  const totalImpayé = impayées.reduce((s,i)=>s+(i.montant-i.acompte),0);
+  const totalImpayé = impayées.reduce((s,i)=>s+invoiceRemainingAmount(i),0);
   const totalQty    = products.reduce((s,p)=>s+productQty(p.id,entries),0);
   const rupture     = products.filter(p=>productQty(p.id,entries)<=0).length;
   const grossistes  = clients.filter(c=>c.type==="Grossiste").length;
@@ -2268,13 +2285,10 @@ function DashboardView({ boutique, onNavigate }: { boutique: Boutique; onNavigat
       // Dynamic: sum encaissé by month for current year
       const now = new Date();
       const MONTHS = ["Jan","Fév","Mar","Avr","Mai","Jun","Jul","Aoû","Sep","Oct","Nov","Déc"];
-      const yearInv = invoices.filter(inv => {
-        const d = parseInvDate(inv);
-        return !isNaN(d.getTime()) && d.getFullYear() === now.getFullYear();
-      });
+      const yearPayments = paymentEvents.filter(payment => new Date(payment.paidAt).getFullYear() === now.getFullYear());
       return MONTHS.map((m, idx) => ({
         m,
-        v: Math.round(yearInv.filter(inv => parseInvDate(inv).getMonth() === idx).reduce((s,inv)=>s+signedInvoicePaid(inv),0) / 1000)
+        v: Math.round(yearPayments.filter(payment => new Date(payment.paidAt).getMonth() === idx).reduce((sum,payment)=>sum+payment.signedAmount,0) / 1000)
       }));
     }
     // group by day of week for semaine (robust parsing)
@@ -2282,12 +2296,12 @@ function DashboardView({ boutique, onNavigate }: { boutique: Boutique; onNavigat
       const days = ["Lun","Mar","Mer","Jeu","Ven","Sam","Dim"];
       return days.map((d,i) => ({
         m: d,
-        v: Math.round(caInv.filter(inv => (parseInvDate(inv).getDay()+6)%7 === i).reduce((s,inv)=>s+signedInvoicePaid(inv),0) / 1000)
+        v: Math.round(filtPayments.filter(payment => (new Date(payment.paidAt).getDay()+6)%7 === i).reduce((sum,payment)=>sum+payment.signedAmount,0) / 1000)
       }));
     }
     // group by date for mois/jour/custom
     const map = new Map<string,number>();
-    caInv.forEach(inv => { const k = inv.date.split(" · ")[0]; map.set(k,(map.get(k)??0)+inv.acompte); });
+    filtPayments.forEach(payment => { const k = new Date(payment.paidAt).toLocaleDateString("fr-FR"); map.set(k,(map.get(k)??0)+payment.signedAmount); });
     return Array.from(map.entries()).slice(-10).map(([m,v])=>({ m, v:Math.round(v/1000) }));
   })();
 
@@ -2327,8 +2341,8 @@ function DashboardView({ boutique, onNavigate }: { boutique: Boutique; onNavigat
         </div>
         <div className="grid grid-cols-3 gap-2">
           {[
-            {label:"CA Encaissé", value:ca, color:"#1f2937", t:trendCa},
-            {label:"CA Facturé",  value:caTotal, color:"#475569", t:trendTotal},
+            {label:"CA encaissé · paiements", value:ca, color:"#1f2937", t:trendCa},
+            {label:"CA facturé · factures",  value:caTotal, color:"#475569", t:trendTotal},
             {label:"Marge nette", value:margeBrute, color:margeBrute>=0?SEM.success.accent:SEM.danger.accent, t:null},
           ].map(m=>(
             <div key={m.label} className="rounded-xl p-2.5 text-center" style={{background:m.color+"11"}}>
@@ -9085,8 +9099,8 @@ export default function App() {
         {safeTab==="dashboard"    && canAccess("dashboard") && <DashboardView boutique={boutique} onNavigate={(t,f)=>{setNavFilter(f??{});setTab(t);}}/>}
         {safeTab==="stock"        && canAccess("stock")        && <RelationalStockView boutique={boutique} onUpdate={updateBoutique} logAction={logAction} initialFilter={navFilter.stockFilter}/>}
         {safeTab==="fournisseurs" && canAccess("fournisseurs") && <RelationalFournisseursView boutique={boutique} onUpdate={updateBoutique} logAction={logAction}/>}
-        {safeTab==="clients"      && canAccess("clients")      && <RelationalClientsView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} currentUser={currentUser!} onUpdate={updateBoutique} logAction={logAction} initialTab={navFilter.clientTab as ClientType|undefined}/>}
-        {safeTab==="factures"     && canAccess("factures")     && <RelationalFacturesView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} currentUser={currentUser} canReturn={canAccess("remboursement")} onUpdate={updateBoutique} onUpdateOtherBoutique={updateOtherBoutique} logAction={logAction} initialStatus={navFilter.statusFilter as InvoiceStatus|"all"|undefined}/>}
+        {safeTab==="clients"      && canAccess("clients")      && <RelationalClientsView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} currentUser={currentUser!} onUpdate={updateBoutique} logAction={logAction} initialTab={navFilter.clientTab as ClientType|undefined} onOpenInvoice={(invoiceId)=>{setNavFilter({invoiceId});setTab("factures");}} onCreateInvoice={(client)=>{setNavFilter({clientId:String(client.id)});setTab("factures");}}/>}
+        {safeTab==="factures"     && canAccess("factures")     && <RelationalFacturesView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} currentUser={currentUser} canReturn={canAccess("remboursement")} onUpdate={updateBoutique} onUpdateOtherBoutique={updateOtherBoutique} logAction={logAction} initialStatus={navFilter.statusFilter as InvoiceStatus|"all"|undefined} initialInvoiceId={navFilter.invoiceId} initialClientId={navFilter.clientId?Number(navFilter.clientId):undefined}/>}
         {safeTab==="pos"          && canAccess("vente")        && <RelationalPOSView boutique={boutique} allBoutiques={boutiques} currentUser={currentUser} onUpdate={updateBoutique} logAction={logAction}/>}
         {safeTab==="charges"      && canAccess("charges")      && <RelationalChargesView boutique={boutique} onUpdate={updateBoutique} logAction={logAction}/>}
         {safeTab==="compta"       && canAccess("compta")       && <RelationalComptabiliteView boutique={boutique}/>}

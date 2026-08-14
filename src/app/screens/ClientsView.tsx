@@ -1,6 +1,6 @@
 import React, { useState } from "react";
-import { Search, MapPin, Phone, Lock, Store, ChevronRight, Plus, ArrowLeft } from "lucide-react";
-import type { Boutique, Client, ClientType, PlatformUser } from "../types";
+import { Search, MapPin, Phone, Lock, Store, ChevronRight, Plus, ArrowLeft, FilePlus2, Wallet, CheckCircle } from "lucide-react";
+import type { Boutique, Client, ClientType, Invoice, PaymentMethod, PlatformUser } from "../types";
 import { SEM, inputCls } from "../constants";
 import { fmt, today, ini } from "../utils/formatting";
 import { invBadge } from "../utils/inventory";
@@ -9,15 +9,18 @@ import { getSiblings } from "../utils/inventory";
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
-import { createClient } from "../../lib/api";
+import { createClient, recordClientPayment } from "../../lib/api";
 import { PhoneField } from "../components/PhoneField";
+import { formatPreciseDateTime, invoicePaidAmount, invoiceRemainingAmount } from "../utils/payments";
 
-export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser, onUpdate, logAction, initialTab }: {
+export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser, onUpdate, logAction, initialTab, onOpenInvoice, onCreateInvoice }: {
   boutique: Boutique; allBoutiques: Boutique[]; platformUsers: PlatformUser[];
   currentUser: PlatformUser;
   onUpdate: (u: Partial<Boutique>) => void;
   logAction: (action: string, detail: string, icon: string) => void;
   initialTab?: ClientType;
+  onOpenInvoice: (invoiceId: string) => void;
+  onCreateInvoice: (client: Client) => void;
 }) {
   const { clients } = boutique;
   const canCreateB2B = currentUser.isSuperAdmin;
@@ -40,6 +43,12 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
     setNom(""); setDialCode("+221"); setTel(""); setVille(""); setAdresse(""); setEmail(""); setContact(""); setModal(false);
   }
   const [detailClient, setDetailClient] = useState<Client|null>(null);
+  const [paymentModal, setPaymentModal] = useState(false);
+  const [paymentAmount, setPaymentAmount] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("Espèces");
+  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
+  const [submittingPayment, setSubmittingPayment] = useState(false);
+  const [paymentDone, setPaymentDone] = useState(false);
   const tabDefs: Array<{id:ClientType;label:string;color:string}> = [
     {id:"B2C",      label:"👤 Particuliers", color:"#374151"},
     {id:"B2B",      label:"🏢 Entreprises",  color:"#0e7490"},
@@ -51,11 +60,16 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
   if (detailClient) {
     const c = detailClient;
     const CC = clientColor(c.type);
-    const clientInvoices = boutique.invoices.filter(inv => inv.client === c.nom).sort((a,b)=>(b.dateRaw??b.date).localeCompare(a.dateRaw??a.date));
+    const normalizedPhone = (value?: string) => (value ?? "").replace(/\D/g, "");
+    const clientInvoices = boutique.invoices.filter(inv =>
+      inv.clientId === c.id
+      || (normalizedPhone(c.tel) && normalizedPhone(inv.clientTel) === normalizedPhone(c.tel))
+      || inv.client.trim().toLowerCase() === c.nom.trim().toLowerCase()
+    ).sort((a,b)=>(b.dateRaw??b.date).localeCompare(a.dateRaw??a.date));
     const totalFacturé  = clientInvoices.reduce((s,i)=>s+i.montant,0);
-    const totalEncaissé = clientInvoices.reduce((s,i)=>s+i.acompte,0);
-    const totalImpayé   = totalFacturé - totalEncaissé;
-    const nbVentes = clientInvoices.filter(i=>i.acompte>0).length;
+    const totalEncaissé = clientInvoices.reduce((s,i)=>s+invoicePaidAmount(i),0);
+    const totalImpayé   = clientInvoices.reduce((s,i)=>s+invoiceRemainingAmount(i),0);
+    const nbVentes = clientInvoices.filter(i=>invoicePaidAmount(i)>0).length;
     const panierMoyen = nbVentes>0?totalEncaissé/nbVentes:0;
     const retours = clientInvoices.filter(i=>i.type==="Retour");
     const totalRetours = retours.reduce((s,i)=>s+i.montant,0);
@@ -66,9 +80,54 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
       const m = (inv.dateRaw??"").slice(0,7) || inv.date.slice(-7);
       if (!byMonth[m]) byMonth[m]={facturé:0,encaissé:0};
       byMonth[m].facturé += inv.montant;
-      byMonth[m].encaissé += inv.acompte;
+      byMonth[m].encaissé += invoicePaidAmount(inv);
     });
     const months = Object.entries(byMonth).sort((a,b)=>b[0].localeCompare(a[0])).slice(0,6);
+    const clientPayments = clientInvoices.flatMap(inv => (inv.payments ?? []).map(payment => ({ ...payment, invoiceId:inv.id })))
+      .sort((a,b)=>b.paidAt.localeCompare(a.paidAt));
+
+    async function submitClientPayment() {
+      if (submittingPayment || totalImpayé <= 0) return;
+      const requested = Number(paymentAmount) || 0;
+      if (requested <= 0) return;
+      setSubmittingPayment(true);
+      try {
+        const result = await recordClientPayment({
+          boutiqueId:boutique.id,
+          clientId:c.id,
+          amount:Math.min(requested, totalImpayé),
+          paymentMethod,
+          paymentDate,
+        });
+        const allocationByInvoice = new Map(result.allocations.map(allocation => [allocation.invoice_id, allocation.amount]));
+        const updatedInvoices = boutique.invoices.map((invoice): Invoice => {
+          const applied = allocationByInvoice.get(invoice.id) ?? 0;
+          if (applied <= 0) return invoice;
+          const paid = invoicePaidAmount(invoice) + applied;
+          return {
+            ...invoice,
+            clientId:c.id,
+            acompte:paid,
+            status:paid >= invoice.montant ? "payé" : "acompte",
+            paymentMethod,
+            payments:[...(invoice.payments ?? []), {
+              id:-Date.now(), amount:applied, paymentMethod, paidAt:result.paid_at,
+              operatorId:result.operator_id, operatorName:result.operator_name,
+              batchId:`fifo:${result.paid_at}`, source:"client_fifo",
+            }],
+          };
+        });
+        onUpdate({ invoices:updatedInvoices });
+        logAction("Versement client", `${c.nom} · ${fmt(result.applied_amount)} · FIFO sur ${result.allocations.length} facture(s)`, "💳");
+        setPaymentDone(true);
+        setTimeout(() => {
+          setPaymentModal(false); setPaymentAmount(""); setPaymentDone(false); setSubmittingPayment(false);
+        }, 1000);
+      } catch (error) {
+        setSubmittingPayment(false);
+        alert(error instanceof Error ? error.message : "Versement impossible");
+      }
+    }
 
     return (
       <div className="space-y-4 pb-24">
@@ -87,6 +146,14 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
               </div>
               <span className="text-xs px-2 py-0.5 rounded-full font-bold mt-1 inline-block" style={{ background:CC+"22",color:CC }}>{c.type}</span>
             </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2 mt-4">
+            <button onClick={()=>onCreateInvoice(c)} className="py-3 rounded-xl text-xs font-black flex items-center justify-center gap-2" style={{ background:CC, color:"#fff" }}>
+              <FilePlus2 size={15}/> Nouvelle facture
+            </button>
+            <button onClick={()=>{setPaymentAmount(String(totalImpayé));setPaymentModal(true);}} disabled={totalImpayé<=0} className="py-3 rounded-xl text-xs font-black flex items-center justify-center gap-2 disabled:opacity-40" style={{ background:SEM.success.bg, color:SEM.success.accent }}>
+              <Wallet size={15}/> Versement
+            </button>
           </div>
         </div>
         {/* KPIs */}
@@ -127,6 +194,15 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
           <p className="text-xs font-black tracking-wider mb-2" style={{ color:"#ef4444" }}>RETOURS ({retours.length})</p>
           <p className="text-xl font-black" style={{ color:"#ef4444",fontFamily:"'Nunito',sans-serif" }}>{fmt(totalRetours)}</p>
         </div>}
+        {clientPayments.length>0&&<div className="bg-card rounded-2xl p-4 border border-border">
+          <p className="text-xs font-black tracking-wider text-muted-foreground mb-3">HISTORIQUE DES PAIEMENTS</p>
+          <div className="space-y-2">
+            {clientPayments.slice(0,20).map(payment=><div key={`${payment.invoiceId}-${payment.id}`} className="flex items-center justify-between gap-3 text-xs">
+              <div><p className="font-bold">{payment.invoiceId} · {payment.paymentMethod}</p><p className="text-muted-foreground">{formatPreciseDateTime(payment.paidAt)} · {payment.operatorName}</p></div>
+              <p className="font-black" style={{color:SEM.success.accent}}>{fmt(payment.amount)}</p>
+            </div>)}
+          </div>
+        </div>}
         {/* All invoices */}
         <div>
           <p className="text-xs font-black tracking-wider text-muted-foreground mb-2">TOUTES LES TRANSACTIONS</p>
@@ -135,7 +211,9 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
             {clientInvoices.map(inv=>{
               const [tc,bc]=invBadge(inv.status);
               const isReturn=inv.type==="Retour";
-              return <div key={inv.id} className="bg-card rounded-2xl p-3.5 border border-border flex items-center gap-3">
+              const paid = invoicePaidAmount(inv);
+              const remaining = invoiceRemainingAmount(inv);
+              return <button type="button" onClick={()=>onOpenInvoice(inv.id)} key={inv.id} className="w-full bg-card rounded-2xl p-3.5 border border-border flex items-center gap-3 text-left active:scale-[0.99]">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <p className="text-xs font-black text-muted-foreground">{inv.id}</p>
@@ -147,13 +225,29 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
                 </div>
                 <div className="text-right flex-shrink-0">
                   <p className="font-black text-sm" style={{ fontFamily:"'Nunito',sans-serif" }}>{fmt(inv.montant)}</p>
-                  {inv.acompte>0&&<p className="text-xs font-semibold" style={{ color:SEM.success.accent }}>✓ {fmt(inv.acompte)}</p>}
-                  {inv.montant-inv.acompte>0&&<p className="text-xs font-semibold" style={{ color:SEM.warning.accent }}>⏳ {fmt(inv.montant-inv.acompte)}</p>}
+                  {paid>0&&<p className="text-xs font-semibold" style={{ color:SEM.success.accent }}>✓ {fmt(paid)}</p>}
+                  {remaining>0&&<p className="text-xs font-semibold" style={{ color:SEM.warning.accent }}>⏳ {fmt(remaining)}</p>}
                 </div>
-              </div>;
+                <ChevronRight size={15} className="text-muted-foreground"/>
+              </button>;
             })}
           </div>
         </div>
+        {paymentModal&&<Modal title="Versement client" color={SEM.success.accent} onClose={()=>{if(!submittingPayment)setPaymentModal(false);}}>
+          <div className="rounded-2xl p-3" style={{background:SEM.success.bg}}>
+            <p className="text-xs text-muted-foreground">Solde global dû</p>
+            <p className="text-2xl font-black" style={{color:SEM.success.accent}}>{fmt(totalImpayé)}</p>
+            <p className="text-xs text-muted-foreground mt-1">Le versement sera affecté aux factures les plus anciennes en premier.</p>
+          </div>
+          <Field label="MONTANT">
+            <input value={paymentAmount} onChange={e=>setPaymentAmount(String(Math.min(Number(e.target.value)||0,totalImpayé)))} type="number" min="0" max={totalImpayé} className={inputCls}/>
+          </Field>
+          <Field label="MODE DE PAIEMENT">
+            <div className="grid grid-cols-2 gap-2">{PAYMENT_METHODS.map(method=><button key={method} onClick={()=>setPaymentMethod(method)} className="py-2.5 rounded-xl text-xs font-bold" style={{background:paymentMethod===method?CC:"#EEE9D8",color:paymentMethod===method?"#fff":"#6b7280"}}>{PM_ICON[method]} {method}</button>)}</div>
+          </Field>
+          <Field label="DATE DU PAIEMENT"><input type="date" value={paymentDate} onChange={e=>setPaymentDate(e.target.value)} className={inputCls}/></Field>
+          {paymentDone?<div className="flex items-center justify-center gap-2 py-4 font-black" style={{color:SEM.success.accent}}><CheckCircle size={20}/> Versement enregistré</div>:<SubmitBtn color={SEM.success.accent} label={submittingPayment?"Enregistrement…":`Enregistrer ${fmt(Math.min(Number(paymentAmount)||0,totalImpayé))}`} onClick={submitClientPayment} disabled={submittingPayment||!Number(paymentAmount)||totalImpayé<=0}/>}
+        </Modal>}
       </div>
     );
   }
