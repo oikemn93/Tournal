@@ -8984,6 +8984,9 @@ export default function App() {
   const isOwner = activeAssign?.role === "Propriétaire";
   const isReadOnly = activeAssign?.role === "Compte Mère";
   function canAccess(perm: Permission) { return isOwner || isReadOnly || !!(droits?.[perm]); }
+  // Margins are sensitive: only owners or users explicitly granted "Voir les marges".
+  // Read-only accounts do NOT see margins unless the right is set.
+  const canSeeMargin = isOwner || !!(droits?.marges);
   const NAV = ALL_NAV.filter(n => {
     if (n.adminOnly) return isOwner;
     if (n.perm) return canAccess(n.perm);
@@ -9101,10 +9104,10 @@ export default function App() {
         {safeTab==="stock"        && canAccess("stock")        && <RelationalStockView boutique={boutique} onUpdate={updateBoutique} logAction={logAction} initialFilter={navFilter.stockFilter}/>}
         {safeTab==="fournisseurs" && canAccess("fournisseurs") && <RelationalFournisseursView boutique={boutique} onUpdate={updateBoutique} logAction={logAction}/>}
         {safeTab==="clients"      && canAccess("clients")      && <RelationalClientsView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} currentUser={currentUser!} onUpdate={updateBoutique} logAction={logAction} initialTab={navFilter.clientTab as ClientType|undefined} onOpenInvoice={(invoiceId)=>{setNavFilter({invoiceId});setTab("factures");}} onCreateInvoice={(client)=>{setNavFilter({clientId:String(client.id)});setTab("factures");}}/>}
-        {safeTab==="factures"     && canAccess("factures")     && <RelationalFacturesView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} currentUser={currentUser} canReturn={canAccess("remboursement")} onUpdate={updateBoutique} onUpdateOtherBoutique={updateOtherBoutique} logAction={logAction} initialStatus={navFilter.statusFilter as InvoiceStatus|"all"|undefined} initialInvoiceId={navFilter.invoiceId} initialClientId={navFilter.clientId?Number(navFilter.clientId):undefined}/>}
+        {safeTab==="factures"     && canAccess("factures")     && <RelationalFacturesView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} currentUser={currentUser} canReturn={canAccess("remboursement")} canSeeMargin={canSeeMargin} onUpdate={updateBoutique} onUpdateOtherBoutique={updateOtherBoutique} logAction={logAction} initialStatus={navFilter.statusFilter as InvoiceStatus|"all"|undefined} initialInvoiceId={navFilter.invoiceId} initialClientId={navFilter.clientId?Number(navFilter.clientId):undefined}/>}
         {safeTab==="pos"          && canAccess("vente")        && <RelationalPOSView boutique={boutique} allBoutiques={boutiques} currentUser={currentUser} onUpdate={updateBoutique} logAction={logAction}/>}
         {safeTab==="charges"      && canAccess("charges")      && <RelationalChargesView boutique={boutique} onUpdate={updateBoutique} logAction={logAction}/>}
-        {safeTab==="compta"       && canAccess("compta")       && <RelationalComptabiliteView boutique={boutique}/>}
+        {safeTab==="compta"       && canAccess("compta")       && <RelationalComptabiliteView boutique={boutique} canSeeMargin={canSeeMargin}/>}
         {safeTab==="inventaire"   && canAccess("inventaire")   && (
           <InventaireView
             boutique={boutique}
