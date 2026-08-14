@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Search, Wallet, RefreshCw, Plus, CheckCircle } from "lucide-react";
+import { Search, Wallet, RefreshCw, Plus, CheckCircle, CreditCard, Loader2 } from "lucide-react";
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import type { Boutique, Charge, ChargeCategorie } from "../types";
 import { CHARGE_CATS, CHARGE_COLORS, SEM, inputCls } from "../constants";
@@ -8,7 +8,7 @@ import { supplierBalance } from "../utils/inventory";
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
-import { createCharge } from "../../lib/api";
+import { createCharge, recordTransferChargePayment } from "../../lib/api";
 
 export function ChargesView({ boutique, onUpdate, logAction }: {
   boutique: Boutique; onUpdate: (u: Partial<Boutique>) => void;
@@ -25,15 +25,20 @@ export function ChargesView({ boutique, onUpdate, logAction }: {
   const [recurrence, setRecurrence] = useState<Charge["recurrence"]>("unique");
   const [note, setNote] = useState("");
   const [fourn, setFourn] = useState<string>("");
+  const [paymentCharge, setPaymentCharge] = useState<Charge|null>(null);
+  const [paymentAmount, setPaymentAmount] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("Espèces");
+  const [paying, setPaying] = useState(false);
 
   const filtered = charges.filter(c =>
     (catFilter === "all" || c.categorie === catFilter) &&
     c.label.toLowerCase().includes(search.toLowerCase())
   ).sort((a,b) => b.id - a.id);
 
-  const totalMois = charges.reduce((s,c) => s + c.montant, 0);
+  const expenseAmount = (charge:Charge) => charge.source==="transfer" ? Number(charge.paidAmount??0) : charge.montant;
+  const totalMois = charges.reduce((s,c) => s + expenseAmount(c), 0);
   const byCategorie = CHARGE_CATS.map(cat => ({
-    name: cat, value: charges.filter(c=>c.categorie===cat).reduce((s,c)=>s+c.montant,0), color: CHARGE_COLORS[cat]
+    name: cat, value: charges.filter(c=>c.categorie===cat).reduce((s,c)=>s+expenseAmount(c),0), color: CHARGE_COLORS[cat]
   })).filter(c=>c.value>0);
 
   async function submit() {
@@ -49,6 +54,20 @@ export function ChargesView({ boutique, onUpdate, logAction }: {
     onUpdate({ charges: [...charges, newCharge] });
     logAction("Nouvelle charge", `${label.trim()} · ${fmt(Number(montant))}${linkedFourn?" → "+linkedFourn:""}`, "💸");
     setLabel(""); setMontant(""); setNote(""); setFourn(""); setModal(false);
+  }
+  async function payTransferCharge() {
+    if (!paymentCharge || paying) return;
+    const due=Math.max(0,paymentCharge.montant-Number(paymentCharge.paidAmount??0));
+    const requested=Number(paymentAmount);
+    if (!Number.isFinite(requested)||requested<=0) return;
+    setPaying(true);
+    try {
+      const result=await recordTransferChargePayment({boutiqueId:boutique.id,chargeId:paymentCharge.id,amount:Math.min(requested,due),paymentMethod});
+      onUpdate({charges:charges.map((charge)=>charge.id===paymentCharge.id?{...charge,paidAmount:result.paid_amount,status:result.status}:charge)});
+      logAction("Règlement transfert B2B",`${paymentCharge.label} · ${fmt(result.applied_amount)} · ${paymentMethod}`,"💳");
+      setPaymentCharge(null); setPaymentAmount("");
+    } catch (error) { alert(error instanceof Error?error.message:"Paiement impossible"); }
+    finally { setPaying(false); }
   }
   return (
     <div data-screen-source="relational-charges" className="space-y-4 pb-24">
@@ -110,6 +129,7 @@ export function ChargesView({ boutique, onUpdate, logAction }: {
             </div>
             <div className="text-right flex-shrink-0">
               <p className="font-black text-base" style={{color:"#ef4444",fontFamily:"'Nunito',sans-serif"}}>{fmt(c.montant)}</p>
+              {c.source==="transfer"&&<><p className="text-xs text-muted-foreground">Réglé : {fmt(Number(c.paidAmount??0))}</p>{c.status!=="paid"&&<button onClick={()=>{const due=Math.max(0,c.montant-Number(c.paidAmount??0));setPaymentCharge(c);setPaymentAmount(String(due));}} className="mt-1 inline-flex items-center gap-1 rounded-lg bg-slate-900 px-2 py-1 text-xs font-bold text-white"><CreditCard size={12}/>Payer</button>}</>}
             </div>
           </div>
         ))}
@@ -157,6 +177,12 @@ export function ChargesView({ boutique, onUpdate, logAction }: {
         )}
         <Field label="NOTE (optionnel)"><input value={note} onChange={e=>setNote(e.target.value)} placeholder="Remarque…" className={inputCls} onKeyDown={e=>e.key==="Enter"&&submit()}/></Field>
         <SubmitBtn color={boutique.color} label="Enregistrer la charge" onClick={submit}/>
+      </Modal>}
+      {paymentCharge&&<Modal title="Régler la charge B2B" color="#111827" onClose={()=>!paying&&setPaymentCharge(null)}>
+        <div className="rounded-xl bg-muted/50 p-3 text-sm"><p className="font-bold">{paymentCharge.label}</p><p className="text-muted-foreground">Reste dû : {fmt(Math.max(0,paymentCharge.montant-Number(paymentCharge.paidAmount??0)))}</p></div>
+        <Field label="MONTANT"><input type="number" min="1" max={Math.max(0,paymentCharge.montant-Number(paymentCharge.paidAmount??0))} value={paymentAmount} onChange={(event)=>setPaymentAmount(event.target.value)} className={inputCls}/></Field>
+        <Field label="MODE DE PAIEMENT"><div className="grid grid-cols-2 gap-2">{["Espèces","Wave","Orange Money","Autre"].map((method)=><button key={method} type="button" onClick={()=>setPaymentMethod(method)} className="rounded-xl p-3 text-xs font-bold" style={{background:paymentMethod===method?"#111827":"#EEE9D8",color:paymentMethod===method?"white":"#374151"}}>{method}</button>)}</div></Field>
+        <button onClick={()=>void payTransferCharge()} disabled={paying||Number(paymentAmount)<=0} className="flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 py-4 font-black text-white disabled:opacity-50">{paying&&<Loader2 className="animate-spin" size={16}/>}Confirmer le règlement</button>
       </Modal>}
     </div>
   );

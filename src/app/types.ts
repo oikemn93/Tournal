@@ -8,7 +8,15 @@ export type PaymentMethod = "Espèces" | "Wave" | "Orange Money" | "Autre";
 export type Permission = "dashboard" | "stock" | "fournisseurs" | "clients" | "factures" | "remboursement" | "charges" | "compta" | "vente";
 export type ChargeCategorie = "Loyer" | "Salaires" | "Électricité" | "Transport" | "Achat stock" | "Marketing" | "Taxes" | "Autre";
 export type CaisseSession = { id: string | number; openedAt: string; openedBy: string; fondDeCaisse: number; closedAt?: string; closedBy?: string };
-export type Charge = { id: number; label: string; montant: number; date: string; dateRaw: string; categorie: ChargeCategorie; recurrence: "unique" | "mensuelle" | "hebdomadaire"; note?: string; fournisseur?: string };
+export type Charge = {
+  id: number; label: string; montant: number; date: string; dateRaw: string;
+  categorie: ChargeCategorie; recurrence: "unique" | "mensuelle" | "hebdomadaire";
+  note?: string; fournisseur?: string;
+  status?: "pending" | "partial" | "paid";
+  paidAmount?: number;
+  transferId?: string;
+  source?: "manual" | "transfer" | "recurrence";
+};
 export type ClientType = "B2C" | "B2B" | "Grossiste";
 
 export type InvoiceLine = { productId: number; nom: string; qty: number; unit: string; prixUnit: number; sellUnit?: string; sellQty?: number };
@@ -34,7 +42,7 @@ export type PlatformUser = {
   initials: string; color: string; isSuperAdmin: boolean;
   assignments: BoutiqueAssignment[];
 };
-export type Product    = { id: number; nom: string; img: string; unit: string; fournisseur: string; categorie?: string; couleur?: string };
+export type Product    = { id: number; nom: string; img: string; unit: string; fournisseur: string; categorie?: string; couleur?: string; prixVente?: number; prixAchat?: number };
 export type StockEntry = { id: number; productId: number; qty: number; unit: string; montantDu: number; date: string; fournisseur: string; invoiceId?: string; nbLots?: number; nbPieces?: number; longueurPiece?: number; sku?: string };
 export type Supplier   = { id: number; nom: string; ville: string; lastDelivery: string; tel: string; initials: string; color: string };
 export type Client     = { id: number; nom: string; type: ClientType; tel: string; total: number; last: string; ville: string; adresse?: string; email?: string; contact?: string };

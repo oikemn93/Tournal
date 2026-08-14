@@ -277,7 +277,7 @@ export async function getData<T>(key: string): Promise<T | null> {
         nbPiecesParLot: Number(c.pieces_per_lot ?? 0),
         longueurParPiece: Number(c.length_per_piece ?? 0),
       })),
-      products: products.filter(p => p.boutique_id === b.id).map(p => ({ id:p.id, nom:p.nom, img:p.image_url ?? "", unit:p.unit, fournisseur:p.supplier_name ?? "", categorie:categories.find(c=>c.boutique_id===b.id&&c.id===p.category_id)?.nom })),
+      products: products.filter(p => p.boutique_id === b.id).map(p => ({ id:p.id, nom:p.nom, img:p.image_url ?? "", unit:p.unit, fournisseur:p.supplier_name ?? "", categorie:categories.find(c=>c.boutique_id===b.id&&c.id===p.category_id)?.nom, prixVente:Number(p.prix_vente ?? 0), prixAchat:Number(p.prix_achat ?? 0) })),
       productParams: products.filter(p => p.boutique_id === b.id && (p.pieces_per_lot != null || p.length_per_piece != null)).map(p => ({
         productId: p.id,
         nbPiecesParLot: Number(p.pieces_per_lot ?? 0),
@@ -323,7 +323,12 @@ export async function getData<T>(key: string): Promise<T | null> {
           lines:lines.filter(l=>l.boutique_id===b.id&&l.invoice_id===i.id).map(l=>({ productId:l.product_id, nom:l.nom, qty:Number(l.qty), unit:l.unit ?? "unité", prixUnit:Number(l.prix_unit), sellUnit:l.sell_unit ?? undefined, sellQty:l.sell_qty ? Number(l.sell_qty) : undefined })),
         };
       }),
-      charges: charges.filter(c => c.boutique_id === b.id).map(c => ({ id:c.id, label:c.label, montant:Number(c.montant), date:day(c.charge_date), dateRaw:c.charge_date, categorie:c.categorie ?? "Autre", recurrence:"unique", note:c.note ?? undefined })),
+      charges: charges.filter(c => c.boutique_id === b.id).map(c => ({
+        id:c.id, label:c.label, montant:Number(c.montant), date:day(c.charge_date), dateRaw:c.charge_date,
+        categorie:c.categorie ?? "Autre", recurrence:c.recurrence ?? "unique", note:c.note ?? undefined,
+        fournisseur:c.fournisseur ?? undefined, status:c.status ?? "paid", paidAmount:Number(c.paid_amount ?? c.montant),
+        transferId:c.transfer_id ?? undefined, source:c.source ?? "manual",
+      })),
       caisseHistory: sessions
         .filter(s => s.boutique_id === b.id)
         .sort((a, b) => new Date(a.opened_at).getTime() - new Date(b.opened_at).getTime())
@@ -510,15 +515,28 @@ export async function updateBoutiqueProfile(params: { boutiqueId:string; nom:str
   });
 }
 
-export type RelationalTransfer = { id:string; from_boutique_id:string; to_boutique_id:string; status:string; note:string|null; created_at:string; lines:Array<{ product_name:string; unit:string; qty:number }> };
+export type RelationalTransfer = {
+  id:string; from_boutique_id:string; to_boutique_id:string; status:"pending"|"accepted"|"rejected"|"cancelled";
+  relationship_type:"same_owner"|"commercial"|null; total_amount:number; invoice_id:string|null; charge_id:number|null;
+  note:string|null; created_at:string;
+  lines:Array<{ product_name:string; unit:string; qty:number; prix_unit:number; discount_percent:number }>;
+};
 export async function getStockTransfers(boutiqueId: string) {
-  return dataRequest<RelationalTransfer[]>(`stock_transfers?select=id,from_boutique_id,to_boutique_id,status,note,created_at,stock_transfer_lines(product_name,unit,qty)&or=(from_boutique_id.eq.${encodeURIComponent(boutiqueId)},to_boutique_id.eq.${encodeURIComponent(boutiqueId)})&order=created_at.desc`);
+  return dataRequest<RelationalTransfer[]>(`stock_transfers?select=id,from_boutique_id,to_boutique_id,status,relationship_type,total_amount,invoice_id,charge_id,note,created_at,stock_transfer_lines(product_name,unit,qty,prix_unit,discount_percent)&or=(from_boutique_id.eq.${encodeURIComponent(boutiqueId)},to_boutique_id.eq.${encodeURIComponent(boutiqueId)})&order=created_at.desc`);
 }
-export async function createStockTransfer(params: { fromBoutiqueId:string; toBoutiqueId:string; lines:Array<{productId:number;qty:number}>; note?:string }) {
-  return dataRequest<{transfer_id:string;status:string}>("rpc/create_stock_transfer", { method:"POST", body:JSON.stringify({ p_from_boutique_id:params.fromBoutiqueId,p_to_boutique_id:params.toBoutiqueId,p_idempotency_key:crypto.randomUUID(),p_lines:params.lines.map(line=>({product_id:line.productId,qty:line.qty})),p_note:params.note ?? null }) });
+export async function createStockTransfer(params: { fromBoutiqueId:string; toBoutiqueId:string; lines:Array<{productId:number;qty:number;unitPrice:number;discountPercent:number}>; note?:string }) {
+  return dataRequest<{transfer_id:string;status:string;relationship_type:"same_owner"|"commercial";total_amount:number}>("rpc/create_stock_transfer", { method:"POST", body:JSON.stringify({ p_from_boutique_id:params.fromBoutiqueId,p_to_boutique_id:params.toBoutiqueId,p_idempotency_key:crypto.randomUUID(),p_lines:params.lines.map(line=>({product_id:line.productId,qty:line.qty,unit_price:line.unitPrice,discount_percent:line.discountPercent})),p_note:params.note ?? null }) });
 }
 export async function acceptStockTransfer(transferId: string) {
-  return dataRequest<{transfer_id:string;status:string}>("rpc/accept_stock_transfer", { method:"POST", body:JSON.stringify({ p_transfer_id:transferId,p_idempotency_key:crypto.randomUUID() }) });
+  return dataRequest<{transfer_id:string;status:string;relationship_type:"same_owner"|"commercial";total_amount:number;invoice_id:string|null;charge_id:number|null}>("rpc/accept_stock_transfer", { method:"POST", body:JSON.stringify({ p_transfer_id:transferId,p_idempotency_key:crypto.randomUUID() }) });
+}
+export async function rejectStockTransfer(transferId: string) {
+  return dataRequest<{transfer_id:string;status:string}>("rpc/reject_stock_transfer", { method:"POST", body:JSON.stringify({ p_transfer_id:transferId,p_idempotency_key:crypto.randomUUID() }) });
+}
+export async function recordTransferChargePayment(params:{boutiqueId:string;chargeId:number;amount:number;paymentMethod:string}) {
+  return dataRequest<{charge_id:number;applied_amount:number;paid_amount:number;status:"partial"|"paid";invoice_id:string;payment_id:number}>("rpc/record_transfer_charge_payment", {
+    method:"POST", body:JSON.stringify({p_boutique_id:params.boutiqueId,p_charge_id:params.chargeId,p_idempotency_key:crypto.randomUUID(),p_amount:params.amount,p_payment_method:params.paymentMethod}),
+  });
 }
 
 export async function checkBackend(): Promise<boolean> {

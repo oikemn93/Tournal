@@ -21,6 +21,7 @@ import { ClientsView as RelationalClientsView } from "./screens/ClientsView";
 import { FournisseursView as RelationalFournisseursView } from "./screens/FournisseursView";
 import { ChargesView as RelationalChargesView } from "./screens/ChargesView";
 import { ComptabiliteView as RelationalComptabiliteView } from "./screens/RapportView";
+import { TransfersView as RelationalTransfersView } from "./screens/TransfersView";
 import { filterPaymentEventsByPeriod, invoicePaymentEvents, invoiceRemainingAmount } from "./utils/payments";
 
 const ReadOnlyCtx = React.createContext(false);
@@ -9113,18 +9114,7 @@ export default function App() {
             onClose={()=>setTab("dashboard")}
           />
         )}
-        {safeTab==="transferts"   && canAccess("stock")        && (
-          <TransfertsView
-            boutique={boutique}
-            allBoutiques={boutiques}
-            platformUsers={platformUsers}
-            groupes={groupes}
-            currentUser={currentUser!}
-            onUpdate={updateBoutique}
-            onUpdateOtherBoutique={updateOtherBoutique}
-            logAction={logAction}
-          />
-        )}
+        {safeTab==="transferts"   && canAccess("stock")        && <RelationalTransfersView boutique={boutique} allBoutiques={boutiques}/>}
         {safeTab==="admin"        && isOwner                  && (
           <AdminView
             boutique={boutique}
