@@ -1,14 +1,17 @@
-import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+ï»¿import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 type Action = "create_boutique" | "create_user" | "reset_password" | "assign_user" | "unassign_user";
 
-const allowedOrigins = new Set(["https://tournal-wldg.vercel.app"]);
+const allowedOrigins = new Set([
+  "https://tournal-wldg.vercel.app",
+  "https://tournal.vercel.app",
+]);
 
 function corsHeaders(request: Request) {
   const origin = request.headers.get("origin");
   return {
-    "Access-Control-Allow-Origin": allowedOrigins.has(origin ?? "") ? origin! : "https://tournal-wldg.vercel.app",
+    "Access-Control-Allow-Origin": allowedOrigins.has(origin ?? "") ? origin! : "https://tournal.vercel.app",
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Content-Type": "application/json",
@@ -104,7 +107,7 @@ Deno.serve(async (request) => {
       const boutiqueId = typeof payload.boutiqueId === "string" ? payload.boutiqueId.trim() : "";
       if (password.length < 12) return reply(request, { error: "Le mot de passe doit contenir au moins 12 caractÃ¨res" }, 422);
       if (!boutiqueId && !caller?.is_super_admin) {
-        return reply(request, { error: "Boutique requise pour créer ce compte" }, 422);
+        return reply(request, { error: "Boutique requise pour crï¿½er ce compte" }, 422);
       }
 
       if (boutiqueId && !caller?.is_super_admin) {
@@ -115,7 +118,7 @@ Deno.serve(async (request) => {
           .maybeSingle();
         if (boutiqueError || !boutique) return reply(request, { error: "Boutique introuvable" }, 422);
         if (boutique.owner_id !== userData.user.id) {
-          return reply(request, { error: "Seul le propriétaire de cette boutique peut créer ce compte" }, 403);
+          return reply(request, { error: "Seul le propriï¿½taire de cette boutique peut crï¿½er ce compte" }, 403);
         }
       }
 
@@ -175,5 +178,6 @@ Deno.serve(async (request) => {
     return reply(request, { error: error instanceof Error ? error.message : "Erreur serveur" }, 400);
   }
 });
+
 
 
