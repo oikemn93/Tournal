@@ -1,15 +1,15 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Search, Plus, Send, FileText, Eye, Mail, MessageCircle, Smartphone, Phone, Wallet, CreditCard, RotateCcw, ShoppingCart, Receipt, AlertCircle, Trash2, CheckCircle, Minus, Store } from "lucide-react";
-import type { Boutique, Invoice, InvoiceStatus, InvoiceLine, StockEntry, PaymentMethod, Client, PlatformUser } from "../types";
+import { Search, Plus, Send, FileText, Eye, Mail, MessageCircle, Smartphone, Phone, Wallet, CreditCard, RotateCcw, ShoppingCart, Receipt, AlertCircle, Trash2, CheckCircle, Minus, Store, X, ChevronLeft, ChevronRight, CalendarDays } from "lucide-react";
+import type { Boutique, Invoice, InvoiceStatus, InvoiceLine, StockEntry, PaymentMethod, Client, PlatformUser, CaisseSession } from "../types";
 import { SEM, inputCls, PAYMENT_METHODS, PM_ICON, PM_COLOR, PLACEHOLDER_IMGS } from "../constants";
-import { createSale, recordPayment, returnSale } from "../../lib/api";
+import { createSale, recordPayment, returnSale, openCaisseSession, closeCaisseSession } from "../../lib/api";
 import { fmt, today, imgSrc } from "../utils/formatting";
 import { invBadge, lineTotal, lineDispQty, lineDispUnit, genInvoiceId, productQty, getSiblings, invoiceMargin } from "../utils/inventory";
-import { buildReceiptHtml, openInvoicePDF, buildInvoiceMessage, agentPrint, printReceipt } from "../utils/invoice";
+import { buildReceiptHtml, openInvoicePDF, buildInvoiceMessage, agentPrint, printReceipt, printCaisseReport } from "../utils/invoice";
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
-import { formatPreciseDateTime, invoicePaidAmount, invoiceRemainingAmount } from "../utils/payments";
+import { formatPreciseDateTime, invoicePaidAmount, invoiceRemainingAmount, invoicePaymentEvents } from "../utils/payments";
 
 // ─── SHARE INVOICE MODAL ──────────────────────────────────────────────────────
 
@@ -250,6 +250,69 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
   const [lQty,setLQty]=useState("");
   const [lPrix,setLPrix]=useState("");
   const [lSellUnit,setLSellUnit]=useState(""); // mirrors POS: "Lot" | "Pièce" | baseUnit
+
+  const FCT_COLOR = boutique.color;
+
+  // ── Caisse (déplacée depuis Vente) : le caissier ouvre/ferme et encaisse ici ──
+  const caisseSession = boutique.caisseSession;
+  const isCaisseOpen = !!(caisseSession && !caisseSession.closedAt);
+  const [fondCaisse, setFondCaisse] = useState("0");
+  const [caisseCloseModal, setCaisseCloseModal] = useState(false);
+  const [savingCaisse, setSavingCaisse] = useState(false);
+
+  // The session total is the sum of payments recorded since the caisse was opened,
+  // so each encaissement below increments it correctly (the bug fixed by the move).
+  const sessionEvents = isCaisseOpen && caisseSession
+    ? invoicePaymentEvents(invoices).filter(ev => ev.paidAt >= caisseSession.openedAt)
+    : [];
+  const sessionTotal = sessionEvents.reduce((s, ev) => s + ev.signedAmount, 0);
+  const sessionByMethod = PAYMENT_METHODS.map(m => ({
+    m,
+    total: sessionEvents.filter(ev => ev.paymentMethod === m).reduce((s, ev) => s + ev.signedAmount, 0),
+    count: sessionEvents.filter(ev => ev.paymentMethod === m).length,
+  }));
+  const sessionEspeces = sessionByMethod.find(b => b.m === "Espèces")?.total ?? 0;
+
+  async function openCaisse() {
+    if (savingCaisse) return;
+    setSavingCaisse(true);
+    try {
+      const saved = await openCaisseSession({ boutiqueId:boutique.id, fondOuverture:Number(fondCaisse) || 0 });
+      const s: CaisseSession = { id:saved.session_id, openedAt:saved.opened_at, openedBy:currentUser.nom, fondDeCaisse:saved.fond_ouverture };
+      onUpdate({ caisseSession:s });
+      logAction("Ouverture caisse", `Fond : ${fmt(s.fondDeCaisse)}`, "🏪");
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Impossible d'ouvrir la caisse");
+    } finally { setSavingCaisse(false); }
+  }
+  async function closeCaisse() {
+    if (!caisseSession || savingCaisse) return;
+    setSavingCaisse(true);
+    try {
+      const saved = await closeCaisseSession({ boutiqueId:boutique.id, sessionId:String(caisseSession.id), totalVentes:sessionTotal });
+      const closed: CaisseSession = { ...caisseSession, closedAt:saved.closed_at, closedBy:currentUser.nom };
+      const history = [...(boutique.caisseHistory ?? []), closed];
+      printCaisseReport(closed, boutique, invoices);
+      onUpdate({ caisseSession:closed, caisseHistory:history });
+      logAction("Fermeture caisse", `Total encaissé : ${fmt(sessionTotal)}`, "🔒");
+      setCaisseCloseModal(false);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Impossible de fermer la caisse");
+    } finally { setSavingCaisse(false); }
+  }
+
+  // ── Filtre par jour (point 4) : par défaut le jour en cours, avec navigation ──
+  const todayKey = new Date().toISOString().slice(0,10);
+  const [selectedDay, setSelectedDay] = useState(todayKey);
+  const [dayFilterActive, setDayFilterActive] = useState(true);
+  function shiftDay(delta: number) {
+    const d = new Date(selectedDay + "T12:00:00");
+    d.setDate(d.getDate() + delta);
+    setSelectedDay(d.toISOString().slice(0,10));
+    setDayFilterActive(true);
+  }
+  const dayLabel = selectedDay === todayKey ? "Aujourd'hui"
+    : new Date(selectedDay + "T12:00:00").toLocaleDateString("fr-FR", { weekday:"long", day:"2-digit", month:"long" });
 
   useEffect(() => {
     if (initialInvoiceId) {
@@ -506,7 +569,9 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
   }
 
   const UNPAID: InvoiceStatus[] = ["en attente","acompte","en retard"];
-  const filtered = [...invoices].sort((a,b)=>(b.dateRaw??b.date).localeCompare(a.dateRaw??a.date)).filter(i=>(statusFilter==="all"||statusFilter==="impayé"?statusFilter==="impayé"?UNPAID.includes(i.status):true:i.status===statusFilter)&&(i.client.toLowerCase().includes(invSearch.toLowerCase())||i.id.toLowerCase().includes(invSearch.toLowerCase())));
+  // The day filter is bypassed while searching so the search reaches every day.
+  const dayActive = dayFilterActive && !invSearch.trim();
+  const filtered = [...invoices].sort((a,b)=>(b.dateRaw??b.date).localeCompare(a.dateRaw??a.date)).filter(i=>(statusFilter==="all"||statusFilter==="impayé"?statusFilter==="impayé"?UNPAID.includes(i.status):true:i.status===statusFilter)&&(i.client.toLowerCase().includes(invSearch.toLowerCase())||i.id.toLowerCase().includes(invSearch.toLowerCase()))&&(!dayActive||(i.dateRaw??"").slice(0,10)===selectedDay));
   const pills: Array<{id:InvoiceStatus|"all"|"impayé";label:string;color:string}> = [
     {id:"all",      label:"Tout",     color:SEM.neutral.accent},
     {id:"impayé",   label:"Impayés",  color:SEM.danger.accent},
@@ -518,7 +583,54 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
 
   return (
     <div data-screen-source="relational-factures" className="space-y-4 pb-24">
+
+      {/* Caisse — ouverte/fermée depuis l'écran Factures */}
+      {isCaisseOpen && caisseSession ? (
+        <div className="flex items-center gap-3 px-4 py-3 rounded-2xl" style={{ background:SEM.success.bg, border:"1px solid "+SEM.success.accent+"44" }}>
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse flex-shrink-0"/>
+            <div className="min-w-0">
+              <p className="text-sm font-black truncate" style={{ color:SEM.success.text }}>CAISSE OUVERTE</p>
+              <p className="text-xs text-muted-foreground truncate">{caisseSession.openedBy} · {new Date(caisseSession.openedAt).toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"})} · Fond : {fmt(caisseSession.fondDeCaisse)}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <span className="text-base font-black" style={{ color:SEM.success.accent, fontFamily:"'Nunito', sans-serif" }}>{fmt(sessionTotal)}</span>
+            <button onClick={()=>setCaisseCloseModal(true)} className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold active:scale-95" style={{ background:"#f3f4f6", color:"#374151" }}>
+              <X size={13}/> Fermer
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center gap-3 px-4 py-3 rounded-2xl" style={{ background:"#EEE9D8" }}>
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <Store size={18} style={{ color:FCT_COLOR }}/>
+            <div className="min-w-0">
+              <p className="text-sm font-black truncate">Caisse fermée</p>
+              <p className="text-xs text-muted-foreground truncate">Ouvrez la caisse pour encaisser</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <input value={fondCaisse} onChange={e=>setFondCaisse(e.target.value)} type="number" placeholder="Fond" className="w-24 px-3 py-2 rounded-xl text-sm font-bold text-center border border-border bg-card" onKeyDown={e=>e.key==="Enter"&&openCaisse()}/>
+            <button disabled={savingCaisse} onClick={openCaisse} className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black active:scale-95 disabled:opacity-60" style={{ background:FCT_COLOR, color:"#fff" }}>
+              <Store size={13}/> {savingCaisse?"…":"Ouvrir"}
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="relative"><Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground"/><input value={invSearch} onChange={e=>setInvSearch(e.target.value)} placeholder="Chercher une facture ou un client…" className={inputCls+" pl-11"}/></div>
+
+      {/* Navigation par jour (point 4) */}
+      <div className="flex items-center gap-2">
+        <button onClick={()=>shiftDay(-1)} className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 border border-border bg-card active:scale-90" title="Jour précédent"><ChevronLeft size={16}/></button>
+        <button onClick={()=>{ setDayFilterActive(a=>!a); }} className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold capitalize active:scale-95" style={{ background: dayFilterActive?FCT_COLOR:FCT_COLOR+"22", color: dayFilterActive?"#fff":FCT_COLOR }}>
+          <CalendarDays size={15}/> {dayFilterActive ? dayLabel : "Toutes les factures"}
+        </button>
+        <button onClick={()=>shiftDay(1)} disabled={selectedDay>=todayKey} className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 border border-border bg-card active:scale-90 disabled:opacity-40" title="Jour suivant"><ChevronRight size={16}/></button>
+        {selectedDay!==todayKey && <button onClick={()=>{ setSelectedDay(todayKey); setDayFilterActive(true); }} className="px-3 h-9 rounded-xl text-xs font-bold flex-shrink-0" style={{ background:FCT_COLOR+"22", color:FCT_COLOR }}>Aujourd'hui</button>}
+      </div>
+
       <div className="flex gap-2" style={{ overflowX:"auto", scrollbarWidth:"none" }}>
         {pills.map(s=><button key={s.id} onClick={()=>setStatusFilter(s.id as InvoiceStatus|"all"|"impayé")}className="px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap flex-shrink-0" style={{ background:statusFilter===s.id?s.color:s.color+"22", color:statusFilter===s.id?"#fff":s.color }}>{s.label}</button>)}
       </div>
@@ -875,6 +987,48 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
           ) : (
             <SubmitBtn color={boutique.color} label={submittingPayment ? "Encaissement…" : "Confirmer l'encaissement"} onClick={submitEncaiss} disabled={submittingPayment || !Number(encaissAmt)||Number(encaissAmt)<=0}/>
           )}
+        </Modal>
+      )}
+
+      {/* Fermeture de caisse */}
+      {caisseCloseModal && caisseSession && (
+        <Modal title="Fermeture de caisse" color={FCT_COLOR} onClose={() => setCaisseCloseModal(false)}>
+          <div className="space-y-3">
+            <div className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-muted">
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background:FCT_COLOR+"22" }}><Store size={18} style={{ color:FCT_COLOR }}/></div>
+              <div>
+                <p className="text-sm font-bold">Session</p>
+                <p className="text-xs text-muted-foreground">Ouvert par {caisseSession.openedBy} à {new Date(caisseSession.openedAt).toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"})}</p>
+              </div>
+            </div>
+            <div className="rounded-2xl border border-border overflow-hidden">
+              <div className="flex justify-between px-4 py-2.5 border-b border-border bg-muted/50">
+                <span className="text-xs font-black text-muted-foreground">Fond de caisse</span>
+                <span className="text-sm font-black" style={{ fontFamily:"'Nunito', sans-serif" }}>{fmt(caisseSession.fondDeCaisse)}</span>
+              </div>
+              {PAYMENT_METHODS.map(m => {
+                const b = sessionByMethod.find(x => x.m === m)!;
+                return (
+                  <div key={m} className="flex justify-between items-center px-4 py-2.5 border-b border-border">
+                    <span className="text-sm flex items-center gap-2"><span>{PM_ICON[m]}</span><span style={{ color:PM_COLOR[m] }}>{m}</span><span className="text-xs text-muted-foreground">({b.count})</span></span>
+                    <span className="font-black text-sm" style={{ color: b.total > 0 ? PM_COLOR[m] : "#c4b89a", fontFamily:"'Nunito', sans-serif" }}>{fmt(b.total)}</span>
+                  </div>
+                );
+              })}
+              <div className="flex justify-between px-4 py-3" style={{ background:"#1E9B1E0d" }}>
+                <span className="font-black text-sm" style={{ color:SEM.success.accent }}>Total encaissé</span>
+                <span className="font-black text-base" style={{ color:SEM.success.accent, fontFamily:"'Nunito', sans-serif" }}>{fmt(sessionTotal)}</span>
+              </div>
+              <div className="flex justify-between px-4 py-3 border-t border-border" style={{ background:"#1E9B1E0d" }}>
+                <span className="font-black text-sm" style={{ color:SEM.success.accent }}>Total en caisse (espèces)</span>
+                <span className="font-black text-base" style={{ color:SEM.success.accent, fontFamily:"'Nunito', sans-serif" }}>{fmt(caisseSession.fondDeCaisse + sessionEspeces)}</span>
+              </div>
+            </div>
+            <p className="text-xs text-center text-muted-foreground">Un rapport sera imprimé automatiquement à la fermeture</p>
+            <button disabled={savingCaisse} onClick={closeCaisse} className="w-full py-4 rounded-2xl font-black text-base flex items-center justify-center gap-2 active:scale-95 disabled:opacity-60" style={{ background:FCT_COLOR, color:"#fff", fontFamily:"'Nunito', sans-serif" }}>
+              🔒 {savingCaisse ? "Fermeture…" : "Confirmer la fermeture"}
+            </button>
+          </div>
         </Modal>
       )}
     </div>

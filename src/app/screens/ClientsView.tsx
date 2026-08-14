@@ -352,7 +352,16 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
       <div className="space-y-2">
         {filtered.map(c=>{
           const CC = clientColor(c.type);
-          const invCount = boutique.invoices.filter(i=>i.client===c.nom).length;
+          // Match the same invoices the detail view uses (clientId, normalized phone, or name)
+          // so the amount due is computed dynamically instead of relying on the stored 0.
+          const normalizedPhone = (value?: string) => (value ?? "").replace(/\D/g, "");
+          const clientInvoices = boutique.invoices.filter(inv =>
+            inv.clientId === c.id
+            || (normalizedPhone(c.tel) && normalizedPhone(inv.clientTel) === normalizedPhone(c.tel))
+            || inv.client.trim().toLowerCase() === c.nom.trim().toLowerCase()
+          );
+          const invCount = clientInvoices.length;
+          const montantDu = clientInvoices.reduce((s,inv)=>s+invoiceRemainingAmount(inv),0);
           return (
           <button key={c.id} onClick={()=>setDetailClient(c)} className="w-full bg-card rounded-2xl p-3.5 border border-border text-left active:scale-[0.98] transition-transform">
             <div className="flex items-center gap-3">
@@ -365,8 +374,8 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
                 </div>
               </div>
               <div className="text-right flex-shrink-0">
-                <p className="font-black text-sm" style={{ color:CC,fontFamily:"'Nunito',sans-serif" }}>{fmt(c.total)}</p>
-                <p className="text-xs text-muted-foreground">{invCount} fact.</p>
+                <p className="font-black text-sm" style={{ color: montantDu>0?SEM.warning.accent:SEM.neutral.accent, fontFamily:"'Nunito',sans-serif" }}>{fmt(montantDu)}</p>
+                <p className="text-xs text-muted-foreground">{montantDu>0?"dû · ":""}{invCount} fact.</p>
               </div>
               <ChevronRight size={14} className="text-muted-foreground flex-shrink-0"/>
             </div>

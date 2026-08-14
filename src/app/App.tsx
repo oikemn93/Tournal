@@ -1094,16 +1094,53 @@ function SubmitBtn({ color = "#C9A227", label, onClick, disabled }: { color?: st
 
 // ─── SCREEN: LOGIN ────────────────────────────────────────────────────────────
 
+const LOGIN_MAX_ATTEMPTS = 5;      // failed tries before the device locks
+const LOGIN_LOCK_MS = 2 * 60_000;  // lockout duration (mirrors auth_settings.lock_minutes default)
+const LOGIN_LOCK_KEY = "tournal:login_lock";
+
 function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
   const [phone, setPhone] = useState("+221 "); const [pwd, setPwd] = useState(""); const [show, setShow] = useState(false); const [err, setErr] = useState(""); const [loading, setLoading] = useState(false);
+  // Employees authenticate with a 6-digit code; the SuperAdmin toggles to a full password.
+  const [adminMode, setAdminMode] = useState(false);
+  const [attempts, setAttempts] = useState(0);
+  const [lockedUntil, setLockedUntil] = useState<number>(() => {
+    const raw = typeof localStorage !== "undefined" ? localStorage.getItem(LOGIN_LOCK_KEY) : null;
+    const ts = raw ? Number(raw) : 0;
+    return ts > Date.now() ? ts : 0;
+  });
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!lockedUntil) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [lockedUntil]);
+  const isLocked = lockedUntil > now;
+  const remainingSec = Math.max(0, Math.ceil((lockedUntil - now) / 1000));
+
+  const onlyDigits = (v: string) => v.replace(/\D/g, "").slice(0, 6);
+
   async function login() {
+    if (isLocked || loading) return;
+    if (!adminMode && !/^\d{6}$/.test(pwd)) { setErr("Entrez votre code à 6 chiffres."); return; }
     setLoading(true);
     try {
       await signInWithPhone(phone, pwd);
-      setErr("");
+      setErr(""); setAttempts(0); setLockedUntil(0);
+      if (typeof localStorage !== "undefined") localStorage.removeItem(LOGIN_LOCK_KEY);
       onAuthenticated();
     } catch (error) {
-      setErr(error instanceof Error ? error.message : "Numéro ou mot de passe incorrect");
+      const next = attempts + 1;
+      setAttempts(next);
+      setPwd("");
+      if (next >= LOGIN_MAX_ATTEMPTS) {
+        const until = Date.now() + LOGIN_LOCK_MS;
+        setLockedUntil(until);
+        if (typeof localStorage !== "undefined") localStorage.setItem(LOGIN_LOCK_KEY, String(until));
+        setErr(`Trop de tentatives. Compte bloqué pendant ${Math.round(LOGIN_LOCK_MS / 60000)} minutes.`);
+      } else {
+        const left = LOGIN_MAX_ATTEMPTS - next;
+        setErr((error instanceof Error ? error.message : "Identifiants incorrects") + ` · ${left} tentative${left > 1 ? "s" : ""} restante${left > 1 ? "s" : ""}`);
+      }
     } finally {
       setLoading(false);
     }
@@ -1119,17 +1156,24 @@ function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
         <div>
           <label className="text-xs font-black mb-2 block tracking-wider" style={{ color:"#C9A227" }}>NUMÉRO DE TÉLÉPHONE</label>
           <div className="relative"><Smartphone size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input value={phone} onChange={e=>{const v=e.target.value;setPhone(v.startsWith("+221 ")?v:"+221 ");setErr("");}} placeholder="+221 77 000 0000" type="tel" className={inputCls+" pl-11"} onKeyDown={e=>e.key==="Enter"&&login()} /></div>
+            <input value={phone} onChange={e=>{const v=e.target.value;setPhone(v.startsWith("+221 ")?v:"+221 ");setErr("");}} placeholder="+221 77 000 0000" type="tel" disabled={isLocked} className={inputCls+" pl-11"} onKeyDown={e=>e.key==="Enter"&&login()} /></div>
         </div>
         <div>
-          <label className="text-xs font-black mb-2 block tracking-wider" style={{ color:"#C9A227" }}>MOT DE PASSE</label>
+          <label className="text-xs font-black mb-2 block tracking-wider" style={{ color:"#C9A227" }}>{adminMode ? "MOT DE PASSE ADMINISTRATEUR" : "CODE D’ACCÈS (6 CHIFFRES)"}</label>
           <div className="relative"><Lock size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input value={pwd} onChange={e=>{setPwd(e.target.value);setErr("");}} placeholder="••••••••" type={show?"text":"password"} className={inputCls+" pl-11 pr-12"} onKeyDown={e=>e.key==="Enter"&&login()} />
+            {adminMode ? (
+              <input value={pwd} onChange={e=>{setPwd(e.target.value);setErr("");}} placeholder="••••••••" type={show?"text":"password"} disabled={isLocked} className={inputCls+" pl-11 pr-12"} onKeyDown={e=>e.key==="Enter"&&login()} />
+            ) : (
+              <input value={pwd} onChange={e=>{setPwd(onlyDigits(e.target.value));setErr("");}} placeholder="••••••" type={show?"text":"password"} inputMode="numeric" maxLength={6} disabled={isLocked} className={inputCls+" pl-11 pr-12 text-center tracking-[0.5em] text-xl font-black"} onKeyDown={e=>e.key==="Enter"&&login()} />
+            )}
             <button onClick={()=>setShow(v=>!v)} className="absolute right-3.5 top-1/2 -translate-y-1/2">{show?<EyeOff size={18} className="text-muted-foreground"/>:<Eye size={18} className="text-muted-foreground"/>}</button></div>
         </div>
         {err&&<div className="flex items-center gap-2 px-4 py-3 rounded-xl" style={{ background:"#ef444415" }}><X size={14} style={{ color:"#ef4444" }}/><p className="text-sm font-semibold" style={{ color:"#ef4444" }}>{err}</p></div>}
-        <button onClick={login} disabled={loading} className="w-full py-4 rounded-2xl text-base font-black active:scale-95 disabled:opacity-60" style={{ background:"#C9A227", color:"#fff", fontFamily:"'Nunito', sans-serif" }}>{loading ? "Veuillez patienter…" : "Se connecter →"}</button>
-
+        {isLocked&&<div className="flex items-center gap-2 px-4 py-3 rounded-xl" style={{ background:"#ef444415" }}><Lock size={14} style={{ color:"#ef4444" }}/><p className="text-sm font-semibold" style={{ color:"#ef4444" }}>Réessayez dans {Math.floor(remainingSec/60)}:{String(remainingSec%60).padStart(2,"0")}</p></div>}
+        <button onClick={login} disabled={loading||isLocked} className="w-full py-4 rounded-2xl text-base font-black active:scale-95 disabled:opacity-60" style={{ background:"#C9A227", color:"#fff", fontFamily:"'Nunito', sans-serif" }}>{loading ? "Veuillez patienter…" : isLocked ? "Compte bloqué" : "Se connecter →"}</button>
+        <button onClick={()=>{ setAdminMode(m=>!m); setPwd(""); setErr(""); }} className="w-full text-center text-xs font-semibold text-muted-foreground py-1">
+          {adminMode ? "← Connexion employé (code à 6 chiffres)" : "Connexion administrateur (mot de passe)"}
+        </button>
       </div>
     </div>
   );
@@ -1143,28 +1187,30 @@ function RequiredPasswordChangeScreen({ onComplete }: { onComplete: () => void }
   const [loading, setLoading] = useState(false);
 
   async function submit() {
-    if (password.length < 12) { setError("Le nouveau mot de passe doit contenir au moins 12 caractères."); return; }
-    if (password !== confirm) { setError("Les deux mots de passe ne correspondent pas."); return; }
+    if (!/^\d{6}$/.test(password)) { setError("Le code doit comporter exactement 6 chiffres."); return; }
+    if (password !== confirm) { setError("Les deux codes ne correspondent pas."); return; }
     setLoading(true);
     try {
       await changeOwnPassword(password);
       onComplete();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Le mot de passe n’a pas pu être modifié.");
+      setError(cause instanceof Error ? cause.message : "Le code n’a pas pu être modifié.");
     } finally {
       setLoading(false);
     }
   }
 
+  const onlyDigits = (v: string) => v.replace(/\D/g, "").slice(0, 6);
+
   return <div className="bg-background text-foreground min-h-screen flex items-center justify-center px-6" style={{ fontFamily:"'Inter', sans-serif" }}>
     <div className="w-full max-w-md rounded-3xl border bg-card p-6 space-y-5 shadow-sm">
       <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto" style={{ background:"#C9A22722" }}><ShieldCheck size={32} style={{ color:"#C9A227" }}/></div>
-      <div className="text-center"><h1 className="text-2xl font-black">Choisissez un nouveau mot de passe</h1><p className="text-sm text-muted-foreground mt-2">Le mot de passe transmis est temporaire. Remplacez-le avant d’accéder à la boutique.</p></div>
-      <Field label="NOUVEAU MOT DE PASSE" color="#C9A227"><input value={password} onChange={e=>{setPassword(e.target.value);setError("");}} type={show?"text":"password"} minLength={12} className={inputCls} autoFocus /></Field>
-      <Field label="CONFIRMER LE MOT DE PASSE" color="#C9A227"><input value={confirm} onChange={e=>{setConfirm(e.target.value);setError("");}} type={show?"text":"password"} minLength={12} className={inputCls} onKeyDown={e=>e.key==="Enter"&&submit()} /></Field>
-      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={show} onChange={e=>setShow(e.target.checked)} /> Afficher les mots de passe</label>
+      <div className="text-center"><h1 className="text-2xl font-black">Choisissez votre code d’accès</h1><p className="text-sm text-muted-foreground mt-2">Le code transmis est temporaire. Choisissez votre code personnel à 6 chiffres avant d’accéder à la boutique.</p></div>
+      <Field label="NOUVEAU CODE (6 CHIFFRES)" color="#C9A227"><input value={password} onChange={e=>{setPassword(onlyDigits(e.target.value));setError("");}} type={show?"text":"password"} inputMode="numeric" maxLength={6} className={inputCls+" text-center tracking-[0.5em] text-xl font-black"} autoFocus /></Field>
+      <Field label="CONFIRMER LE CODE" color="#C9A227"><input value={confirm} onChange={e=>{setConfirm(onlyDigits(e.target.value));setError("");}} type={show?"text":"password"} inputMode="numeric" maxLength={6} className={inputCls+" text-center tracking-[0.5em] text-xl font-black"} onKeyDown={e=>e.key==="Enter"&&submit()} /></Field>
+      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={show} onChange={e=>setShow(e.target.checked)} /> Afficher le code</label>
       {error&&<div className="px-4 py-3 rounded-xl text-sm font-semibold" style={{ background:"#ef444415",color:"#ef4444" }}>{error}</div>}
-      <SubmitBtn label={loading?"Modification…":"Enregistrer le nouveau mot de passe"} onClick={submit} disabled={loading} />
+      <SubmitBtn label={loading?"Modification…":"Enregistrer mon code"} onClick={submit} disabled={loading} />
     </div>
   </div>;
 }
@@ -9185,7 +9231,7 @@ export default function App() {
                       {!n.read && <span className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0"/>}
                     </div>
                     <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{n.body}</p>
-                    <p className="text-[10px] text-muted-foreground/50 mt-0.5">{new Date(n.dateRaw).toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"})}</p>
+                    <p className="text-[10px] text-muted-foreground/50 mt-0.5">{new Date(n.dateRaw).toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit",second:"2-digit"})}</p>
                   </div>
                 </button>
               ))}
