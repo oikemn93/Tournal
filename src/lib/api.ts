@@ -92,7 +92,7 @@ async function adminProvision<T>(action: string, payload: Record<string, unknown
 export async function signInWithPhone(phone: string, password: string) {
   const body = await authRequest("/token?grant_type=password", {
     method: "POST",
-    body: JSON.stringify({ email: phoneToEmail(phone), password }),
+    body: JSON.stringify({ phone, password }),
   });
   storeSession(body as AuthSession);
   return body as AuthSession;
@@ -118,7 +118,7 @@ export async function signUpWithPhone(phone: string, password: string, fullName:
   const body = await authRequest("/signup", {
     method: "POST",
     body: JSON.stringify({
-      email: phoneToEmail(phone),
+      phone,
       password,
       data: { phone, full_name: fullName.trim() || phone },
     }),
