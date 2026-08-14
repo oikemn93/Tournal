@@ -15,7 +15,7 @@ export type InvoiceLine = { productId: number; nom: string; qty: number; unit: s
 
 export type AuditEntry = {
   id: number; userId: string; userNom: string; userColor: string;
-  action: string; detail: string; icon: string; timestamp: number; date: string;
+  action: string; detail: string; icon: string; timestamp: number; date: string; source?: "native" | "legacy_kv";
 };
 export type BoutiqueAssignment = { boutiqueId: string; role: string; droits: Record<Permission, boolean> };
 export type PlatformUser = {

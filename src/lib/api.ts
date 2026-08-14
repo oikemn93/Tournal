@@ -98,6 +98,21 @@ export async function signInWithPhone(phone: string, password: string) {
   return body as AuthSession;
 }
 
+export async function changeOwnPassword(password: string) {
+  if (password.length < 12) throw new Error("Utilisez au moins 12 caractères pour le mot de passe");
+  const session = readSession();
+  if (!session?.access_token) throw new Error("Connexion requise");
+  await authRequest("/user", {
+    method: "PUT",
+    headers: { Authorization: `Bearer ${session.access_token}` },
+    body: JSON.stringify({ password }),
+  });
+  await dataRequest("rpc/complete_password_change", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
 export async function signUpWithPhone(phone: string, password: string, fullName: string) {
   if (password.length < 12) throw new Error("Utilisez au moins 12 caractères pour le mot de passe");
   const body = await authRequest("/signup", {
@@ -184,6 +199,31 @@ export function subscribeToBoutiqueChanges(boutiqueId: string, onChange: () => v
   }
 }
 
+export async function recordAuditLog(params: {
+  boutiqueId: string;
+  userId: string;
+  action: string;
+  detail: string;
+  icon: string;
+  source?: "native" | "legacy_kv";
+}) {
+  return dataRequest<Array<{ id: number; boutique_id: string; user_id: string; action: string; detail: string; icon: string; source?: string; created_at: string }>>(
+    "audit_log",
+    {
+      method: "POST",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify({
+        boutique_id: params.boutiqueId,
+        user_id: params.userId,
+        action: params.action,
+        detail: params.detail,
+        icon: params.icon,
+        source: params.source ?? "native",
+      }),
+    },
+  );
+}
+
 export async function createBoutique(nom: string, ville: string, ownerId: string) {
   return adminProvision<{ boutiqueId: string }>("create_boutique", { nom, ville, ownerId });
 }
@@ -214,14 +254,17 @@ export async function getData<T>(key: string): Promise<T | null> {
   if (key === "boutiques") {
     // Compatibility projection: legacy screens still consume a Boutique object,
     // but its data now comes exclusively from the relational source of truth.
-    const [boutiques, categories, products, entries, clients, suppliers, invoices, lines, charges, sessions] = await Promise.all([
+    const [boutiques, categories, products, entries, clients, suppliers, invoices, lines, charges, sessions, users, auditLogs] = await Promise.all([
       dataRequest<any[]>("boutiques?select=*&order=nom.asc"),
       dataRequest<any[]>("categories?select=*"), dataRequest<any[]>("products?select=*"),
       dataRequest<any[]>("stock_entries?select=*"), dataRequest<any[]>("clients?select=*"),
       dataRequest<any[]>("suppliers?select=*"), dataRequest<any[]>("invoices?select=*"),
       dataRequest<any[]>("invoice_lines?select=*"), dataRequest<any[]>("charges?select=*"),
       dataRequest<any[]>("caisse_sessions?select=*"),
+      dataRequest<any[]>("platform_users?select=id,nom,initials,color"),
+      dataRequest<any[]>("audit_log?select=*&order=created_at.desc"),
     ]);
+    const userById = new Map(users.map((u: any) => [u.id, u]));
     const day = (value?: string | null) => value ? new Date(value).toLocaleDateString("fr-FR") : "";
     return boutiques.map((b) => ({
       id: b.id, nom: b.nom, ville: b.ville ?? "", color: b.color ?? "#C9A227",
@@ -263,12 +306,29 @@ export async function getData<T>(key: string): Promise<T | null> {
         .sort((a, b) => new Date(b.opened_at).getTime() - new Date(a.opened_at).getTime())
         .slice(0, 1)
         .map(s => ({ id:s.id, openedAt:s.opened_at, fondDeCaisse:Number(s.fond_ouverture ?? 0), openedBy:s.opened_by ?? "" }))[0],
-      auditLog: [],
+      auditLog: auditLogs
+        .filter((l: any) => l.boutique_id === b.id)
+        .map((l: any) => {
+          const ts = new Date(l.created_at).getTime();
+          const user = userById.get(l.user_id) ?? {};
+          return {
+            id: l.id,
+            userId: l.user_id,
+            userNom: user.nom ?? "Utilisateur",
+            userColor: user.color ?? "#6b7280",
+            action: l.action,
+            detail: l.detail,
+            icon: l.icon,
+            timestamp: ts,
+            date: new Date(ts).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+            source: l.source ?? undefined,
+          };
+        }),
     })) as T;
   }
   if (key === "platform_users") {
     const [users, assignments] = await Promise.all([
-      dataRequest<Array<any>>("platform_users?select=id,phone,nom,initials,color,is_super_admin,group_id,is_compte_mere"),
+      dataRequest<Array<any>>("platform_users?select=id,phone,nom,initials,color,is_super_admin,group_id,is_compte_mere,must_change_password"),
       dataRequest<Array<any>>("boutique_assignments?select=boutique_id,user_id,role,droits"),
     ]);
     const toRole = (role: string) => role === "owner" ? "Propriétaire" : role === "manager" ? "Manager" : "Vendeur";
@@ -281,6 +341,7 @@ export async function getData<T>(key: string): Promise<T | null> {
       isSuperAdmin: user.is_super_admin,
       groupeId: user.group_id ?? undefined,
       isCompteMere: user.is_compte_mere ?? undefined,
+      mustChangePassword: user.must_change_password === true,
       assignments: assignments.filter((a) => a.user_id === user.id).map((a) => ({
         boutiqueId: a.boutique_id,
         role: toRole(a.role),

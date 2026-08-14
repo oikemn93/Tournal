@@ -1,8 +1,13 @@
 packages:
   - '.'
+allowBuilds:
+  '@tailwindcss/oxide': true
+  core-js: true
+  esbuild: true
 supportedArchitectures:
   os:
     - linux
+    - win32
   cpu:
     - x64
     - arm64

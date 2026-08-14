@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { getData, saveData, checkBackend, stripImages, mergeImages, signQZ, sendInvoiceEmail, storePDFForSMS, getCurrentAuthUser, hasAuthenticatedSession, validateServerSession, signInWithPhone, signUpWithPhone, signOut as signOutFromSupabase, createBoutique, createUser, resetUserPassword, subscribeToBoutiqueChanges, assignUserToBoutique, unassignUserFromBoutique } from "../lib/api";
+import { getData, saveData, checkBackend, stripImages, mergeImages, signQZ, sendInvoiceEmail, storePDFForSMS, getCurrentAuthUser, hasAuthenticatedSession, validateServerSession, signInWithPhone, changeOwnPassword, signOut as signOutFromSupabase, createBoutique, createUser, resetUserPassword, subscribeToBoutiqueChanges, assignUserToBoutique, unassignUserFromBoutique, recordAuditLog } from "../lib/api";
 import { toast, Toaster } from "sonner";
 import {
   LayoutDashboard, Package, Users, Truck, FileText, ShieldCheck,
@@ -31,7 +31,7 @@ const useNotif = () => React.useContext(NotifCtx);
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 
-type Screen     = "login" | "superadmin" | "boutique-select" | "app";
+type Screen     = "login" | "password-change" | "superadmin" | "boutique-select" | "app";
 type Tab        = "dashboard" | "stock" | "fournisseurs" | "clients" | "factures" | "pos" | "charges" | "compta" | "admin" | "inventaire" | "transferts";
 type Notif      = { id: number; icon: string; title: string; body: string; dateRaw: string; read: boolean; tab?: Tab; filter?: Record<string,string> };
 type TransferStatus = "en_attente" | "accepté" | "refusé" | "annulé";
@@ -72,7 +72,7 @@ type InvoiceLine = { productId: number; nom: string; qty: number; unit: string; 
 
 type AuditEntry = {
   id: number; userId: string; userNom: string; userColor: string;
-  action: string; detail: string; icon: string; timestamp: number; date: string;
+  action: string; detail: string; icon: string; timestamp: number; date: string; source?: "native" | "legacy_kv";
 };
 type BoutiqueAssignment = { boutiqueId: string; role: string; droits: Record<Permission, boolean> };
 type Groupe = { id: string; nom: string };
@@ -80,7 +80,7 @@ type PlatformUser = {
   id: string; phone: string; password: string; nom: string;
   initials: string; color: string; isSuperAdmin: boolean;
   assignments: BoutiqueAssignment[];
-  groupeId?: string; isCompteMere?: boolean;
+  groupeId?: string; isCompteMere?: boolean; mustChangePassword?: boolean;
 };
 type Product    = { id: number; nom: string; img: string; unit: string; fournisseur: string; categorie?: string; couleur?: string; alertOk?: number; alertLow?: number };
 type StockEntry = { id: number; productId: number; qty: number; unit: string; montantDu: number; date: string; fournisseur: string; invoiceId?: string; nbLots?: number; nbPieces?: number; longueurPiece?: number; sku?: string; isTransfertInterne?: boolean };
@@ -1092,7 +1092,7 @@ function SubmitBtn({ color = "#C9A227", label, onClick, disabled }: { color?: st
 // ─── SCREEN: LOGIN ────────────────────────────────────────────────────────────
 
 function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
-  const [phone, setPhone] = useState("+221 "); const [name, setName] = useState(""); const [pwd, setPwd] = useState(""); const [show, setShow] = useState(false); const [registration, setRegistration] = useState(false); const [err, setErr] = useState(""); const [loading, setLoading] = useState(false);
+  const [phone, setPhone] = useState("+221 "); const [pwd, setPwd] = useState(""); const [show, setShow] = useState(false); const [err, setErr] = useState(""); const [loading, setLoading] = useState(false);
   async function login() {
     setLoading(true);
     try {
@@ -1105,19 +1105,6 @@ function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
       setLoading(false);
     }
   }
-  async function register() {
-    setLoading(true);
-    try {
-      const session = await signUpWithPhone(phone, pwd, name);
-      setErr("");
-      if (session.access_token) onAuthenticated();
-      else setErr("Compte créé. La confirmation d’e-mail doit être activée dans Supabase avant la première connexion.");
-    } catch (error) {
-      setErr(error instanceof Error ? error.message : "Création du compte impossible");
-    } finally {
-      setLoading(false);
-    }
-  }
   return (
     <div className="bg-background text-foreground min-h-screen flex flex-col" style={{ fontFamily:"'Inter', sans-serif" }}>
       <div className="px-6 pt-16 pb-8 text-center">
@@ -1126,10 +1113,6 @@ function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
         <p className="text-sm text-muted-foreground">Gestion simplifiée pour les commerçants</p>
       </div>
       <div className="flex-1 px-6 space-y-4">
-        {registration&&<div>
-          <label className="text-xs font-black mb-2 block tracking-wider" style={{ color:"#C9A227" }}>NOM COMPLET</label>
-          <input value={name} onChange={e=>{setName(e.target.value);setErr("");}} placeholder="Votre nom" className={inputCls} />
-        </div>}
         <div>
           <label className="text-xs font-black mb-2 block tracking-wider" style={{ color:"#C9A227" }}>NUMÉRO DE TÉLÉPHONE</label>
           <div className="relative"><Smartphone size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -1142,12 +1125,45 @@ function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
             <button onClick={()=>setShow(v=>!v)} className="absolute right-3.5 top-1/2 -translate-y-1/2">{show?<EyeOff size={18} className="text-muted-foreground"/>:<Eye size={18} className="text-muted-foreground"/>}</button></div>
         </div>
         {err&&<div className="flex items-center gap-2 px-4 py-3 rounded-xl" style={{ background:"#ef444415" }}><X size={14} style={{ color:"#ef4444" }}/><p className="text-sm font-semibold" style={{ color:"#ef4444" }}>{err}</p></div>}
-        <button onClick={registration?register:login} disabled={loading} className="w-full py-4 rounded-2xl text-base font-black active:scale-95 disabled:opacity-60" style={{ background:"#C9A227", color:"#fff", fontFamily:"'Nunito', sans-serif" }}>{loading ? "Veuillez patienter…" : registration ? "Créer le compte →" : "Se connecter →"}</button>
-        <button onClick={()=>{setRegistration(v=>!v);setErr("");}} className="w-full text-sm font-semibold underline text-muted-foreground">{registration ? "J’ai déjà un compte" : "Premier accès ? Créer le compte administrateur"}</button>
+        <button onClick={login} disabled={loading} className="w-full py-4 rounded-2xl text-base font-black active:scale-95 disabled:opacity-60" style={{ background:"#C9A227", color:"#fff", fontFamily:"'Nunito', sans-serif" }}>{loading ? "Veuillez patienter…" : "Se connecter →"}</button>
 
       </div>
     </div>
   );
+}
+
+function RequiredPasswordChangeScreen({ onComplete }: { onComplete: () => void }) {
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [show, setShow] = useState(false);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function submit() {
+    if (password.length < 12) { setError("Le nouveau mot de passe doit contenir au moins 12 caractères."); return; }
+    if (password !== confirm) { setError("Les deux mots de passe ne correspondent pas."); return; }
+    setLoading(true);
+    try {
+      await changeOwnPassword(password);
+      onComplete();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Le mot de passe n’a pas pu être modifié.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return <div className="bg-background text-foreground min-h-screen flex items-center justify-center px-6" style={{ fontFamily:"'Inter', sans-serif" }}>
+    <div className="w-full max-w-md rounded-3xl border bg-card p-6 space-y-5 shadow-sm">
+      <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto" style={{ background:"#C9A22722" }}><ShieldCheck size={32} style={{ color:"#C9A227" }}/></div>
+      <div className="text-center"><h1 className="text-2xl font-black">Choisissez un nouveau mot de passe</h1><p className="text-sm text-muted-foreground mt-2">Le mot de passe transmis est temporaire. Remplacez-le avant d’accéder à la boutique.</p></div>
+      <Field label="NOUVEAU MOT DE PASSE" color="#C9A227"><input value={password} onChange={e=>{setPassword(e.target.value);setError("");}} type={show?"text":"password"} minLength={12} className={inputCls} autoFocus /></Field>
+      <Field label="CONFIRMER LE MOT DE PASSE" color="#C9A227"><input value={confirm} onChange={e=>{setConfirm(e.target.value);setError("");}} type={show?"text":"password"} minLength={12} className={inputCls} onKeyDown={e=>e.key==="Enter"&&submit()} /></Field>
+      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={show} onChange={e=>setShow(e.target.checked)} /> Afficher les mots de passe</label>
+      {error&&<div className="px-4 py-3 rounded-xl text-sm font-semibold" style={{ background:"#ef444415",color:"#ef4444" }}>{error}</div>}
+      <SubmitBtn label={loading?"Modification…":"Enregistrer le nouveau mot de passe"} onClick={submit} disabled={loading} />
+    </div>
+  </div>;
 }
 
 // ─── SCREEN: SUPER ADMIN ──────────────────────────────────────────────────────
@@ -7005,7 +7021,17 @@ function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdat
               <div className="flex-1 pb-3">
                 <div className="bg-card rounded-2xl px-3 py-3 border border-border">
                   <div className="flex items-start justify-between gap-2">
-                    <div><p className="text-sm font-bold">{e.action}</p><p className="text-xs text-muted-foreground mt-0.5">{e.detail}</p></div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-bold">{e.action}</p>
+                        {currentUser?.isSuperAdmin && e.source && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-md font-black uppercase tracking-wide" style={{ background:e.source === "legacy_kv" ? "#dc262615" : "#16a34a15", color:e.source === "legacy_kv" ? "#dc2626" : "#16a34a" }}>
+                            {e.source === "legacy_kv" ? "KV legacy" : "Native"}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-0.5">{e.detail}</p>
+                    </div>
                     <p className="text-xs text-muted-foreground text-right whitespace-nowrap flex-shrink-0">{e.date}</p>
                   </div>
                   <div className="flex items-center gap-1.5 mt-2">
@@ -8470,6 +8496,7 @@ export default function App() {
   const lastRemoteU          = useRef<string>("");
   const platformUsersRef     = useRef<PlatformUser[]>([]);
   const activeBoutiqueIdRef  = useRef<string|null>(null); // stable ref for async callbacks
+  const currentUserRef       = useRef<PlatformUser | null>(null);
 
   // ── Notification helpers ──────────────────────────────────────────────────
   const sendNotif = React.useCallback(async (params: Omit<Notif,"id"|"read"|"dateRaw">) => {
@@ -8675,6 +8702,7 @@ export default function App() {
           const u = finalUsers.find(x => x.id === authUser.id);
           if (u) {
             setCurrentUser(u);
+            if (u.mustChangePassword) { setScreen("password-change"); return; }
             if (u.isSuperAdmin) { setScreen("superadmin"); return; }
             const assignments = u.assignments.filter(a => finalBoutiques.some(b => b.id === a.boutiqueId));
             if (assignments.length === 1) {
@@ -8756,6 +8784,7 @@ export default function App() {
   // Keep stable ref in sync for use inside async callbacks (debouncedSave, logTech)
   useEffect(() => { activeBoutiqueIdRef.current = activeBoutiqueId; }, [activeBoutiqueId]);
   useEffect(() => { platformUsersRef.current = platformUsers; }, [platformUsers]);
+  useEffect(() => { currentUserRef.current = currentUser; }, [currentUser]);
 
   const boutique = boutiques.find(b=>b.id===activeBoutiqueId)??null;
 
@@ -8767,9 +8796,50 @@ export default function App() {
     setBoutiques(prev=>prev.map(b=>b.id===boutiqueId?{...b,...updates}:b));
   }
   function logAction(action: string, detail: string, icon: string) {
-    if (!activeBoutiqueId||!currentUser) return;
-    const entry: AuditEntry = { id:Date.now(), userId:currentUser.id, userNom:currentUser.nom, userColor:currentUser.color, action, detail, icon, timestamp:Date.now(), date:`Aujourd'hui ${nowStr()}` };
-    setBoutiques(prev=>prev.map(b=>b.id===activeBoutiqueId?{...b,auditLog:[entry,...b.auditLog]}:b));
+    if (!activeBoutiqueId || !currentUser) return;
+    const boutiqueId = activeBoutiqueId;
+    const user = currentUserRef.current ?? currentUser;
+    const optimisticId = Date.now();
+    const optimistic: AuditEntry = {
+      id: optimisticId,
+      userId: user.id,
+      userNom: user.nom,
+      userColor: user.color,
+      action,
+      detail,
+      icon,
+      timestamp: optimisticId,
+      date: new Date(optimisticId).toLocaleString("fr-FR", { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit", second:"2-digit" }),
+      source: "native",
+    };
+    setBoutiques(prev=>prev.map(b=>b.id===boutiqueId?{...b,auditLog:[optimistic,...b.auditLog]}:b));
+    void (async () => {
+      try {
+        const rows = await recordAuditLog({
+          boutiqueId,
+          userId: user.id,
+          action,
+          detail,
+          icon,
+          source: "native",
+        });
+        const saved = rows[0];
+        if (!saved) return;
+        const ts = new Date(saved.created_at).getTime();
+        setBoutiques(prev => prev.map(b => b.id !== boutiqueId ? b : {
+          ...b,
+          auditLog: b.auditLog.map((entry) => entry.id !== optimisticId ? entry : {
+            ...entry,
+            id: saved.id,
+            timestamp: ts,
+            date: new Date(ts).toLocaleString("fr-FR", { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit", second:"2-digit" }),
+            source: (saved.source ?? "native") as "native" | "legacy_kv",
+          }),
+        }));
+      } catch (error) {
+        console.warn("Audit log server write failed", error);
+      }
+    })();
   }
   function handleLogin(user: PlatformUser) {
     const freshUser = platformUsers.find(u => u.id === user.id) ?? user;
@@ -8914,6 +8984,7 @@ export default function App() {
 
 
   if (screen==="login") return <LoginScreen onAuthenticated={() => window.location.reload()}/>;
+  if (screen==="password-change"&&currentUser) return <RequiredPasswordChangeScreen onComplete={() => window.location.reload()}/>;
   if (screen==="superadmin"&&currentUser) return (
     <SuperAdminScreen boutiques={boutiques} platformUsers={platformUsers} groupes={groupes}
       onEnterBoutique={handleEnterBoutiqueAsAdmin}
