@@ -128,6 +128,8 @@ export function POSView({ boutique, allBoutiques, currentUser, onUpdate, logActi
   const [expMethod, setExpMethod] = useState<PaymentMethod>("Espèces");
   const [expBusy, setExpBusy] = useState(false);
   const [expDone, setExpDone] = useState(false);
+  const [expPending, setExpPending] = useState(false);
+  const canCollectExpress = currentUser.assignments.find(a => a.boutiqueId === boutique.id)?.droits?.encaissement_vente === true;
 
   function openExpress(e: React.MouseEvent, p: Product) {
     e.stopPropagation();
@@ -140,8 +142,9 @@ export function POSView({ boutique, allBoutiques, currentUser, onUpdate, logActi
     setExpSellUnit(defaultUnit);
     setExpQty("1");
     setExpPrice(p.prixVente ? String(p.prixVente) : "");
-    setExpMethod("Espèces");
-    setExpDone(false);
+  setExpMethod("Espèces");
+  setExpDone(false);
+  setExpPending(false);
   }
 
   async function confirmExpress() {
@@ -158,20 +161,34 @@ export function POSView({ boutique, allBoutiques, currentUser, onUpdate, logActi
     setExpBusy(true);
     try {
       const saved = await createSale({ boutiqueId:boutique.id, client:"Client comptoir", lines:[line] });
-      const paid = await recordPayment({ boutiqueId:boutique.id, invoiceId:saved.invoice_id, amount:saved.total, paymentMethod:expMethod });
-      const newInv: Invoice = {
-        id:saved.invoice_id, client:"Client comptoir", lines:[line], montant:saved.total, acompte:paid.acompte,
-        date:today(), dateRaw:new Date().toISOString(), status:"payé", type:"vente",
-        operatorNom:currentUser.nom, operatorColor:currentUser.color, paymentMethod:expMethod,
-        payments:[{ id:paid.payment.id, amount:paid.payment.amount, paymentMethod:paid.payment.payment_method as PaymentMethod, paidAt:paid.payment.paid_at, operatorId:paid.payment.operator_id, operatorName:paid.payment.operator_name, batchId:paid.payment.batch_id, source:paid.payment.source }],
-      };
-      const saleEntries: StockEntry[] = paid.stock_deducted
-        ? [{ id:Date.now(), productId:line.productId, qty:-line.qty, unit:line.unit, montantDu:0, date:today(), fournisseur:`Vente ${saved.invoice_id}`, invoiceId:saved.invoice_id }]
-        : [];
-      onUpdate({ invoices:[...invoices, newInv], ...(saleEntries.length ? { entries:[...entries, ...saleEntries] } : {}) });
-      logAction("Vente express", `${newInv.id} · ${expressModal.nom} · ${fmt(saved.total)} · ${expMethod}`, "⚡");
-      setExpDone(true);
-      setTimeout(() => doPrint(buildReceiptHtml(newInv, boutique, currentUser.nom), "Ticket de vente"), 150);
+      if (canCollectExpress) {
+        const paid = await recordPayment({ boutiqueId:boutique.id, invoiceId:saved.invoice_id, amount:saved.total, paymentMethod:expMethod });
+        const newInv: Invoice = {
+          id:saved.invoice_id, client:"Client comptoir", lines:[line], montant:saved.total, acompte:paid.acompte,
+          date:today(), dateRaw:new Date().toISOString(), status:"payé", type:"vente",
+          operatorNom:currentUser.nom, operatorColor:currentUser.color, paymentMethod:expMethod,
+          payments:[{ id:paid.payment.id, amount:paid.payment.amount, paymentMethod:paid.payment.payment_method as PaymentMethod, paidAt:paid.payment.paid_at, operatorId:paid.payment.operator_id, operatorName:paid.payment.operator_name, batchId:paid.payment.batch_id, source:paid.payment.source }],
+        };
+        const saleEntries: StockEntry[] = paid.stock_deducted
+          ? [{ id:Date.now(), productId:line.productId, qty:-line.qty, unit:line.unit, montantDu:0, date:today(), fournisseur:`Vente ${saved.invoice_id}`, invoiceId:saved.invoice_id }]
+          : [];
+        onUpdate({ invoices:[...invoices, newInv], ...(saleEntries.length ? { entries:[...entries, ...saleEntries] } : {}) });
+        logAction("Vente express", `${newInv.id} · ${expressModal.nom} · ${fmt(saved.total)} · ${expMethod}`, "⚡");
+        setExpPending(false);
+        setExpDone(true);
+        setTimeout(() => doPrint(buildReceiptHtml(newInv, boutique, currentUser.nom), "Ticket de vente"), 150);
+      } else {
+        const newInv: Invoice = {
+          id:saved.invoice_id, client:"Client comptoir", lines:[line], montant:saved.total, acompte:0,
+          date:today(), dateRaw:new Date().toISOString(), status:"en attente", type:"vente",
+          operatorNom:currentUser.nom, operatorColor:currentUser.color,
+        };
+        onUpdate({ invoices:[...invoices, newInv] });
+        logAction("Commande en attente", `${newInv.id} · ${expressModal.nom} · ${fmt(saved.total)}`, "🧾");
+        setExpPending(true);
+        setExpDone(true);
+        setTimeout(() => doPrint(buildOrderTicketHtml(newInv, boutique, currentUser.nom, true), "Bon de commande"), 150);
+      }
       setTimeout(() => { setExpressModal(null); setExpDone(false); setExpBusy(false); }, 1200);
     } catch (error) {
       setExpBusy(false);
@@ -599,8 +616,8 @@ export function POSView({ boutique, allBoutiques, currentUser, onUpdate, logActi
           {expDone ? (
             <div className="flex flex-col items-center gap-3 py-6 rounded-2xl" style={{ background:SEM.success.bg }}>
               <CheckCircle size={40} style={{ color:SEM.success.accent }}/>
-              <p className="font-black text-lg" style={{ color:SEM.success.accent, fontFamily:"'Nunito', sans-serif" }}>Vente encaissée ✓</p>
-              <p className="text-sm text-muted-foreground">Ticket imprimé automatiquement</p>
+              <p className="font-black text-lg" style={{ color:expPending ? SEM.warning.accent : SEM.success.accent, fontFamily:"'Nunito', sans-serif" }}>{expPending ? "Commande enregistrée ✓" : "Vente encaissée ✓"}</p>
+              <p className="text-sm text-muted-foreground">{expPending ? "Bon imprimé — le client règle auprès du caissier" : "Ticket imprimé automatiquement"}</p>
             </div>
           ) : (<>
             <div className="flex gap-4 items-center">
@@ -634,13 +651,14 @@ export function POSView({ boutique, allBoutiques, currentUser, onUpdate, logActi
                 <input value={expPrice} onChange={e=>setExpPrice(e.target.value)} type="number" placeholder="0 F" className={inputCls+" text-center font-black"}/>
               </Field>
             </div>
-            <Field label="MODE DE PAIEMENT" color={POS_COLOR}>
+            {canCollectExpress && <Field label="MODE DE PAIEMENT" color={POS_COLOR}>
               <div className="grid grid-cols-2 gap-2">
                 {PAYMENT_METHODS.map(m => (
                   <button key={m} onClick={()=>setExpMethod(m)} className="py-2.5 rounded-xl text-xs font-bold" style={{ background: expMethod===m?POS_COLOR:"#EEE9D8", color: expMethod===m?"#fff":"#6b7280" }}>{PM_ICON[m]} {m}</button>
                 ))}
               </div>
-            </Field>
+            </Field>}
+            {!canCollectExpress && <div className="flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background:SEM.warning.bg, color:SEM.warning.accent }}><AlertCircle size={16}/><span className="text-xs font-semibold">Cette vente sera enregistrée en attente et réglée auprès du caissier.</span></div>}
             {Number(expQty)>0 && Number(expPrice)>0 && (
               <div className="flex justify-between items-center px-4 py-3 rounded-2xl" style={{ background:POS_COLOR+"15" }}>
                 <span className="text-sm font-bold" style={{ color:POS_COLOR }}>Total à encaisser</span>
@@ -648,7 +666,7 @@ export function POSView({ boutique, allBoutiques, currentUser, onUpdate, logActi
               </div>
             )}
             <button disabled={expBusy || !Number(expQty) || !Number(expPrice)} onClick={confirmExpress} className="w-full py-4 rounded-2xl font-black text-base flex items-center justify-center gap-2 active:scale-95 disabled:opacity-60" style={{ background:POS_COLOR, color:"#fff", fontFamily:"'Nunito', sans-serif" }}>
-              <Zap size={18}/> {expBusy ? "Encaissement…" : "Vendre & imprimer"}
+              <Zap size={18}/> {expBusy ? (canCollectExpress ? "Encaissement…" : "Enregistrement…") : (canCollectExpress ? "Vendre & imprimer" : "Enregistrer la commande")}
             </button>
           </>)}
         </Modal>

@@ -62,7 +62,7 @@ function RelationalMigrationNotice({ title }: { title: string }) {
 type CartItem   = { productId: number; nom: string; img: string; unit: string; qty: number; prixUnit: number; sellUnit?: string; sellQty?: number };
 type InvoiceStatus = "payé" | "acompte" | "en attente" | "en retard";
 type PaymentMethod = "Espèces" | "Wave" | "Orange Money" | "Autre";
-type Permission = "dashboard" | "stock" | "fournisseurs" | "clients" | "factures" | "remboursement" | "charges" | "compta" | "vente" | "inventaire" | "marges";
+type Permission = "dashboard" | "stock" | "fournisseurs" | "clients" | "factures" | "remboursement" | "charges" | "compta" | "vente" | "inventaire" | "marges" | "encaissement_vente";
 type InventaireLine = { productId: number; nom: string; unit: string; categorie?: string; theorique: number; compte?: number };
 type InventaireSession = { id: string; date: string; dateRaw: string; userId: string; userNom: string; userColor: string; statut: "en_cours" | "terminé"; perimetre: "tout" | string[]; lines: InventaireLine[]; valeurEcart?: number; chiffreAffaires?: number; benefice?: number };
 type ChargeCategorie = "Loyer" | "Salaires" | "Électricité" | "Transport" | "Achat stock" | "Marketing" | "Taxes" | "Autre";
@@ -174,12 +174,12 @@ const SUP_COLORS  = ["#C9A227","#1E9B1E","#3b82f6","#a855f7","#f97316","#ec4899"
 const USER_COLORS = ["#C9A227","#3b82f6","#1E9B1E","#a855f7","#f97316","#ec4899","#14b8a6","#ef4444"];
 const ROLES       = ["Gérant","Vendeur","Vendeuse","Caissier","Livreur","Autre"];
 const ROLE_PRESETS: Record<string, Record<Permission,boolean>> = {
-  "Gérant":   { dashboard:true,  stock:true,  fournisseurs:true,  clients:true,  factures:true,  remboursement:true,  charges:true,  compta:true,  vente:true,  inventaire:true,  marges:true  },
-  "Vendeur":  { dashboard:true,  stock:true,  fournisseurs:false, clients:true,  factures:true,  remboursement:false, charges:false, compta:false, vente:true,  inventaire:false, marges:false },
-  "Vendeuse": { dashboard:true,  stock:true,  fournisseurs:false, clients:true,  factures:true,  remboursement:false, charges:false, compta:false, vente:true,  inventaire:false, marges:false },
-  "Caissier": { dashboard:true,  stock:false, fournisseurs:false, clients:true,  factures:true,  remboursement:false, charges:false, compta:false, vente:true,  inventaire:false, marges:false },
-  "Livreur":  { dashboard:false, stock:false, fournisseurs:false, clients:false, factures:true,  remboursement:false, charges:false, compta:false, vente:false, inventaire:false, marges:false },
-  "Autre":    { dashboard:false, stock:false, fournisseurs:false, clients:false, factures:false, remboursement:false, charges:false, compta:false, vente:false, inventaire:false, marges:false },
+  "Gérant":   { dashboard:true,  stock:true,  fournisseurs:true,  clients:true,  factures:true,  remboursement:true,  charges:true,  compta:true,  vente:true,  inventaire:true,  marges:true,  encaissement_vente:true  },
+  "Vendeur":  { dashboard:true,  stock:true,  fournisseurs:false, clients:true,  factures:true,  remboursement:false, charges:false, compta:false, vente:true,  inventaire:false, marges:false, encaissement_vente:false },
+  "Vendeuse": { dashboard:true,  stock:true,  fournisseurs:false, clients:true,  factures:true,  remboursement:false, charges:false, compta:false, vente:true,  inventaire:false, marges:false, encaissement_vente:false },
+  "Caissier": { dashboard:true,  stock:false, fournisseurs:false, clients:true,  factures:true,  remboursement:false, charges:false, compta:false, vente:true,  inventaire:false, marges:false, encaissement_vente:true },
+  "Livreur":  { dashboard:false, stock:false, fournisseurs:false, clients:false, factures:true,  remboursement:false, charges:false, compta:false, vente:false, inventaire:false, marges:false, encaissement_vente:false },
+  "Autre":    { dashboard:false, stock:false, fournisseurs:false, clients:false, factures:false, remboursement:false, charges:false, compta:false, vente:false, inventaire:false, marges:false, encaissement_vente:false },
 };
 const COULEURS    = ["","#C9A227","#3b82f6","#1E9B1E","#ef4444","#a855f7","#f97316","#ec4899","#6b7280","#ffffff","#000000","#8B4513"];
 const CATEGORIES_DEF = ["Wax","Bazin","Soie","Dentelle","Velours","Coton","Lin","Satin","Kente","Bogolan","Autre"];
@@ -2536,7 +2536,7 @@ function TransfertsView({ boutique, allBoutiques, platformUsers, groupes, curren
   const allOutbound = [...outbound].sort((a,b) => b.dateRaw.localeCompare(a.dateRaw));
   const pendingInCount = allInbound.filter(t => t.status === "en_attente").length;
 
-  // ── Helpers ──────────────────────────────────────────────────────────────────
+  // ─�� Helpers ──────────────────────────────────────────────────────────────────
   function cleanPhone(p: string) { return p.replace(/\D/g,""); }
   // Flexible match: compare last min(9, len) digits to handle country-code prefixes
   function phoneMatch(a: string, b: string) {
@@ -3053,7 +3053,7 @@ function TransfertsView({ boutique, allBoutiques, platformUsers, groupes, curren
     </div>
   );
 
-  // ── Transfer list card ────────────────────────────────────────────────────────
+  // ── Transfer list card ───────────────────────────��────────────────────────────
   function TransferCard({ t, dir }: { t: Transfer; dir: "in"|"out" }) {
     const senderB = dir === "in" ? allBoutiques.find(b => b.id === t.fromBoutiqueId) : null;
     const invObj = (boutique.invoices??[]).find(inv => inv.id === t.invoiceId)
@@ -6372,7 +6372,7 @@ ${PA.printer ? `<div class="c" style="font-size:8pt;margin-top:2mm">Imprimante :
       {/* Auto-print sections per document type */}
       {[
         { key:"ticket" as const, label:"Ticket de caisse", desc:"Reçu court format thermique, remis au client après encaissement.", icon:"🧾" },
-        { key:"bon"    as const, label:"Bon de commande",  desc:"Document détaillé produits/quantités, généré à chaque nouvelle commande.", icon:"📋" },
+        { key:"bon"    as const, label:"Bon de commande",  desc:"Document d��taillé produits/quantités, généré à chaque nouvelle commande.", icon:"📋" },
       ].map(({ key, label, desc, icon }) => {
         const isOn = key==="ticket" ? (autoPrint&&canAutoprint) : (autoPrintBon&&canAutoprint);
         return (
@@ -6722,6 +6722,7 @@ function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdat
     {id:"compta"       as Permission, label:"Rapport",            icon:"📊"},
     {id:"inventaire"   as Permission, label:"Inventaire physique",icon:"📋"},
     {id:"marges"       as Permission, label:"Voir les marges",    icon:"📈"},
+    {id:"encaissement_vente" as Permission, label:"Encaissement en vente", icon:"💵"},
   ];
 
   // ── guards ────────────────────────────────────────────────────────────────
