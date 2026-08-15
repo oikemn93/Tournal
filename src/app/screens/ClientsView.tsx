@@ -9,7 +9,7 @@ import { getSiblings } from "../utils/inventory";
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
-import { createClient, recordClientPayment } from "../../lib/api";
+import { createClient, recordClientPayment, updateClientContact, WHOLESALE_MARKER } from "../../lib/api";
 import { PhoneField } from "../components/PhoneField";
 import { formatPreciseDateTime, invoicePaidAmount, invoiceRemainingAmount } from "../utils/payments";
 
@@ -35,9 +35,16 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
   async function submit() {
     if (!nom.trim()) return;
     const fullTel = tel.trim() ? dialCode + " " + tel.trim() : "";
+    const isWholesale = type === "Grossiste";
     let persisted;
-    try { persisted = await createClient({ boutiqueId:boutique.id,name:nom.trim(),type:type === "Grossiste" ? "B2B" : type,phone:fullTel,email:email.trim() || undefined,city:ville.trim() || undefined }); }
+    try { persisted = await createClient({ boutiqueId:boutique.id,name:nom.trim(),type:isWholesale ? "B2B" : type,phone:fullTel,email:email.trim() || undefined,city:ville.trim() || undefined }); }
     catch (error) { alert(error instanceof Error ? error.message : "Création du client impossible"); return; }
+    // Wholesale clients: tag the persisted row so the type survives a reload.
+    if (isWholesale) {
+      const markedContact = `${contact.trim()} ${WHOLESALE_MARKER}`.trim();
+      try { await updateClientContact(persisted.client_id, markedContact); }
+      catch { /* non-blocking: client is created, tag is best-effort */ }
+    }
     onUpdate({ clients:[...clients,{ id:persisted.client_id, nom:nom.trim(), type, tel:fullTel, total:0, last:today(), ville:ville.trim(), adresse:adresse.trim()||undefined, email:email.trim()||undefined, contact:contact.trim()||undefined }] });
     logAction("Nouveau client",`${nom.trim()} (${type}) · ${ville.trim()}`,"👥");
     setNom(""); setDialCode("+221"); setTel(""); setVille(""); setAdresse(""); setEmail(""); setContact(""); setModal(false);
@@ -345,7 +352,16 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
       <div className="space-y-2">
         {filtered.map(c=>{
           const CC = clientColor(c.type);
-          const invCount = boutique.invoices.filter(i=>i.client===c.nom).length;
+          // Match the same invoices the detail view uses (clientId, normalized phone, or name)
+          // so the amount due is computed dynamically instead of relying on the stored 0.
+          const normalizedPhone = (value?: string) => (value ?? "").replace(/\D/g, "");
+          const clientInvoices = boutique.invoices.filter(inv =>
+            inv.clientId === c.id
+            || (normalizedPhone(c.tel) && normalizedPhone(inv.clientTel) === normalizedPhone(c.tel))
+            || inv.client.trim().toLowerCase() === c.nom.trim().toLowerCase()
+          );
+          const invCount = clientInvoices.length;
+          const montantDu = clientInvoices.reduce((s,inv)=>s+invoiceRemainingAmount(inv),0);
           return (
           <button key={c.id} onClick={()=>setDetailClient(c)} className="w-full bg-card rounded-2xl p-3.5 border border-border text-left active:scale-[0.98] transition-transform">
             <div className="flex items-center gap-3">
@@ -358,8 +374,8 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
                 </div>
               </div>
               <div className="text-right flex-shrink-0">
-                <p className="font-black text-sm" style={{ color:CC,fontFamily:"'Nunito',sans-serif" }}>{fmt(c.total)}</p>
-                <p className="text-xs text-muted-foreground">{invCount} fact.</p>
+                <p className="font-black text-sm" style={{ color: montantDu>0?SEM.warning.accent:SEM.neutral.accent, fontFamily:"'Nunito',sans-serif" }}>{fmt(montantDu)}</p>
+                <p className="text-xs text-muted-foreground">{montantDu>0?"dû · ":""}{invCount} fact.</p>
               </div>
               <ChevronRight size={14} className="text-muted-foreground flex-shrink-0"/>
             </div>

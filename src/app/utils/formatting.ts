@@ -1,7 +1,8 @@
 export const fmt   = (n: number) => new Intl.NumberFormat("fr-FR").format(n) + " F";
-export const today = () => new Date().toLocaleDateString("fr-FR", { day: "2-digit", month: "short" }) + " · " + new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+// Times include seconds so every logged action carries a precise timestamp.
+export const today = () => new Date().toLocaleDateString("fr-FR", { day: "2-digit", month: "short" }) + " · " + new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 export const ini   = (n: string) => n.split(" ").map(w => w[0]).slice(0, 2).join("").toUpperCase();
-export const nowStr = () => new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+export const nowStr = () => new Date().toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 export const cleanPhone = (s: string) => s.replace(/[\s\-().]/g, "");
 
 export function imgSrc(img: string, w = 400, h = 300): string {

@@ -1,14 +1,14 @@
 import React, { useState, useEffect } from "react";
-import { Search, Plus, Minus, ChevronRight, ShoppingBag, Store, Trash2, CheckCircle, AlertCircle, X, Smartphone, ClipboardList, Printer, Settings } from "lucide-react";
-import type { Boutique, CartItem, Invoice, CaisseSession, Product, PlatformUser } from "../types";
-import { SEM, inputCls, PAYMENT_METHODS, PM_ICON, PM_COLOR } from "../constants";
+import { Search, Plus, Minus, ChevronRight, ShoppingBag, Trash2, CheckCircle, AlertCircle, Zap, ClipboardList, Printer, Settings } from "lucide-react";
+import type { Boutique, CartItem, Invoice, Product, PlatformUser, PaymentMethod, StockEntry } from "../types";
+import { SEM, inputCls, PAYMENT_METHODS, PM_ICON } from "../constants";
 import { fmt, today, imgSrc } from "../utils/formatting";
 import { productQty, lineTotal, lineDispQty, lineDispUnit } from "../utils/inventory";
-import { silentPrint, buildOrderTicketHtml, printCaisseReport, agentPrint, connectQZ, PA } from "../utils/invoice";
+import { silentPrint, buildOrderTicketHtml, buildReceiptHtml, agentPrint, connectQZ, PA } from "../utils/invoice";
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
-import { closeCaisseSession, createSale, openCaisseSession } from "../../lib/api";
+import { createSale, recordPayment } from "../../lib/api";
 
 export function POSView({ boutique, allBoutiques, currentUser, onUpdate, logAction }: {
   boutique: Boutique; allBoutiques: Boutique[]; currentUser: PlatformUser;
@@ -17,13 +17,6 @@ export function POSView({ boutique, allBoutiques, currentUser, onUpdate, logActi
 }) {
   const POS_COLOR = boutique.color;
   const { products, entries, invoices } = boutique;
-  const session = boutique.caisseSession;
-  const isSessionOpen = !!(session && !session.closedAt);
-
-  // Caisse open/close
-  const [fondCaisse, setFondCaisse] = useState("0");
-  const [closeModal, setCloseModal] = useState(false);
-  const [savingCaisse, setSavingCaisse] = useState(false);
 
   // Order taking
   const [search, setSearch] = useState("");
@@ -95,18 +88,11 @@ export function POSView({ boutique, allBoutiques, currentUser, onUpdate, logActi
     if (result !== "fail") setTimeout(()=>setPrintJob(null), 3500);
   }
 
-  // Pending (unpaid) orders that can still be modified before encaissement
-  const pendingOrders = invoices.filter(i => i.acompte === 0 && i.status === "en attente" && i.type !== "Retour");
-
-  const todayStr = new Date().toISOString().split("T")[0];
-  const todayInv = invoices.filter(i => i.dateRaw === todayStr && i.acompte > 0);
-  const totalJour = todayInv.reduce((s, i) => s + i.acompte, 0);
-  const byMethod = PAYMENT_METHODS.map(m => ({
-    m,
-    total: todayInv.filter(i => i.paymentMethod === m).reduce((s, i) => s + i.acompte, 0),
-    count: todayInv.filter(i => i.paymentMethod === m).length,
-  }));
-  const totalEspeces = byMethod.find(b => b.m === "Espèces")?.total ?? 0;
+  // Pending (unpaid) orders that can still be modified before encaissement.
+  // Newest first (descending arrival order) so the latest orders stay on top.
+  const pendingOrders = invoices
+    .filter(i => i.acompte === 0 && i.status === "en attente" && i.type !== "Retour")
+    .sort((a, b) => (b.dateRaw ?? b.date).localeCompare(a.dateRaw ?? a.date));
 
   const [posCatFilter, setPosCatFilter] = useState("all");
   const [posSort, setPosSort] = useState<"nom"|"stock_asc"|"stock_desc"|"bestseller">("nom");
@@ -134,37 +120,62 @@ export function POSView({ boutique, allBoutiques, currentUser, onUpdate, logActi
   const cartTotal = cart.reduce((s, i) => s + lineTotal(i), 0);
   const cartCount = cart.reduce((s, i) => s + i.qty, 0);
 
-  async function openCaisse() {
-    if (savingCaisse) return;
-    setSavingCaisse(true);
-    try {
-      const saved = await openCaisseSession({ boutiqueId:boutique.id, fondOuverture:Number(fondCaisse) || 0 });
-      const s: CaisseSession = { id:saved.session_id, openedAt:saved.opened_at, openedBy:currentUser.nom, fondDeCaisse:saved.fond_ouverture };
-      onUpdate({ caisseSession:s });
-      logAction("Ouverture caisse", `Fond : ${fmt(s.fondDeCaisse)}`, "🏪");
-    } catch (error) {
-      alert(error instanceof Error ? error.message : "Impossible d’ouvrir la caisse");
-    } finally {
-      setSavingCaisse(false);
-    }
+  // ── Vente express : vend un seul produit, encaisse et imprime immédiatement ──
+  const [expressModal, setExpressModal] = useState<Product|null>(null);
+  const [expQty, setExpQty] = useState("1");
+  const [expPrice, setExpPrice] = useState("");
+  const [expSellUnit, setExpSellUnit] = useState("");
+  const [expMethod, setExpMethod] = useState<PaymentMethod>("Espèces");
+  const [expBusy, setExpBusy] = useState(false);
+  const [expDone, setExpDone] = useState(false);
+
+  function openExpress(e: React.MouseEvent, p: Product) {
+    e.stopPropagation();
+    const opts = getSellOptions(p);
+    const cat = posCats.find(c => c.nom === p.categorie);
+    const baseU = cat?.unitVente ?? p.unit;
+    const isFabric = baseU === "yards" || baseU === "mètres" || baseU === "metres";
+    const defaultUnit = isFabric && opts.includes(baseU) ? baseU : opts.includes("Pièce") ? "Pièce" : opts[0];
+    setExpressModal(p);
+    setExpSellUnit(defaultUnit);
+    setExpQty("1");
+    setExpPrice(p.prixVente ? String(p.prixVente) : "");
+    setExpMethod("Espèces");
+    setExpDone(false);
   }
 
-  async function closeCaisse() {
-    if (!session) return;
-    if (savingCaisse) return;
-    setSavingCaisse(true);
+  async function confirmExpress() {
+    if (!expressModal || expBusy) return;
+    const sellQtyN = Number(expQty);
+    const prix = Number(expPrice);
+    if (sellQtyN <= 0 || prix <= 0) return;
+    const opts = getSellOptions(expressModal);
+    const cat = posCats.find(c => c.nom === expressModal.categorie);
+    const baseUnit = cat?.unitVente ?? expressModal.unit;
+    const isSell = opts.length > 1 && expSellUnit !== baseUnit;
+    const baseQty = isSell ? toBaseQty(sellQtyN, expSellUnit, expressModal) : sellQtyN;
+    const line = { productId: expressModal.id, nom: expressModal.nom, qty: baseQty, unit: baseUnit, prixUnit: prix, ...(isSell ? { sellUnit: expSellUnit, sellQty: sellQtyN } : {}) };
+    setExpBusy(true);
     try {
-      const saved = await closeCaisseSession({ boutiqueId:boutique.id, sessionId:String(session.id), totalVentes:totalJour });
-      const closed: CaisseSession = { ...session, closedAt:saved.closed_at, closedBy:currentUser.nom };
-      const history = [...(boutique.caisseHistory ?? []), closed];
-      printCaisseReport(closed, boutique, invoices);
-      onUpdate({ caisseSession:closed, caisseHistory:history });
-      logAction("Fermeture caisse", `Total encaissé : ${fmt(totalJour)}`, "🔒");
-      setCloseModal(false);
+      const saved = await createSale({ boutiqueId:boutique.id, client:"Client comptoir", lines:[line] });
+      const paid = await recordPayment({ boutiqueId:boutique.id, invoiceId:saved.invoice_id, amount:saved.total, paymentMethod:expMethod });
+      const newInv: Invoice = {
+        id:saved.invoice_id, client:"Client comptoir", lines:[line], montant:saved.total, acompte:paid.acompte,
+        date:today(), dateRaw:new Date().toISOString(), status:"payé", type:"vente",
+        operatorNom:currentUser.nom, operatorColor:currentUser.color, paymentMethod:expMethod,
+        payments:[{ id:paid.payment.id, amount:paid.payment.amount, paymentMethod:paid.payment.payment_method as PaymentMethod, paidAt:paid.payment.paid_at, operatorId:paid.payment.operator_id, operatorName:paid.payment.operator_name, batchId:paid.payment.batch_id, source:paid.payment.source }],
+      };
+      const saleEntries: StockEntry[] = paid.stock_deducted
+        ? [{ id:Date.now(), productId:line.productId, qty:-line.qty, unit:line.unit, montantDu:0, date:today(), fournisseur:`Vente ${saved.invoice_id}`, invoiceId:saved.invoice_id }]
+        : [];
+      onUpdate({ invoices:[...invoices, newInv], ...(saleEntries.length ? { entries:[...entries, ...saleEntries] } : {}) });
+      logAction("Vente express", `${newInv.id} · ${expressModal.nom} · ${fmt(saved.total)} · ${expMethod}`, "⚡");
+      setExpDone(true);
+      setTimeout(() => doPrint(buildReceiptHtml(newInv, boutique, currentUser.nom), "Ticket de vente"), 150);
+      setTimeout(() => { setExpressModal(null); setExpDone(false); setExpBusy(false); }, 1200);
     } catch (error) {
-      alert(error instanceof Error ? error.message : "Impossible de fermer la caisse");
-    } finally {
-      setSavingCaisse(false);
+      setExpBusy(false);
+      alert(error instanceof Error ? error.message : "Vente express impossible");
     }
   }
 
@@ -244,55 +255,9 @@ export function POSView({ boutique, allBoutiques, currentUser, onUpdate, logActi
     }
   }
 
-  // ── If caisse not open ───────────────────────────────────────────────────────
-  if (!isSessionOpen) {
-    const lastClosed = (boutique.caisseHistory ?? []).slice(-1)[0];
-    return (
-      <div data-screen-source="relational-pos" className="space-y-5 pb-24 flex flex-col items-center justify-center min-h-[60vh]">
-        <div className="w-20 h-20 rounded-3xl flex items-center justify-center" style={{ background:POS_COLOR+"15" }}>
-          <Store size={36} style={{ color:POS_COLOR }}/>
-        </div>
-        <div className="text-center">
-          <h2 className="text-xl font-black">Ouvrir la caisse</h2>
-          <p className="text-sm text-muted-foreground mt-1">Renseignez le fond de caisse pour commencer</p>
-        </div>
-        {lastClosed && (
-          <div className="w-full max-w-sm px-4 py-3 rounded-2xl text-xs text-muted-foreground" style={{ background:"#EEE9D8" }}>
-            Dernière session : {new Date(lastClosed.openedAt).toLocaleDateString("fr-FR")} · {lastClosed.openedBy} · fermée {lastClosed.closedAt ? new Date(lastClosed.closedAt).toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"}) : "—"}
-          </div>
-        )}
-        <div className="w-full max-w-sm space-y-3 px-4">
-          <Field label="FOND DE CAISSE (F CFA)" color={POS_COLOR}>
-            <input value={fondCaisse} onChange={e=>setFondCaisse(e.target.value)} type="number" placeholder="0" className={inputCls+" text-center text-xl font-black"} autoFocus onKeyDown={e=>e.key==="Enter"&&openCaisse()}/>
-          </Field>
-          <button disabled={savingCaisse} onClick={openCaisse} className="w-full py-4 rounded-2xl font-black text-base flex items-center justify-center gap-2 active:scale-95 transition-transform disabled:opacity-60" style={{ background:POS_COLOR, color:"#fff", fontFamily:"'Nunito', sans-serif" }}>
-            <Store size={20}/> {savingCaisse ? "Ouverture…" : "Ouvrir la caisse"}
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // ── Session open ─────────────────────────────────────────────────────────────
+  // ── Vente (la caisse a été déplacée vers l'écran Factures) ───────────────────
   return (
     <div data-screen-source="relational-pos" className="space-y-3 pb-36">
-
-      {/* Caisse header bar */}
-      <div className="flex items-center gap-3 px-4 py-3 rounded-2xl" style={{ background:SEM.success.bg, border:"1px solid "+SEM.success.accent+"44" }}>
-        <div className="flex items-center gap-2 flex-1 min-w-0">
-          <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse flex-shrink-0"/>
-          <div className="min-w-0">
-            <p className="text-sm font-black truncate" style={{ color:SEM.success.text }}>CAISSE OUVERTE</p>
-            <p className="text-xs text-muted-foreground truncate">{session!.openedBy} · {new Date(session!.openedAt).toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"})} · Fond : {fmt(session!.fondDeCaisse)}</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <span className="text-base font-black" style={{ color:SEM.success.accent, fontFamily:"'Nunito', sans-serif" }}>{fmt(totalJour)}</span>
-          <button onClick={()=>setCloseModal(true)} className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold active:scale-95" style={{ background:"#f3f4f6", color:"#374151" }}>
-            <X size={13}/> Fermer
-          </button>
-        </div>
-      </div>
 
       {/* Mon poste widget — non-admin local config */}
       {(()=>{
@@ -383,7 +348,8 @@ export function POSView({ boutique, allBoutiques, currentUser, onUpdate, logActi
               const stock = productQty(p.id, entries);
               const outOfStock = stock <= 0;
               return (
-                <button key={p.id} onClick={() => !outOfStock && openAdd(p)}
+                <div key={p.id} className="relative">
+                <button onClick={() => !outOfStock && openAdd(p)}
                   className="w-full bg-card rounded-2xl border text-left flex items-center gap-3 p-3 transition-transform active:scale-[0.98]"
                   style={{ borderColor: inCart ? POS_COLOR+"66" : "var(--border)", opacity: outOfStock ? 0.5 : 1 }}>
                   <div className="w-14 h-14 rounded-xl overflow-hidden flex-shrink-0 relative">
@@ -396,12 +362,20 @@ export function POSView({ boutique, allBoutiques, currentUser, onUpdate, logActi
                     {p.categorie && <span className="text-xs px-1.5 py-0.5 rounded font-bold mt-0.5 inline-block" style={{ background:"#EEE9D8", color:"#7A7055" }}>{p.categorie}</span>}
                   </div>
                   {inCart && (
-                    <div className="flex-shrink-0 text-right">
+                    <div className="flex-shrink-0 text-right mr-12">
                       <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-black text-white ml-auto" style={{ background:POS_COLOR }}>{inCart.qty}</div>
                       <p className="text-xs font-black mt-1" style={{ color:POS_COLOR }}>{fmt(lineTotal(inCart))}</p>
                     </div>
                   )}
                 </button>
+                {!outOfStock && (
+                  <button onClick={(e)=>openExpress(e,p)} title="Vente express"
+                    className="absolute top-1/2 -translate-y-1/2 right-2.5 flex items-center gap-1 px-2.5 py-2 rounded-xl text-xs font-black active:scale-90"
+                    style={{ background:SEM.success.accent, color:"#fff" }}>
+                    <Zap size={14}/>
+                  </button>
+                )}
+                </div>
               );
             })}
           </div>
@@ -412,8 +386,9 @@ export function POSView({ boutique, allBoutiques, currentUser, onUpdate, logActi
             const stock = productQty(p.id, entries);
             const outOfStock = stock <= 0;
             return (
-              <button key={p.id} onClick={() => !outOfStock && openAdd(p)}
-                className="bg-card rounded-2xl overflow-hidden border text-left relative transition-transform active:scale-95"
+              <div key={p.id} className="relative">
+              <button onClick={() => !outOfStock && openAdd(p)}
+                className="w-full bg-card rounded-2xl overflow-hidden border text-left relative transition-transform active:scale-95"
                 style={{ borderColor: inCart ? POS_COLOR+"66" : "var(--border)", opacity: outOfStock ? 0.5 : 1 }}>
                 <div className="w-full h-36 relative overflow-hidden">
                   <img src={imgSrc(p.img,300,300)} alt={p.nom} className="w-full h-full object-cover"/>
@@ -430,6 +405,14 @@ export function POSView({ boutique, allBoutiques, currentUser, onUpdate, logActi
                   <p className="text-sm font-semibold text-muted-foreground mt-0.5">Stock : {stock} {p.unit}</p>
                 </div>
               </button>
+              {!outOfStock && !inCart && (
+                <button onClick={(e)=>openExpress(e,p)} title="Vente express"
+                  className="absolute bottom-2.5 right-2.5 flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-black active:scale-90 shadow-lg"
+                  style={{ background:SEM.success.accent, color:"#fff" }}>
+                  <Zap size={13}/> Express
+                </button>
+              )}
+              </div>
             );
           })}
         </div>
@@ -451,7 +434,7 @@ export function POSView({ boutique, allBoutiques, currentUser, onUpdate, logActi
           </div>
         ) : (
           <div className="space-y-2">
-            {[...pendingOrders].reverse().map(inv => (
+            {pendingOrders.map(inv => (
               <div key={inv.id} className="bg-card rounded-2xl border overflow-hidden" style={{ borderColor:SEM.warning.accent+"33" }}>
                 <div className="flex items-center gap-3 px-4 py-3.5">
                   <div className="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0" style={{ background:SEM.warning.bg }}>
@@ -610,45 +593,64 @@ export function POSView({ boutique, allBoutiques, currentUser, onUpdate, logActi
         </Modal>
       )}
 
-      {/* Fermer la caisse modal */}
-      {closeModal && session && (
-        <Modal title="Fermeture de caisse" color={POS_COLOR} onClose={() => setCloseModal(false)}>
-          <div className="space-y-3">
-            <div className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-muted">
-              <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background:POS_COLOR+"22" }}><Store size={18} style={{ color:POS_COLOR }}/></div>
+      {/* Vente express modal */}
+      {expressModal && (
+        <Modal title={`Vente express — ${expressModal.nom}`} color={POS_COLOR} onClose={() => { if (!expBusy) setExpressModal(null); }}>
+          {expDone ? (
+            <div className="flex flex-col items-center gap-3 py-6 rounded-2xl" style={{ background:SEM.success.bg }}>
+              <CheckCircle size={40} style={{ color:SEM.success.accent }}/>
+              <p className="font-black text-lg" style={{ color:SEM.success.accent, fontFamily:"'Nunito', sans-serif" }}>Vente encaissée ✓</p>
+              <p className="text-sm text-muted-foreground">Ticket imprimé automatiquement</p>
+            </div>
+          ) : (<>
+            <div className="flex gap-4 items-center">
+              <img src={imgSrc(expressModal.img,160,160)} alt={expressModal.nom} className="w-20 h-20 rounded-2xl object-cover flex-shrink-0"/>
               <div>
-                <p className="text-sm font-bold">Session</p>
-                <p className="text-xs text-muted-foreground">Ouvert par {session.openedBy} à {new Date(session.openedAt).toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"})}</p>
+                <p className="text-xs text-muted-foreground uppercase font-semibold tracking-wide">Stock disponible</p>
+                <p className="text-2xl font-black mt-0.5" style={{ fontFamily:"'Nunito', sans-serif", color:POS_COLOR }}>
+                  {productQty(expressModal.id, entries)}<span className="text-sm font-normal ml-1 text-muted-foreground">{expressModal.unit}</span>
+                </p>
               </div>
             </div>
-            <div className="rounded-2xl border border-border overflow-hidden">
-              <div className="flex justify-between px-4 py-2.5 border-b border-border bg-muted/50">
-                <span className="text-xs font-black text-muted-foreground">Fond de caisse</span>
-                <span className="text-sm font-black" style={{ fontFamily:"'Nunito', sans-serif" }}>{fmt(session.fondDeCaisse)}</span>
-              </div>
-              {PAYMENT_METHODS.map(m => {
-                const b = byMethod.find(x => x.m === m)!;
-                return (
-                  <div key={m} className="flex justify-between items-center px-4 py-2.5 border-b border-border">
-                    <span className="text-sm flex items-center gap-2"><span>{PM_ICON[m]}</span><span style={{ color:PM_COLOR[m] }}>{m}</span><span className="text-xs text-muted-foreground">({b.count})</span></span>
-                    <span className="font-black text-sm" style={{ color: b.total > 0 ? PM_COLOR[m] : "#c4b89a", fontFamily:"'Nunito', sans-serif" }}>{fmt(b.total)}</span>
-                  </div>
-                );
-              })}
-              <div className="flex justify-between px-4 py-3" style={{ background:"#1E9B1E0d" }}>
-                <span className="font-black text-sm" style={{ color:SEM.success.accent }}>Total encaissé</span>
-                <span className="font-black text-base" style={{ color:SEM.success.accent, fontFamily:"'Nunito', sans-serif" }}>{fmt(totalJour)}</span>
-              </div>
-              <div className="flex justify-between px-4 py-3 border-t border-border" style={{ background:"#1E9B1E0d" }}>
-                <span className="font-black text-sm" style={{ color:SEM.success.accent }}>Total en caisse (espèces)</span>
-                <span className="font-black text-base" style={{ color:SEM.success.accent, fontFamily:"'Nunito', sans-serif" }}>{fmt(session.fondDeCaisse + totalEspeces)}</span>
-              </div>
+            {getSellOptions(expressModal).length > 1 && (
+              <Field label="VENDRE PAR" color={POS_COLOR}>
+                <div className="flex gap-2">
+                  {getSellOptions(expressModal).map(u => (
+                    <button key={u} onClick={() => setExpSellUnit(u)} className="flex-1 py-3 rounded-xl text-sm font-bold"
+                      style={{ background: expSellUnit === u ? POS_COLOR : POS_COLOR+"22", color: expSellUnit === u ? "#fff" : POS_COLOR }}>{u}</button>
+                  ))}
+                </div>
+              </Field>
+            )}
+            <div className="grid grid-cols-2 gap-3">
+              <Field label={`QUANTITÉ (${expSellUnit})`} color={POS_COLOR}>
+                <div className="flex items-center gap-2">
+                  <button onClick={()=>setExpQty(q=>String(Math.max(1,Number(q)-1)))} className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background:POS_COLOR+"22" }}><Minus size={14} style={{ color:POS_COLOR }}/></button>
+                  <input value={expQty} onChange={e=>setExpQty(e.target.value)} type="number" className={inputCls+" text-center font-black"} autoFocus/>
+                  <button onClick={()=>setExpQty(q=>String(Number(q)+1))} className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background:POS_COLOR+"22" }}><Plus size={14} style={{ color:POS_COLOR }}/></button>
+                </div>
+              </Field>
+              <Field label={`PRIX / ${expSellUnit.toUpperCase()}`} color={POS_COLOR}>
+                <input value={expPrice} onChange={e=>setExpPrice(e.target.value)} type="number" placeholder="0 F" className={inputCls+" text-center font-black"}/>
+              </Field>
             </div>
-            <p className="text-xs text-center text-muted-foreground">Un rapport sera imprimé automatiquement à la fermeture</p>
-            <button disabled={savingCaisse} onClick={closeCaisse} className="w-full py-4 rounded-2xl font-black text-base flex items-center justify-center gap-2 active:scale-95 disabled:opacity-60" style={{ background:POS_COLOR, color:"#fff", fontFamily:"'Nunito', sans-serif" }}>
-              🔒 {savingCaisse ? "Fermeture…" : "Confirmer la fermeture"}
+            <Field label="MODE DE PAIEMENT" color={POS_COLOR}>
+              <div className="grid grid-cols-2 gap-2">
+                {PAYMENT_METHODS.map(m => (
+                  <button key={m} onClick={()=>setExpMethod(m)} className="py-2.5 rounded-xl text-xs font-bold" style={{ background: expMethod===m?POS_COLOR:"#EEE9D8", color: expMethod===m?"#fff":"#6b7280" }}>{PM_ICON[m]} {m}</button>
+                ))}
+              </div>
+            </Field>
+            {Number(expQty)>0 && Number(expPrice)>0 && (
+              <div className="flex justify-between items-center px-4 py-3 rounded-2xl" style={{ background:POS_COLOR+"15" }}>
+                <span className="text-sm font-bold" style={{ color:POS_COLOR }}>Total à encaisser</span>
+                <span className="text-xl font-black" style={{ color:POS_COLOR, fontFamily:"'Nunito', sans-serif" }}>{fmt(Number(expQty)*Number(expPrice))}</span>
+              </div>
+            )}
+            <button disabled={expBusy || !Number(expQty) || !Number(expPrice)} onClick={confirmExpress} className="w-full py-4 rounded-2xl font-black text-base flex items-center justify-center gap-2 active:scale-95 disabled:opacity-60" style={{ background:POS_COLOR, color:"#fff", fontFamily:"'Nunito', sans-serif" }}>
+              <Zap size={18}/> {expBusy ? "Encaissement…" : "Vendre & imprimer"}
             </button>
-          </div>
+          </>)}
         </Modal>
       )}
       {/* Quick-add modal — must be LAST so it renders above checkout modal */}

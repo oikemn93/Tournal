@@ -285,7 +285,13 @@ export async function getData<T>(key: string): Promise<T | null> {
         unitVente: p.unit,
       })),
       entries: entries.filter(e => e.boutique_id === b.id).map(e => ({ id:e.id, productId:e.product_id, qty:e.qty, unit:"unité", montantDu:Number(e.qty)*Number(e.prix_unit ?? 0), date:day(e.entry_date), fournisseur:e.note ?? "", invoiceId:undefined })),
-      clients: clients.filter(c => c.boutique_id === b.id).map(c => ({ id:c.id, nom:c.nom, type:c.type, tel:c.tel ?? "", total:c.total ?? 0, last:day(c.last_invoice_at), ville:c.ville ?? "", adresse:c.adresse ?? undefined, email:c.email ?? undefined, contact:c.contact ?? undefined })),
+      clients: clients.filter(c => c.boutique_id === b.id).map(c => {
+        // A wholesale client is stored as B2B with a marker in `contact`.
+        const isWholesale = typeof c.contact === "string" && c.contact.includes(WHOLESALE_MARKER);
+        const effectiveType = isWholesale ? "Grossiste" : c.type;
+        const cleanContact = isWholesale ? c.contact.replace(WHOLESALE_MARKER, "").trim() : c.contact;
+        return { id:c.id, nom:c.nom, type:effectiveType, tel:c.tel ?? "", total:c.total ?? 0, last:day(c.last_invoice_at), ville:c.ville ?? "", adresse:c.adresse ?? undefined, email:c.email ?? undefined, contact:cleanContact || undefined };
+      }),
       suppliers: suppliers.filter(s => s.boutique_id === b.id).map(s => ({ id:s.id, nom:s.nom, ville:s.ville ?? "", lastDelivery:day(s.last_delivery_at), tel:s.tel ?? "", initials:s.initials ?? "", color:s.color ?? "#C9A227", email:s.email ?? undefined, contact:s.contact ?? undefined })),
       invoices: invoices.filter(i => i.boutique_id === b.id).map(i => {
         const invoicePayments = payments.filter(p => p.boutique_id === b.id && p.invoice_id === i.id);
@@ -497,8 +503,22 @@ export async function createCharge(params:{ boutiqueId:string; label:string; amo
   return dataRequest<{ charge_id:number }>("rpc/create_charge", { method:"POST", headers:{ Prefer:"return=representation" }, body:JSON.stringify({ p_boutique_id:params.boutiqueId,p_idempotency_key:crypto.randomUUID(),p_label:params.label,p_montant:params.amount,p_categorie:params.category,p_note:params.note ?? null }) });
 }
 
+// Marker stored in the free-text `contact` column to distinguish wholesale
+// clients: the DB `type` column only accepts B2B/B2C, so a "Grossiste" is
+// persisted as B2B + this marker, and reconstructed as "Grossiste" on load.
+export const WHOLESALE_MARKER = "[GROSSISTE]";
+
 export async function createClient(params:{ boutiqueId:string; name:string; type?:"B2B"|"B2C"; phone?:string; email?:string; city?:string }) {
   return dataRequest<{client_id:number}>("rpc/create_client", { method:"POST", body:JSON.stringify({ p_boutique_id:params.boutiqueId,p_idempotency_key:crypto.randomUUID(),p_nom:params.name,p_type:params.type ?? "B2C",p_tel:params.phone ?? null,p_email:params.email ?? null,p_ville:params.city ?? null }) });
+}
+
+// Persist the free-text contact field on a client row (used to tag wholesale
+// clients). Kept as a plain table PATCH so it does not depend on RPC signatures.
+export async function updateClientContact(clientId:number, contact:string|null) {
+  await dataRequest(`clients?id=eq.${clientId}`, {
+    method:"PATCH", headers:{ Prefer:"return=minimal" },
+    body:JSON.stringify({ contact }),
+  });
 }
 export async function createSupplier(params:{ boutiqueId:string; name:string; phone?:string; city?:string }) {
   return dataRequest<{supplier_id:number}>("rpc/create_supplier", { method:"POST", body:JSON.stringify({ p_boutique_id:params.boutiqueId,p_idempotency_key:crypto.randomUUID(),p_nom:params.name,p_tel:params.phone ?? null,p_ville:params.city ?? null }) });
