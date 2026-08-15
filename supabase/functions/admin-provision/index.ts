@@ -1,4 +1,4 @@
-﻿import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 type Action = "create_boutique" | "create_user" | "reset_password" | "assign_user" | "unassign_user";
@@ -36,10 +36,39 @@ function phoneToEmail(phone: string) {
   return `${digits}@tournal.internal`;
 }
 
+const permissionKeys = new Set([
+  "dashboard", "stock", "fournisseurs", "clients", "factures", "remboursement",
+  "charges", "compta", "vente", "inventaire", "marges", "encaissement_vente",
+]);
 const ownerRights = {
   dashboard: true, stock: true, fournisseurs: true, clients: true, factures: true,
-  remboursement: true, charges: true, compta: true, vente: true, inventaire: true, marges: true,
+  remboursement: true, charges: true, compta: true, vente: true, inventaire: true,
+  marges: true, encaissement_vente: true,
 };
+const employeeRoles = new Set(["employee", "manager"]);
+
+function sixDigitCode() {
+  const bytes = new Uint32Array(1);
+  crypto.getRandomValues(bytes);
+  return String(bytes[0] % 1_000_000).padStart(6, "0");
+}
+
+function validatedRights(value: unknown) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
+  const result: Record<string, boolean> = {};
+  for (const [key, enabled] of Object.entries(value)) {
+    if (!permissionKeys.has(key) || typeof enabled !== "boolean") throw new Error("Droits invalides");
+    result[key] = enabled;
+  }
+  return result;
+}
+
+async function ownedBoutique(admin: ReturnType<typeof createClient>, callerId: string, boutiqueId: string) {
+  const { data, error } = await admin.from("boutiques").select("id, owner_id").eq("id", boutiqueId).maybeSingle();
+  if (error || !data) throw new Error("Boutique introuvable");
+  if (data.owner_id !== callerId) throw new Error("Seul le propriétaire de cette boutique peut effectuer cette action");
+  return data;
+}
 
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders(request) });
@@ -103,48 +132,52 @@ Deno.serve(async (request) => {
     if (action === "create_user") {
       const phone = text(payload.phone, "Numéro de téléphone", 32);
       const fullName = text(payload.fullName, "Nom", 120);
-      const password = text(payload.password, "Mot de passe", 256);
-      const boutiqueId = typeof payload.boutiqueId === "string" ? payload.boutiqueId.trim() : "";
-      if (password.length < 12) return reply(request, { error: "Le mot de passe doit contenir au moins 12 caractères" }, 422);
-      if (!boutiqueId && !caller?.is_super_admin) {
-        return reply(request, { error: "Boutique requise pour cr�er ce compte" }, 422);
-      }
-
-      if (boutiqueId && !caller?.is_super_admin) {
-        const { data: boutique, error: boutiqueError } = await admin
-          .from("boutiques")
-          .select("owner_id")
-          .eq("id", boutiqueId)
-          .maybeSingle();
-        if (boutiqueError || !boutique) return reply(request, { error: "Boutique introuvable" }, 422);
-        if (boutique.owner_id !== userData.user.id) {
-          return reply(request, { error: "Seul le propri�taire de cette boutique peut cr�er ce compte" }, 403);
-        }
-      }
-
+      const boutiqueId = text(payload.boutiqueId, "Boutique", 120);
+      const role = payload.role === "manager" ? "manager" : payload.role === "employee" ? "employee" : "employee";
+      const droits = validatedRights(payload.droits);
+      await ownedBoutique(admin, userData.user.id, boutiqueId);
+      const code = sixDigitCode();
       const { data, error } = await admin.auth.admin.createUser({
-        email: phoneToEmail(phone), password, email_confirm: true,
+        email: phoneToEmail(phone), password: code, email_confirm: true,
         user_metadata: { phone, full_name: fullName },
       });
       if (error || !data.user) return reply(request, { error: error?.message ?? "Création impossible" }, 422);
-      return reply(request, { userId: data.user.id }, 201);
+      const userId = data.user.id;
+      const { error: platformError } = await admin.from("platform_users").insert({ id: userId, nom: fullName, telephone: phone, is_super_admin: false });
+      if (platformError) {
+        await admin.auth.admin.deleteUser(userId);
+        throw platformError;
+      }
+      const { error: assignmentError } = await admin.from("boutique_assignments").insert({ boutique_id: boutiqueId, user_id: userId, role, droits });
+      if (assignmentError) {
+        await admin.from("platform_users").delete().eq("id", userId);
+        await admin.auth.admin.deleteUser(userId);
+        throw assignmentError;
+      }
+      return reply(request, { userId, code }, 201);
     }
 
     if (action === "reset_password") {
       const userId = text(payload.userId, "Utilisateur", 36);
-      const password = text(payload.password, "Mot de passe", 256);
-      if (password.length < 12) return reply(request, { error: "Le mot de passe doit contenir au moins 12 caractères" }, 422);
-      const { error } = await admin.auth.admin.updateUserById(userId, { password });
+      const boutiqueId = text(payload.boutiqueId, "Boutique", 120);
+      await ownedBoutique(admin, userData.user.id, boutiqueId);
+      const { data: assignment } = await admin.from("boutique_assignments").select("role").eq("boutique_id", boutiqueId).eq("user_id", userId).maybeSingle();
+      if (!assignment || assignment.role === "owner") return reply(request, { error: "Employé introuvable" }, 403);
+      const code = sixDigitCode();
+      const { error } = await admin.auth.admin.updateUserById(userId, { password: code });
       if (error) return reply(request, { error: error.message }, 422);
-      return reply(request, { ok: true });
+      return reply(request, { code });
     }
 
     if (action === "assign_user") {
       const boutiqueId = text(payload.boutiqueId, "Boutique", 120);
       const userId = text(payload.userId, "Utilisateur", 36);
       const role = payload.role;
-      if (role !== "owner" && role !== "manager" && role !== "employee") return reply(request, { error: "Rôle invalide" }, 422);
-      const droits = typeof payload.droits === "object" && payload.droits !== null ? payload.droits : {};
+      await ownedBoutique(admin, userData.user.id, boutiqueId);
+      if (role !== "manager" && role !== "employee") return reply(request, { error: "Rôle invalide" }, 422);
+      const droits = validatedRights(payload.droits);
+      const { data: target } = await admin.from("boutique_assignments").select("role").eq("boutique_id", boutiqueId).eq("user_id", userId).maybeSingle();
+      if (target?.role === "owner") return reply(request, { error: "Le propriétaire ne peut pas être modifié" }, 403);
       const { error } = await admin.from("boutique_assignments").upsert(
         { boutique_id: boutiqueId, user_id: userId, role, droits },
         { onConflict: "boutique_id,user_id" },

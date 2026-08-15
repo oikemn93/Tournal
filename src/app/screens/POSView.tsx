@@ -8,7 +8,7 @@ import { silentPrint, buildOrderTicketHtml, buildReceiptHtml, agentPrint, connec
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
-import { createSale, recordPayment } from "../../lib/api";
+import { createSale, recordPayment, recordExpressPayment } from "../../lib/api";
 
 export function POSView({ boutique, allBoutiques, currentUser, onUpdate, logAction }: {
   boutique: Boutique; allBoutiques: Boutique[]; currentUser: PlatformUser;
@@ -162,7 +162,7 @@ export function POSView({ boutique, allBoutiques, currentUser, onUpdate, logActi
     try {
       const saved = await createSale({ boutiqueId:boutique.id, client:"Client comptoir", lines:[line] });
       if (canCollectExpress) {
-        const paid = await recordPayment({ boutiqueId:boutique.id, invoiceId:saved.invoice_id, amount:saved.total, paymentMethod:expMethod });
+        const paid = await recordExpressPayment({ boutiqueId:boutique.id, invoiceId:saved.invoice_id, amount:saved.total, paymentMethod:expMethod });
         const newInv: Invoice = {
           id:saved.invoice_id, client:"Client comptoir", lines:[line], montant:saved.total, acompte:paid.acompte,
           date:today(), dateRaw:new Date().toISOString(), status:"payé", type:"vente",

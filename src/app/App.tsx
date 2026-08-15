@@ -811,7 +811,7 @@ async function renderHtmlToCanvas(html: string, designWidth: number): Promise<HT
   }
 }
 
-// ── Shared jsPDF pagination helper ───────────────────────────────────────────
+// ── Shared jsPDF pagination helper ────────���──────────────────────────────────
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildPdfFromCanvas(jsPDFClass: any, canvas: HTMLCanvasElement): any {
   const pdf = new jsPDFClass({ orientation: "portrait", unit: "mm", format: "a4" });
@@ -1215,7 +1215,7 @@ function RequiredPasswordChangeScreen({ onComplete }: { onComplete: () => void }
   </div>;
 }
 
-// ─── SCREEN: SUPER ADMIN ──────────────────────────────────────────────────────
+// ─── SCREEN: SUPER ADMIN ───────────────────────────��──────────────────────────
 
 function SuperAdminScreen({ boutiques, platformUsers, groupes, onEnterBoutique, onCreateBoutique, onUpdateBoutique, onDeleteBoutique, onCreateUser, onUpdateUser, onCreateGroupe, onUpdateGroupe, onDeleteGroupe, onResetPassword, onResetBackend, onLogout, backendOk, saveState }: {
   boutiques: Boutique[]; platformUsers: PlatformUser[]; groupes: Groupe[];
@@ -6263,7 +6263,7 @@ body{font-family:'Courier New',monospace;font-size:9.5pt;width:72mm;margin:0 aut
 <div class="c" style="font-size:8.5pt">${new Date().toLocaleDateString("fr-FR")} ${new Date().toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"})}</div>
 ${PA.printer ? `<div class="c" style="font-size:8pt;margin-top:2mm">Imprimante : ${PA.printer}</div>` : ""}
 <div class="sep"></div>
-<div class="c b" style="color:SEM.success.accent">Connexion réussie ✓</div>
+<div class="c b" style="color:SEM.success.accent">Connexion réussie ���</div>
 <div class="c" style="font-size:8pt;margin-top:2mm">Agent QZ Tray actif · Tournal</div>
 </body></html>`;
     const result = await agentPrint(html);
@@ -8971,10 +8971,17 @@ export default function App() {
 
   async function handleCreateUser(user: Omit<PlatformUser,"id">): Promise<PlatformUser|null> {
     try {
-      const { userId } = await createUser(user.phone, user.nom, user.password, boutique.id);
+      const assignment = user.assignments.find(a => a.boutiqueId === boutique.id);
+      const { userId, code } = await createUser({
+        phone: user.phone,
+        fullName: user.nom,
+        boutiqueId: boutique.id,
+        role: assignment?.role === "Manager" || assignment?.role === "Gérant" ? "manager" : "employee",
+        droits: assignment?.droits,
+      });
       const created = {...user,id:userId,password:""};
       setPlatformUsers(prev=>[...prev,created]);
-      toast.success("Compte utilisateur créé");
+      toast.success(`Compte créé. Code temporaire : ${code} — transmettez-le une seule fois à l’employé.`);
       return created;
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Création du compte impossible");
@@ -8982,10 +8989,10 @@ export default function App() {
     }
   }
 
-  async function handleResetPassword(userId: string, password: string) {
+  async function handleResetPassword(userId: string, _password: string) {
     try {
-      await resetUserPassword(userId, password);
-      toast.success("Mot de passe réinitialisé");
+      const { code } = await resetUserPassword(userId, boutique.id);
+      toast.success(`Nouveau code temporaire : ${code} — transmettez-le une seule fois à l’employé.`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Réinitialisation impossible");
     }

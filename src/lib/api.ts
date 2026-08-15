@@ -228,12 +228,12 @@ export async function createBoutique(nom: string, ville: string, ownerId: string
   return adminProvision<{ boutiqueId: string }>("create_boutique", { nom, ville, ownerId });
 }
 
-export async function createUser(phone: string, fullName: string, password: string, boutiqueId?: string) {
-  return adminProvision<{ userId: string }>("create_user", { phone, fullName, password, boutiqueId });
+export async function createUser(params: { phone: string; fullName: string; boutiqueId: string; role?: "employee" | "manager"; droits?: Record<string, boolean> }) {
+  return adminProvision<{ userId: string; code: string }>("create_user", params);
 }
 
-export async function resetUserPassword(userId: string, password: string) {
-  return adminProvision<{ ok: true }>("reset_password", { userId, password });
+export async function resetUserPassword(userId: string, boutiqueId: string) {
+  return adminProvision<{ code: string }>("reset_password", { userId, boutiqueId });
 }
 
 export async function assignUserToBoutique(
@@ -466,6 +466,13 @@ export async function closeCaisseSession(params: { boutiqueId:string; sessionId:
 
 export async function recordPayment(params: { boutiqueId:string; invoiceId:string; amount:number; paymentMethod:string }) {
   return dataRequest<{ invoice_id:string; acompte:number; applied_amount:number; status:string; stock_deducted:boolean; payment:{ id:number; amount:number; payment_method:string; paid_at:string; operator_id:string; operator_name:string; batch_id:string; source:"invoice" } }>("rpc/record_payment", {
+    method:"POST", headers:{ Prefer:"return=representation" },
+    body:JSON.stringify({ p_boutique_id:params.boutiqueId, p_invoice_id:params.invoiceId, p_idempotency_key:crypto.randomUUID(), p_amount:params.amount, p_payment_method:params.paymentMethod }),
+  });
+  }
+
+export async function recordExpressPayment(params: { boutiqueId:string; invoiceId:string; amount:number; paymentMethod:string }) {
+  return dataRequest<{ invoice_id:string; acompte:number; applied_amount:number; status:string; stock_deducted:boolean; payment:{ id:number; amount:number; payment_method:string; paid_at:string; operator_id:string; operator_name:string; batch_id:string; source:"invoice" } }>("rpc/record_express_payment", {
     method:"POST", headers:{ Prefer:"return=representation" },
     body:JSON.stringify({ p_boutique_id:params.boutiqueId, p_invoice_id:params.invoiceId, p_idempotency_key:crypto.randomUUID(), p_amount:params.amount, p_payment_method:params.paymentMethod }),
   });
