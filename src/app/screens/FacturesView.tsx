@@ -684,7 +684,8 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
           </div>
           <span className="text-xs px-2 py-1 rounded-full font-bold capitalize" style={{ background:invBadge(detailInv.status)[1], color:invBadge(detailInv.status)[0] }}>{detailInv.status}</span>
         </div>
-        {detailInv.lines&&detailInv.lines.length>0&&(
+        <div>
+          {detailInv.lines&&detailInv.lines.length>0 ? <>
           <div>
             <p className="text-xs font-black tracking-wider text-muted-foreground mb-2">PRODUITS FACTURÉS</p>
             <div className="space-y-2">
@@ -697,12 +698,13 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
                 </div>;
               })}
             </div>
-            <div className="flex justify-between items-center mt-3 px-4 py-3 rounded-xl" style={{ background:"#37415110" }}>
-              <p className="text-sm font-black">TOTAL FACTURE</p>
-              <p className="text-xl font-black" style={{ fontFamily:"'Nunito', sans-serif" }}>{fmt(detailInv.montant)} F</p>
-            </div>
           </div>
-        )}
+          </> : <div className="rounded-xl bg-muted px-4 py-3 text-sm text-muted-foreground">Aucune ligne détaillée n&apos;est disponible pour cette facture dans cette boutique.</div>}
+          <div className="flex justify-between items-center mt-3 px-4 py-3 rounded-xl" style={{ background:"#37415110" }}>
+            <p className="text-sm font-black">TOTAL FACTURE</p>
+            <p className="text-xl font-black" style={{ fontFamily:"'Nunito', sans-serif" }}>{fmt(detailInv.montant)} F</p>
+          </div>
+        </div>
         <div>
           <p className="text-xs font-black tracking-wider text-muted-foreground mb-2">PAIEMENT</p>
           <div className="space-y-2">
