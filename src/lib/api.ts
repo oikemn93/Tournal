@@ -326,7 +326,7 @@ export async function getData<T>(key: string): Promise<T | null> {
             batchId:p.batch_id,
             source:p.source,
           })),
-          lines:lines.filter(l=>l.invoice_id===i.id && (l.boutique_id===b.id || l.boutique_id == null)).map(l=>({ productId:l.product_id, nom:l.nom ?? "Article", qty:Number(l.qty ?? 0), unit:l.unit ?? "unité", prixUnit:Number(l.prix_unit ?? 0), sellUnit:l.sell_unit ?? undefined, sellQty:l.sell_qty != null ? Number(l.sell_qty) : undefined })),
+          lines:lines.filter(l=>String(l.invoice_id)===String(i.id) && (String(l.boutique_id)===String(b.id) || l.boutique_id == null)).map(l=>({ productId:Number(l.product_id), nom:l.nom ?? "Article", qty:Number(l.qty ?? 0), unit:l.unit ?? "unité", prixUnit:Number(l.prix_unit ?? 0), sellUnit:l.sell_unit ?? undefined, sellQty:l.sell_qty != null ? Number(l.sell_qty) : undefined })),
         };
       }),
       charges: charges.filter(c => c.boutique_id === b.id).map(c => ({
