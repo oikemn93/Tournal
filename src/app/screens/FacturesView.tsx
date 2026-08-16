@@ -640,7 +640,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
           const isReturn = inv.type === "Retour";
           return (
             <div key={inv.id} className="bg-card rounded-2xl p-4 border border-border" style={isReturn?{borderColor:"#ef444433"}:{}}>
-              <div className="w-full text-left cursor-pointer" onClick={()=>{ if (!isReturn && inv.status !== "payé") { setEncaissInv(inv); setEncaissAmt(String(invoiceRemainingAmount(inv))); } else { setDetailInv(inv); } }}>
+              <div className="w-full text-left cursor-pointer" onClick={()=>setDetailInv(inv)}>
                 <div className="flex items-start justify-between">
                   <div>
                     <div className="flex items-center gap-2">
@@ -692,14 +692,14 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
                 const prod=products.find(p=>p.id===l.productId);
                 return <div key={i} className="flex items-center gap-3 bg-muted rounded-xl px-3 py-2.5">
                   {prod&&<div className="w-10 h-10 rounded-lg overflow-hidden flex-shrink-0"><img src={imgSrc(prod.img,80,80)} alt={l.nom} className="w-full h-full object-cover"/></div>}
-                  <div className="flex-1 min-w-0"><p className="text-sm font-bold truncate">{l.nom}</p><p className="text-xs text-muted-foreground">{lineDispQty(l)} {lineDispUnit(l)} × {fmt(l.prixUnit)}</p></div>
-                  <p className="text-sm font-black flex-shrink-0" style={{ color:"#a855f7", fontFamily:"'Nunito', sans-serif" }}>{fmt(lineTotal(l))}</p>
+                  <div className="flex-1 min-w-0"><p className="text-sm font-bold truncate">{l.nom}</p><p className="text-xs text-muted-foreground">Quantité : {lineDispQty(l)} {lineDispUnit(l)}</p><p className="text-xs text-muted-foreground">Prix unitaire : {fmt(l.prixUnit)} F</p></div>
+                  <div className="text-right flex-shrink-0"><p className="text-sm font-black" style={{ color:"#a855f7", fontFamily:"'Nunito', sans-serif" }}>{fmt(lineTotal(l))} F</p><p className="text-[11px] text-muted-foreground">Sous-total</p></div>
                 </div>;
               })}
             </div>
-            <div className="flex justify-between items-center mt-3 px-1">
-              <p className="text-xs text-muted-foreground">Total</p>
-              <p className="text-lg font-black" style={{ fontFamily:"'Nunito', sans-serif" }}>{fmt(detailInv.montant)}</p>
+            <div className="flex justify-between items-center mt-3 px-4 py-3 rounded-xl" style={{ background:"#37415110" }}>
+              <p className="text-sm font-black">TOTAL FACTURE</p>
+              <p className="text-xl font-black" style={{ fontFamily:"'Nunito', sans-serif" }}>{fmt(detailInv.montant)} F</p>
             </div>
           </div>
         )}
