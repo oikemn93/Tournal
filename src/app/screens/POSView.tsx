@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Search, Plus, Minus, ChevronRight, ShoppingBag, Trash2, CheckCircle, AlertCircle, Zap, ClipboardList, Printer, Settings } from "lucide-react";
+import { Search, Plus, Minus, ChevronRight, ShoppingBag, Trash2, CheckCircle, AlertCircle, Zap, ClipboardList, Printer, Settings, Smartphone } from "lucide-react";
 import type { Boutique, CartItem, Invoice, Product, PlatformUser, PaymentMethod, StockEntry } from "../types";
 import { SEM, inputCls, PAYMENT_METHODS, PM_ICON } from "../constants";
 import { fmt, today, imgSrc } from "../utils/formatting";
