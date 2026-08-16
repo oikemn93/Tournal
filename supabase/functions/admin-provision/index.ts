@@ -6,12 +6,45 @@ const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const admin = createClient(url, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } });
 const authClient = createClient(url, anonKey);
 
-const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type" };
-const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
+const configuredOrigins = (Deno.env.get("ADMIN_PROVISION_ALLOWED_ORIGINS") ?? "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const redirectOrigin = Deno.env.get("NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL")?.replace(/\/auth\/callback\/?$/, "");
+const allowedOrigins = new Set([
+  ...configuredOrigins,
+  ...(redirectOrigin ? [redirectOrigin] : []),
+  "http://localhost:3000",
+  "http://localhost:5173",
+]);
+const corsHeaders = (origin: string | null) => {
+  const requestedOrigin = origin && allowedOrigins.has(origin) ? origin : null;
+  return {
+    ...(requestedOrigin ? { "Access-Control-Allow-Origin": requestedOrigin, Vary: "Origin" } : {}),
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+  };
+};
+const json = (body: unknown, status = 200, origin: string | null = null) => new Response(JSON.stringify(body), { status, headers: { ...corsHeaders(origin), "Content-Type": "application/json" } });
 const supportedPermissions = new Set(["dashboard", "stock", "fournisseurs", "clients", "factures", "remboursement", "charges", "compta", "vente", "inventaire", "marges", "encaissement_vente"]);
 const supportedRoles = new Set(["employee", "manager"]);
 
-function code() { const a = new Uint32Array(1); crypto.getRandomValues(a); return String(a[0] % 1_000_000).padStart(6, "0"); }
+function code() {
+  const values = new Uint32Array(1);
+  const limit = Math.floor(0x1_0000_0000 / 1_000_000) * 1_000_000;
+  do crypto.getRandomValues(values); while (values[0] >= limit);
+  return String(values[0] % 1_000_000).padStart(6, "0");
+}
+function readJwtClaims(token: string) {
+  try {
+    const payload = token.split(".")[1];
+    if (!payload) return null;
+    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(payload.length / 4) * 4, "=");
+    return JSON.parse(atob(normalized)) as { sub?: string; aud?: string; role?: string };
+  } catch {
+    return null;
+  }
+}
 function cleanRights(input: unknown) {
   if (!input || typeof input !== "object") return {};
   return Object.fromEntries(Object.entries(input as Record<string, unknown>).filter(([key, value]) => supportedPermissions.has(key) && typeof value === "boolean"));
@@ -19,8 +52,10 @@ function cleanRights(input: unknown) {
 async function caller(req: Request) {
   const token = req.headers.get("Authorization")?.replace(/^Bearer\s+/i, "");
   if (!token) throw new Error("Connexion requise");
+  const claims = readJwtClaims(token);
+  if (!claims?.sub || claims.aud !== "authenticated" || claims.role !== "authenticated") throw new Error("Session invalide");
   const { data, error } = await authClient.auth.getUser(token);
-  if (error || !data.user) throw new Error("Session invalide");
+  if (error || !data.user || data.user.id !== claims.sub) throw new Error("Session invalide");
   return data.user;
 }
 async function owns(userId: string, boutiqueId: string) {
@@ -33,10 +68,15 @@ async function assignedToOwnedBoutique(ownerId: string, userId: string, boutique
   const { data, error } = await admin.from("boutique_assignments").select("role").eq("user_id", userId).eq("boutique_id", boutiqueId).maybeSingle();
   if (error) throw error;
   if (!data || data.role === "owner") throw new Error("Cible employé non autorisée");
+  const { data: target, error: targetError } = await admin.from("platform_users").select("id,is_super_admin").eq("id", userId).maybeSingle();
+  if (targetError) throw targetError;
+  if (!target || target.is_super_admin) throw new Error("Cible employé non autorisée");
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
+  const origin = req.headers.get("Origin");
+  if (origin && !allowedOrigins.has(origin)) return json({ error: "Origine non autorisée" }, 403, origin);
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders(origin) });
   try {
     const actor = await caller(req);
     const body = await req.json();
@@ -59,7 +99,7 @@ Deno.serve(async (req) => {
         await admin.auth.admin.deleteUser(created.user.id);
         throw error;
       }
-      return json({ userId: created.user.id, code: temporaryCode });
+      return json({ userId: created.user.id, code: temporaryCode }, 200, origin);
     }
     if (action === "reset_password") {
       const { userId, boutiqueId } = body;
@@ -68,7 +108,7 @@ Deno.serve(async (req) => {
       const { error } = await admin.auth.admin.updateUserById(userId, { password: temporaryCode, email_confirm: true, user_metadata: { must_change_password: true } });
       if (error) throw error;
       await admin.from("platform_users").update({ must_change_password: true }).eq("id", userId);
-      return json({ code: temporaryCode });
+      return json({ code: temporaryCode }, 200, origin);
     }
     if (["assign_user", "unassign_user"].includes(action)) {
       const { boutiqueId, userId } = body;
@@ -79,9 +119,9 @@ Deno.serve(async (req) => {
         const role = body.role; if (!supportedRoles.has(role)) throw new Error("Rôle non autorisé");
         const { error } = await admin.from("boutique_assignments").update({ role, droits: cleanRights(body.droits) }).eq("boutique_id", boutiqueId).eq("user_id", userId); if (error) throw error;
       }
-      return json({ ok: true });
+      return json({ ok: true }, 200, origin);
     }
     if (action === "create_boutique") throw new Error("Création de boutique non disponible via cet endpoint");
     throw new Error("Action inconnue");
-  } catch (error) { return json({ error: error instanceof Error ? error.message : "Opération refusée" }, 400); }
+  } catch (error) { return json({ error: error instanceof Error ? error.message : "Opération refusée" }, 400, origin); }
 });
