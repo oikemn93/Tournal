@@ -427,7 +427,17 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
   async function submitReturn() {
     if (!returnInv || !returnInv.lines) return;
     const lines = returnInv.lines;
-    const returnLines = lines.map((l,i) => ({ ...l, qty: returnQtys[i] ?? 0 })).filter(l => l.qty > 0);
+    const returnLines = lines.map((l,i) => {
+      const qty = returnQtys[i] ?? 0;
+      const proportionalSellQty = l.sellUnit && l.sellQty != null && l.qty > 0
+        ? l.sellQty * qty / l.qty
+        : undefined;
+      return {
+        ...l,
+        qty,
+        ...(proportionalSellQty != null ? { sellQty: proportionalSellQty } : {}),
+      };
+    }).filter(l => l.qty > 0);
     if (returnLines.length === 0) return;
     // Never let a line send back more than what is still returnable.
     const overLine = lines.find((l,i) => (returnQtys[i] ?? 0) > remainingReturnable(returnInv, l));
@@ -442,12 +452,13 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
       alert(error instanceof Error ? error.message : "Retour impossible");
       return;
     }
-    const refundTotal = returnLines.reduce((s, l) => s + l.qty * l.prixUnit, 0);
+    const refundTotal = Number(persisted.total);
     const retId = persisted.return_invoice_id;
     const retInv: Invoice = {
       id: retId, clientId:returnInv.clientId, client: returnInv.client, clientTel: returnInv.clientTel,
+      clientType:returnInv.clientType,
       lines: returnLines, montant: refundTotal, acompte: refundTotal,
-      date: today(), dateRaw: new Date().toISOString(), status: "payé", type: "Retour",
+      date: today(), dateRaw:persisted.returned_at, status: "payé", type: "Retour", returnOfInvoiceId:returnInv.id,
       operatorNom: currentUser.nom, operatorColor: currentUser.color,
     };
     // Restore stock

@@ -67,7 +67,7 @@ export type Invoice    = {
   boutiqueNomSnapshot?: string; boutiqueVilleSnapshot?: string; boutiqueAdresseSnapshot?: string; boutiqueTelSnapshot?: string; boutiqueEmailSnapshot?: string; boutiqueLogoSnapshot?: string;
   lines?: InvoiceLine[]; payments?: InvoicePayment[];
   montant: number; acompte: number; date: string; dateRaw?: string;
-  status: InvoiceStatus; type: string;
+  status: InvoiceStatus; type: string; returnOfInvoiceId?: string;
   operatorNom?: string; operatorColor?: string;
   paymentMethod?: PaymentMethod; paymentSplit?: PaymentEntry[];
 };

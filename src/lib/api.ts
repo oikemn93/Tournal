@@ -369,6 +369,7 @@ export async function getData<T>(key: string): Promise<T | null> {
           dateRaw:i.invoice_date,
           status:paid >= Number(i.montant) ? "payé" : paid > 0 ? "acompte" : i.status === "en_attente" ? "en attente" : i.status,
           type:i.type,
+          returnOfInvoiceId:i.return_of_invoice_id ?? undefined,
           operatorNom:i.operator_nom_snapshot ?? operator.nom ?? undefined,
           operatorColor:operator.color ?? undefined,
           paymentMethod:i.payment_method ?? undefined,
@@ -562,7 +563,7 @@ export async function cancelPendingInvoice(invoiceId: string) {
 }
 
 export async function returnSale(params: { boutiqueId:string; invoiceId:string; lines:Array<{productId:number;qty:number}> }) {
-  return dataRequest<{ return_invoice_id:string; total:number }>("rpc/return_sale", {
+  return dataRequest<{ return_invoice_id:string; source_invoice_id:string; total:number; returned_at:string }>("rpc/return_sale", {
     method:"POST", headers:{ Prefer:"return=representation" },
     body:JSON.stringify({ p_boutique_id:params.boutiqueId, p_invoice_id:params.invoiceId, p_idempotency_key:crypto.randomUUID(), p_lines:params.lines }),
   });
