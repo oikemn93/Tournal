@@ -38,7 +38,6 @@ new='''  const [returnQtys, setReturnQtys] = useState<Record<number,number>>({})
 if new not in s:
     if old not in s: raise SystemExit('return state anchor missing')
     s=s.replace(old,new,1)
-
 old='''    setReturnQtys(initQtys);
     setReturnDone(false);
     setReturnInv(inv);'''
@@ -49,15 +48,11 @@ new='''    setReturnQtys(initQtys);
 if new not in s:
     if old not in s: raise SystemExit('open return anchor missing')
     s=s.replace(old,new,1)
-
 old='''persisted = await returnSale({ boutiqueId:boutique.id, invoiceId:returnInv.id, lines:returnLines.map(l=>({ productId:l.productId, qty:l.qty })) });'''
 new='''persisted = await returnSale({ boutiqueId:boutique.id, invoiceId:returnInv.id, refundMethod:returnMethod, lines:returnLines.map(l=>({ productId:l.productId, qty:l.qty })) });'''
 if new not in s:
     if old not in s: raise SystemExit('return call anchor missing')
     s=s.replace(old,new,1)
-
-# Persist the method immediately on the local return invoice object when the
-# existing object literal is built. This keeps UI, print and reports consistent.
 needle='''      operatorNom: currentUser.nom, operatorColor: currentUser.color,'''
 replacement='''      operatorNom: currentUser.nom, operatorColor: currentUser.color,
       paymentMethod: persisted.refund_method as PaymentMethod,
@@ -75,8 +70,6 @@ if replacement not in s:
     pos=s.find(needle, s.find('const retInv'))
     if pos<0: raise SystemExit('return invoice operator anchor missing')
     s=s[:pos]+s[pos:].replace(needle,replacement,1)
-
-# Insert selector directly before the return completion branch.
 ui_anchor='''          {returnDone ? ('''
 ui='''          {!returnDone && (
             <div className="space-y-2">
@@ -96,4 +89,28 @@ if 'MODE DE REMBOURSEMENT' not in s:
     if ui_anchor not in s: raise SystemExit('return UI anchor missing')
     s=s.replace(ui_anchor,ui+ui_anchor,1)
 p.write_text(s)
-print('refund method functional patch applied')
+
+# Print/share documents must explicitly show how the refund was paid.
+ip=Path('src/app/utils/invoice.ts')
+i=ip.read_text()
+msg_old='''      `\\n↩️ Montant remboursé: ${fmt(inv.montant)}\\n` +
+      `📅 ${inv.date}\\nCe document atteste d'un retour de marchandise.`;'''
+msg_new='''      `\\n↩️ Montant remboursé: ${fmt(inv.montant)}\\n` +
+      (inv.paymentMethod ? `💳 Mode de remboursement: ${inv.paymentMethod}\\n` : "") +
+      `📅 ${inv.date}\\nCe document atteste d'un retour de marchandise.`;'''
+if msg_new not in i:
+    if msg_old not in i: raise SystemExit('return message anchor missing')
+    i=i.replace(msg_old,msg_new,1)
+block_old='''  ${!isReturn && (paymentRows.length > 0 || inv.operatorNom || cashier || paidAtFormatted) ? `
+  <div class="payment-block">
+    ${paymentRows.length > 0 ? `
+      <div class="payment-title">${paymentRows.length > 1 ? "Modes de paiement" : "Mode de paiement"}</div>'''
+block_new='''  ${(paymentRows.length > 0 || inv.operatorNom || cashier || paidAtFormatted) ? `
+  <div class="payment-block">
+    ${paymentRows.length > 0 ? `
+      <div class="payment-title">${isReturn ? "Mode de remboursement" : paymentRows.length > 1 ? "Modes de paiement" : "Mode de paiement"}</div>'''
+if block_new not in i:
+    if block_old not in i: raise SystemExit('payment block anchor missing')
+    i=i.replace(block_old,block_new,1)
+ip.write_text(i)
+print('refund method patch applied')
