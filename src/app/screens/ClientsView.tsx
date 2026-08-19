@@ -13,6 +13,10 @@ import { createClient, recordClientPayment, updateClientContact, WHOLESALE_MARKE
 import { PhoneField } from "../components/PhoneField";
 import { formatPreciseDateTime, invoicePaidAmount, invoiceRemainingAmount } from "../utils/payments";
 
+function normalizePhone(value?: string): string {
+  return (value ?? "").replace(/\D/g, "");
+}
+
 export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser, onUpdate, logAction, initialTab, onOpenInvoice, onCreateInvoice }: {
   boutique: Boutique; allBoutiques: Boutique[]; platformUsers: PlatformUser[];
   currentUser: PlatformUser;
@@ -27,18 +31,45 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
   const [tab, setTab] = useState<ClientType>(initialTab ?? "B2C");
   const [search, setSearch] = useState("");
   const [modal, setModal] = useState(false);
+  const [detailClient, setDetailClient] = useState<Client|null>(null);
   const [nom,setNom]=useState(""); const [dialCode,setDialCode]=useState("+221"); const [tel,setTel]=useState(""); const [ville,setVille]=useState(""); const [type,setType]=useState<ClientType>("B2C");
   const [adresse,setAdresse]=useState(""); const [email,setEmail]=useState(""); const [contact,setContact]=useState("");
   const siblings = getSiblings(boutique.id, allBoutiques, platformUsers);
   const filtered = clients.filter(c=>c.type===tab&&(c.nom.toLowerCase().includes(search.toLowerCase())||c.tel.includes(search)||c.ville.toLowerCase().includes(search.toLowerCase())));
   const counts = { "B2C":clients.filter(c=>c.type==="B2C").length, "B2B":clients.filter(c=>c.type==="B2B").length, "Grossiste":clients.filter(c=>c.type==="Grossiste").length };
+
   async function submit() {
     if (!nom.trim()) return;
     const fullTel = tel.trim() ? dialCode + " " + tel.trim() : "";
+    const phoneNorm = normalizePhone(fullTel);
+    if (phoneNorm.length >= 8) {
+      const existing = clients.find(c => normalizePhone(c.tel) === phoneNorm);
+      if (existing) {
+        setModal(false);
+        setDetailClient(existing);
+        alert(`Ce numéro appartient déjà à ${existing.nom}. La fiche existante a été ouverte.`);
+        return;
+      }
+    }
+
     const isWholesale = type === "Grossiste";
     let persisted;
-    try { persisted = await createClient({ boutiqueId:boutique.id,name:nom.trim(),type:isWholesale ? "B2B" : type,phone:fullTel,email:email.trim() || undefined,city:ville.trim() || undefined }); }
-    catch (error) { alert(error instanceof Error ? error.message : "Création du client impossible"); return; }
+    try {
+      persisted = await createClient({ boutiqueId:boutique.id,name:nom.trim(),type:isWholesale ? "B2B" : type,phone:fullTel,email:email.trim() || undefined,city:ville.trim() || undefined });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Création du client impossible";
+      if (message.includes("client_phone_exists") && phoneNorm.length >= 8) {
+        const existing = clients.find(c => normalizePhone(c.tel) === phoneNorm);
+        if (existing) {
+          setModal(false);
+          setDetailClient(existing);
+          alert(`Ce numéro appartient déjà à ${existing.nom}. La fiche existante a été ouverte.`);
+          return;
+        }
+      }
+      alert(message);
+      return;
+    }
     // Wholesale clients: tag the persisted row so the type survives a reload.
     if (isWholesale) {
       const markedContact = `${contact.trim()} ${WHOLESALE_MARKER}`.trim();
@@ -49,7 +80,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
     logAction("Nouveau client",`${nom.trim()} (${type}) · ${ville.trim()}`,"👥");
     setNom(""); setDialCode("+221"); setTel(""); setVille(""); setAdresse(""); setEmail(""); setContact(""); setModal(false);
   }
-  const [detailClient, setDetailClient] = useState<Client|null>(null);
+
   const [paymentModal, setPaymentModal] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("Espèces");
@@ -63,16 +94,12 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
   ];
   const clientColor = (t: ClientType) => t==="Grossiste"?"#6d28d9":t==="B2B"?"#0e7490":"#374151";
 
-  // Client accounting detail modal
+  // Client accounting detail modal: invoices are linked only by their canonical client_id.
   if (detailClient) {
     const c = detailClient;
     const CC = clientColor(c.type);
-    const normalizedPhone = (value?: string) => (value ?? "").replace(/\D/g, "");
-    const clientInvoices = boutique.invoices.filter(inv =>
-      inv.clientId === c.id
-      || (normalizedPhone(c.tel) && normalizedPhone(inv.clientTel) === normalizedPhone(c.tel))
-      || inv.client.trim().toLowerCase() === c.nom.trim().toLowerCase()
-    ).sort((a,b)=>(b.dateRaw??b.date).localeCompare(a.dateRaw??a.date));
+    const clientInvoices = boutique.invoices.filter(inv => inv.clientId === c.id)
+      .sort((a,b)=>(b.dateRaw??b.date).localeCompare(a.dateRaw??a.date));
     const totalFacturé  = clientInvoices.reduce((s,i)=>s+i.montant,0);
     const totalEncaissé = clientInvoices.reduce((s,i)=>s+invoicePaidAmount(i),0);
     const totalImpayé   = clientInvoices.reduce((s,i)=>s+invoiceRemainingAmount(i),0);
@@ -296,7 +323,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
                 <div key={owner.id} className="rounded-2xl border overflow-hidden" style={{ borderColor: color+"33" }}>
                   {/* Owner header */}
                   <div className="flex items-center gap-3 px-4 py-3" style={{ background: color+"0f" }}>
-                    <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-black text-white flex-shrink-0" style={{ background: owner.color }}>
+                    <div className="w-9 h-9 rounded-full flex-shrink-0 flex items-center justify-center text-sm font-black text-white flex-shrink-0" style={{ background: owner.color }}>
                       {owner.initials}
                     </div>
                     <div className="flex-1 min-w-0">
@@ -352,14 +379,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
       <div className="space-y-2">
         {filtered.map(c=>{
           const CC = clientColor(c.type);
-          // Match the same invoices the detail view uses (clientId, normalized phone, or name)
-          // so the amount due is computed dynamically instead of relying on the stored 0.
-          const normalizedPhone = (value?: string) => (value ?? "").replace(/\D/g, "");
-          const clientInvoices = boutique.invoices.filter(inv =>
-            inv.clientId === c.id
-            || (normalizedPhone(c.tel) && normalizedPhone(inv.clientTel) === normalizedPhone(c.tel))
-            || inv.client.trim().toLowerCase() === c.nom.trim().toLowerCase()
-          );
+          const clientInvoices = boutique.invoices.filter(inv => inv.clientId === c.id);
           const invCount = clientInvoices.length;
           const montantDu = clientInvoices.reduce((s,inv)=>s+invoiceRemainingAmount(inv),0);
           return (
