@@ -37,9 +37,20 @@ export function productMontantNet(pid: number, entries: StockEntry[], charges: C
   return Math.max(0, Math.round(net));
 }
 export function supplierBalance(nom: string, entries: StockEntry[], charges?: Charge[]) {
-  const dû = entries.filter(e => e.fournisseur === nom && e.qty > 0).reduce((s, e) => s + e.montantDu, 0);
-  const payé = (charges ?? []).filter(c => c.fournisseur === nom).reduce((s, c) => s + c.montant, 0);
-  return Math.max(0, dû - payé);
+  const linkedCharges = (charges ?? []).filter(c => c.fournisseur === nom);
+  const regularPurchases = entries
+    .filter(e => e.fournisseur === nom && e.qty > 0)
+    .reduce((s, e) => s + e.montantDu, 0);
+  const transferPurchases = linkedCharges
+    .filter(c => c.source === "transfer")
+    .reduce((s, c) => s + c.montant, 0);
+  const regularPayments = linkedCharges
+    .filter(c => c.source !== "transfer")
+    .reduce((s, c) => s + c.montant, 0);
+  const transferPayments = linkedCharges
+    .filter(c => c.source === "transfer")
+    .reduce((s, c) => s + Number(c.paidAmount ?? 0), 0);
+  return Math.max(0, regularPurchases + transferPurchases - regularPayments - transferPayments);
 }
 // ─── MARGIN (FIFO cost of stock entries) ────────────────────────────────────
 // Unit cost for selling `qty` base units of a product, walking stock receipts

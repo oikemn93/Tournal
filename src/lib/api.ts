@@ -576,8 +576,8 @@ export async function recordStockMovement(params:{ boutiqueId:string; productId:
   });
 }
 
-export async function createCharge(params:{ boutiqueId:string; label:string; amount:number; category:string; note?:string }) {
-  return dataRequest<{ charge_id:number }>("rpc/create_charge", { method:"POST", headers:{ Prefer:"return=representation" }, body:JSON.stringify({ p_boutique_id:params.boutiqueId,p_idempotency_key:crypto.randomUUID(),p_label:params.label,p_montant:params.amount,p_categorie:params.category,p_note:params.note ?? null }) });
+export async function createCharge(params:{ boutiqueId:string; label:string; amount:number; category:string; note?:string; supplier?:string }) {
+  return dataRequest<{ charge_id:number }>("rpc/create_charge", { method:"POST", headers:{ Prefer:"return=representation" }, body:JSON.stringify({ p_boutique_id:params.boutiqueId,p_idempotency_key:crypto.randomUUID(),p_label:params.label,p_montant:params.amount,p_categorie:params.category,p_note:params.note ?? null,p_fournisseur:params.supplier ?? null }) });
 }
 
 // Marker stored in the free-text `contact` column to distinguish wholesale
