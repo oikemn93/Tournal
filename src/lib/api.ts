@@ -267,6 +267,26 @@ export async function resetUserPassword(userId: string, password: string) {
   return adminProvision<{ ok: true }>("reset_password", { userId, password });
 }
 
+export async function updateAdminUser(params:{userId:string;fullName:string;phone:string}) {
+  return adminProvision<{ok:true}>("update_user", params);
+}
+
+export async function setAdminUserSuspended(params:{userId:string;suspended:boolean;reason?:string}) {
+  return adminProvision<{ok:true;isSuspended:boolean}>("set_user_suspended", params);
+}
+
+export async function deleteAdminUser(userId:string) {
+  return adminProvision<{ok:true;transferredBoutiques:string[]}>("delete_user", {userId});
+}
+
+export async function getAdminUserDebug(userId:string) {
+  return adminProvision<{
+    user:{id:string;nom:string;phone:string;isSuspended:boolean;suspensionReason?:string|null};
+    auth:{createdAt?:string|null;lastSignInAt?:string|null;bannedUntil?:string|null;email?:string|null};
+    assignments:Array<{boutique_id:string;role:string;droits?:Record<string,boolean>;boutiques?:{nom?:string;ville?:string}|null}>;
+  }>("get_user_debug", {userId});
+}
+
 export async function assignUserToBoutique(
   boutiqueId: string,
   userId: string,
@@ -432,7 +452,7 @@ export async function getData<T>(key: string): Promise<T | null> {
   }
   if (key === "platform_users") {
     const [users, assignments] = await Promise.all([
-      dataRequest<Array<any>>("platform_users?select=id,phone,nom,initials,color,is_super_admin,group_id,is_compte_mere,must_change_password"),
+      dataRequest<Array<any>>("platform_users?select=id,phone,nom,initials,color,is_super_admin,is_suspended,suspension_reason,suspended_at,group_id,is_compte_mere,must_change_password"),
       dataRequest<Array<any>>("boutique_assignments?select=boutique_id,user_id,role,droits"),
     ]);
     const toRole = (role: string) => role === "owner" ? "Propriétaire" : role === "manager" ? "Manager" : "Vendeur";
@@ -443,6 +463,9 @@ export async function getData<T>(key: string): Promise<T | null> {
       initials: user.initials,
       color: user.color,
       isSuperAdmin: user.is_super_admin,
+      isSuspended: user.is_suspended === true,
+      suspensionReason: user.suspension_reason ?? undefined,
+      suspendedAt: user.suspended_at ?? undefined,
       groupeId: user.group_id ?? undefined,
       isCompteMere: user.is_compte_mere ?? undefined,
       mustChangePassword: user.must_change_password === true,

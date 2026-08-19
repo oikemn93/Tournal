@@ -22,6 +22,7 @@ import { FournisseursView as RelationalFournisseursView } from "./screens/Fourni
 import { ChargesView as RelationalChargesView } from "./screens/ChargesView";
 import { ComptabiliteView as RelationalComptabiliteView } from "./screens/RapportView";
 import { TransfersView as RelationalTransfersView } from "./screens/TransfersView";
+import { SuperAdminUserActions } from "./components/SuperAdminUserActions";
 import { filterPaymentEventsByPeriod, invoicePaymentEvents, invoiceRemainingAmount } from "./utils/payments";
 
 const ReadOnlyCtx = React.createContext(false);
@@ -83,6 +84,7 @@ type PlatformUser = {
   initials: string; color: string; isSuperAdmin: boolean;
   assignments: BoutiqueAssignment[];
   groupeId?: string; isCompteMere?: boolean; mustChangePassword?: boolean;
+  isSuspended?: boolean; suspensionReason?: string; suspendedAt?: string;
 };
 type Product    = { id: number; nom: string; img: string; unit: string; fournisseur: string; categorie?: string; couleur?: string; alertOk?: number; alertLow?: number };
 type StockEntry = { id: number; productId: number; qty: number; unit: string; montantDu: number; date: string; fournisseur: string; invoiceId?: string; nbLots?: number; nbPieces?: number; longueurPiece?: number; sku?: string; isTransfertInterne?: boolean };
@@ -1368,6 +1370,7 @@ function SuperAdminScreen({ boutiques, platformUsers, groupes, onEnterBoutique, 
                       <div className="flex items-center gap-2 flex-wrap">
                         <p className="font-bold text-sm">{u.nom}</p>
                         {isOwner&&<span className="text-xs px-1.5 py-0.5 rounded font-bold" style={{ background:SEM.role.bg, color:SEM.role.text }}>Propriétaire</span>}
+                        {u.isSuspended&&<span className="text-xs px-1.5 py-0.5 rounded font-bold" style={{ background:SEM.danger.bg, color:SEM.danger.text }}>Suspendu</span>}
                         {u.isCompteMere&&<span className="text-xs px-1.5 py-0.5 rounded font-bold" style={{ background:"#7c3aed22", color:"#7c3aed" }}>Compte mère</span>}
                         {grp&&<span className="text-xs px-1.5 py-0.5 rounded font-bold" style={{ background:"#0891b222", color:"#0891b2" }}>🔗 {grp.nom}</span>}
                       </div>
@@ -1379,6 +1382,7 @@ function SuperAdminScreen({ boutiques, platformUsers, groupes, onEnterBoutique, 
                     <button onClick={()=>{setResetTarget(u);setNewPwd("");setResetDone(false);}} className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold flex-shrink-0" style={{ background:"#C9A22722", color:"#C9A227" }}>
                       <RefreshCw size={13}/> MDP
                     </button>
+                    <SuperAdminUserActions user={u} boutiques={boutiques} onChanged={()=>window.location.reload()}/>
                   </div>
                   {u.assignments.length>0&&<div className="flex flex-wrap gap-2 mt-3">{u.assignments.map((a,i)=>{const b=boutiques.find(x=>x.id===a.boutiqueId);return b?<span key={i} className="text-xs px-2.5 py-1.5 rounded-xl font-bold flex items-center gap-1.5" style={{ background:b.color+"22", color:b.color }}><Building2 size={11}/>{b.nom} · {a.role}</span>:null;})}</div>}
                   {u.assignments.length===0&&<p className="text-xs text-muted-foreground mt-2">Aucun tenant assigné</p>}
@@ -8814,6 +8818,10 @@ export default function App() {
           const u = finalUsers.find(x => x.id === authUser.id);
           if (u) {
             setCurrentUser(u);
+            if (u.isSuspended) {
+              await signOutFromSupabase(); clearSession(); setCurrentUser(null); setScreen("login");
+              toast.error("Compte suspendu — contactez l’administrateur Tournal"); return;
+            }
             if (u.mustChangePassword) { setScreen("password-change"); return; }
             if (u.isSuperAdmin) { setScreen("superadmin"); return; }
             const assignments = u.assignments.filter(a => finalBoutiques.some(b => b.id === a.boutiqueId));
@@ -8956,6 +8964,10 @@ export default function App() {
   function handleLogin(user: PlatformUser) {
     const freshUser = platformUsers.find(u => u.id === user.id) ?? user;
     setCurrentUser(freshUser);
+    if (freshUser.isSuspended) {
+      void signOutFromSupabase(); clearSession(); setCurrentUser(null); setScreen("login");
+      toast.error("Compte suspendu — contactez l’administrateur Tournal"); return;
+    }
     if (freshUser.isSuperAdmin) { saveSession(freshUser.id, null, null); setScreen("superadmin"); return; }
     const active = freshUser.assignments.filter(a => boutiques.find(b => b.id === a.boutiqueId));
     if (active.length === 0) { saveSession(freshUser.id, null, null); setScreen("boutique-select"); return; }
