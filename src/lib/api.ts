@@ -97,6 +97,26 @@ async function adminProvision<T>(action: string, payload: Record<string, unknown
   return body as T;
 }
 
+export async function createInvoiceShare(params: { boutiqueId:string; invoiceId:string; pdf:Blob }) {
+  const session = readSession();
+  if (!session?.access_token) throw new Error("Connexion requise");
+  const form = new FormData();
+  form.append("boutique_id", params.boutiqueId);
+  form.append("invoice_id", params.invoiceId);
+  form.append("file", params.pdf, `facture-${params.invoiceId}.pdf`);
+  const response = await fetch(`${SUPABASE_URL}/functions/v1/create-invoice-share`, {
+    method: "POST",
+    headers: {
+      apikey: ANON_KEY,
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: form,
+  });
+  const body = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(body?.error ?? "Création du lien de facture impossible");
+  return body as { url:string; expires_at:string };
+}
+
 export async function signInWithPhone(phone: string, password: string) {
   const body = await authRequest("/token?grant_type=password", {
     method: "POST",

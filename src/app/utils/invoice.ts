@@ -232,6 +232,55 @@ export function buildInvoicePDFHtml(inv: Invoice, boutique: Boutique, clients: C
 </html>`;
 }
 
+export async function generateInvoicePDFBlob(inv: Invoice, boutique: Boutique, clients: Client[]): Promise<Blob> {
+  const [{ jsPDF }, html2canvasModule] = await Promise.all([
+    import("jspdf"),
+    import("html2canvas"),
+  ]);
+  const html2canvas = html2canvasModule.default;
+  const iframe = document.createElement("iframe");
+  iframe.style.cssText = "position:fixed;left:-10000px;top:0;width:794px;height:1123px;border:0;visibility:hidden;pointer-events:none;";
+  document.body.appendChild(iframe);
+  try {
+    const doc = iframe.contentDocument ?? iframe.contentWindow?.document;
+    if (!doc) throw new Error("Préparation PDF impossible");
+    doc.open();
+    doc.write(buildInvoicePDFHtml(inv, boutique, clients));
+    doc.close();
+    await new Promise(resolve => setTimeout(resolve, 120));
+    if (doc.fonts?.ready) await doc.fonts.ready;
+    doc.body.style.width = "794px";
+    doc.body.style.minHeight = "1123px";
+    doc.body.style.padding = "53px 60px";
+    doc.body.style.background = "#fff";
+
+    const canvas = await html2canvas(doc.body, {
+      scale: 1.5,
+      useCORS: true,
+      backgroundColor: "#ffffff",
+      logging: false,
+    });
+    const pdf = new jsPDF({ orientation:"portrait", unit:"mm", format:"a4", compress:true });
+    const pageWidth = 210;
+    const pageHeight = 297;
+    const imgHeight = canvas.height * pageWidth / canvas.width;
+    const image = canvas.toDataURL("image/jpeg", 0.9);
+    let position = 0;
+    let remaining = imgHeight;
+    pdf.addImage(image, "JPEG", 0, position, pageWidth, imgHeight, undefined, "FAST");
+    remaining -= pageHeight;
+    while (remaining > 0) {
+      position -= pageHeight;
+      pdf.addPage();
+      pdf.addImage(image, "JPEG", 0, position, pageWidth, imgHeight, undefined, "FAST");
+      remaining -= pageHeight;
+    }
+    return pdf.output("blob");
+  } finally {
+    iframe.remove();
+  }
+}
+
 export function openInvoicePDF(inv: Invoice, boutique: Boutique, clients: Client[]) {
   const html = buildInvoicePDFHtml(inv, boutique, clients);
   const w = window.open("", "_blank", "width=900,height=700");

@@ -2,10 +2,10 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Search, Plus, Send, FileText, Eye, Mail, MessageCircle, Smartphone, Phone, Wallet, CreditCard, RotateCcw, ShoppingCart, Receipt, AlertCircle, Trash2, CheckCircle, Minus, Store, X, ChevronLeft, ChevronRight, CalendarDays, PlusCircle } from "lucide-react";
 import type { Boutique, Invoice, InvoiceStatus, InvoiceLine, StockEntry, PaymentMethod, Client, PlatformUser, CaisseSession, PaymentEntry } from "../types";
 import { SEM, inputCls, PAYMENT_METHODS, PM_ICON, PM_COLOR, PLACEHOLDER_IMGS } from "../constants";
-import { createSale, recordPayment, recordMultiPayment, returnSale, openCaisseSession, closeCaisseSession } from "../../lib/api";
+import { createSale, recordPayment, recordMultiPayment, returnSale, openCaisseSession, closeCaisseSession, createInvoiceShare } from "../../lib/api";
 import { fmt, today, imgSrc } from "../utils/formatting";
 import { invBadge, lineTotal, lineDispQty, lineDispUnit, genInvoiceId, productQty, getSiblings, invoiceMargin, lineUnitCost } from "../utils/inventory";
-import { buildReceiptHtml, openInvoicePDF, buildInvoiceMessage, agentPrint, printReceipt, printCaisseReport } from "../utils/invoice";
+import { buildReceiptHtml, openInvoicePDF, buildInvoiceMessage, generateInvoicePDFBlob, agentPrint, printReceipt, printCaisseReport } from "../utils/invoice";
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
@@ -15,176 +15,136 @@ import { getDefaultSaleUnit, getLastSalePrice, getSaleUnitOptions, toBaseSaleQty
 // ─── SHARE INVOICE MODAL ──────────────────────────────────────────────────────
 
 function ShareInvoiceModal({ inv, boutique, clients, onClose }: { inv: Invoice; boutique: Boutique; clients: Client[]; onClose: () => void }) {
-  const msg = buildInvoiceMessage(inv, boutique);
-  const phone = inv.clientTel ? inv.clientTel.replace(/[\s\-().]/g,"").replace("+","") : "";
-  const clientRecord = clients.find(c=>c.nom===inv.client);
+  const phone = inv.clientTel ? inv.clientTel.replace(/[\s\-().]/g, "").replace("+", "") : "";
+  const clientRecord = inv.clientId != null ? clients.find(c=>c.id===inv.clientId) : clients.find(c=>c.nom===inv.client);
   const reste = Math.max(0, inv.montant - inv.acompte);
   const [channel, setChannel] = useState<"apercu"|"email"|"whatsapp"|"sms">("apercu");
   const [emailAddr, setEmailAddr] = useState(clientRecord?.email ?? "");
   const [waPhone, setWaPhone] = useState(inv.clientTel ?? "");
   const [smsPhone, setSmsPhone] = useState(inv.clientTel ?? "");
   const [generating, setGenerating] = useState(false);
+  const [shareError, setShareError] = useState("");
 
   const inputCls2 = "w-full rounded-xl border border-border bg-background px-4 py-3 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-ring";
+  const fmtN = (n: number) => new Intl.NumberFormat("fr-FR").format(n);
 
   function doPreview() {
+    openInvoicePDF(inv, boutique, clients);
+  }
+
+  async function createTemporaryLink() {
+    setShareError("");
     setGenerating(true);
-    setTimeout(() => { openInvoicePDF(inv, boutique, clients); setGenerating(false); }, 100);
+    try {
+      const pdf = await generateInvoicePDFBlob(inv, boutique, clients);
+      return await createInvoiceShare({ boutiqueId:boutique.id, invoiceId:inv.id, pdf });
+    } catch (error) {
+      setShareError(error instanceof Error ? error.message : "Création du lien impossible");
+      return null;
+    } finally {
+      setGenerating(false);
+    }
   }
 
-  function doEmail() {
-    if (!emailAddr.trim()) return;
-    openInvoicePDF(inv, boutique, clients);
-    const subject = encodeURIComponent(`Facture ${inv.id} — ${boutique.nom}`);
-    const fmtN = (n: number) => new Intl.NumberFormat("fr-FR").format(n);
-    const bodyText = `Bonjour ${inv.client},\n\nVeuillez trouver ci-joint votre facture N° ${inv.id} d'un montant de ${fmtN(inv.montant)} F.`
-      + (reste > 0 ? `\nMontant restant dû : ${fmtN(reste)} F.` : `\nStatut : Payé.`)
-      + `\n\nCordialement,\n${boutique.nom}` + (boutique.tel ? `\n${boutique.tel}` : "") + (boutique.email ? `\n${boutique.email}` : "");
-    const body = encodeURIComponent(bodyText);
-    setTimeout(() => { window.location.href = `mailto:${emailAddr}?subject=${subject}&body=${body}`; }, 800);
-  }
-
-  function doWhatsApp() {
-    const rawPhone = (waPhone||phone).replace(/[\s\-().+]/g,"");
-    if (!rawPhone) return;
-    const fmtN = (n: number) => new Intl.NumberFormat("fr-FR").format(n);
+  function shareText(url:string) {
     const statusLine = reste<=0 ? "Statut : Payé"
-      : inv.acompte>0 ? `Acompte de ${fmtN(inv.acompte)} F versé — reste dû : ${fmtN(reste)} F`
+      : inv.acompte>0 ? `Encaissé : ${fmtN(inv.acompte)} F — reste dû : ${fmtN(reste)} F`
       : "Statut : Impayé";
-    const text = encodeURIComponent(
-      `Bonjour ${inv.client}\n\nVoici votre facture *${inv.id}* de *${boutique.nom}* :\n` +
-      `Total : *${fmtN(inv.montant)} F*\n${statusLine}\nDate : ${inv.date}\n\nMerci pour votre confiance`
-    );
-    openInvoicePDF(inv, boutique, clients);
-    setTimeout(() => window.open(`https://wa.me/${rawPhone}?text=${text}`, "_blank"), 800);
+    return `Bonjour ${inv.client}\n\nVoici votre facture ${inv.id} de ${boutique.nom}.\nTotal : ${fmtN(inv.montant)} F\n${statusLine}\n\nConsulter / télécharger la facture :\n${url}\n\nLien valable 48 h. Après expiration, la facture peut être régénérée sur demande.\n\nMerci pour votre confiance.`;
   }
 
-  function doSMS() {
-    const rawPhone = (smsPhone||phone).replace(/[\s\-()]/g,"");
-    if (!rawPhone) return;
-    const fmtN = (n: number) => new Intl.NumberFormat("fr-FR").format(n);
-    const text = encodeURIComponent(
-      `Facture ${inv.id} - ${boutique.nom} : ${fmtN(inv.montant)} F`
-      + (reste > 0 ? ` (reste: ${fmtN(reste)} F)` : " (Paye)")
-      + `. Consultez le PDF envoye separement.`
-    );
-    openInvoicePDF(inv, boutique, clients);
-    setTimeout(() => window.open(`sms:${rawPhone}?body=${text}`, "_self"), 800);
+  async function doEmail() {
+    if (!emailAddr.trim() || generating) return;
+    const share = await createTemporaryLink();
+    if (!share) return;
+    const subject = encodeURIComponent(`Facture ${inv.id} — ${boutique.nom}`);
+    const body = encodeURIComponent(shareText(share.url));
+    window.location.href = `mailto:${emailAddr.trim()}?subject=${subject}&body=${body}`;
   }
 
-  const fmtN = (n: number) => new Intl.NumberFormat("fr-FR").format(n);
-  const waPreview = `Bonjour ${inv.client}\n\nVoici votre facture *${inv.id}* de *${boutique.nom}* :\nTotal : *${fmtN(inv.montant)} F*\n${reste<=0?"Statut : Paye":inv.acompte>0?`Acompte de ${fmtN(inv.acompte)} F verse — reste du : ${fmtN(reste)} F`:"Statut : Impaie"}\nDate : ${inv.date}\n\nMerci pour votre confiance`;
+  async function doWhatsApp() {
+    const rawPhone = (waPhone || phone).replace(/[\s\-().+]/g, "");
+    if (!rawPhone || generating) return;
+    const popup = window.open("about:blank", "_blank");
+    const share = await createTemporaryLink();
+    if (!share) { popup?.close(); return; }
+    const target = `https://wa.me/${rawPhone}?text=${encodeURIComponent(shareText(share.url))}`;
+    if (popup) popup.location.href = target;
+    else window.location.href = target;
+  }
+
+  async function doSMS() {
+    const rawPhone = (smsPhone || phone).replace(/[\s\-()]/g, "");
+    if (!rawPhone || generating) return;
+    const share = await createTemporaryLink();
+    if (!share) return;
+    const text = `Facture ${inv.id} - ${boutique.nom} : ${fmtN(inv.montant)} F. ${reste > 0 ? `Reste ${fmtN(reste)} F. ` : "Payée. "}Lien valable 48 h : ${share.url}`;
+    window.location.href = `sms:${rawPhone}?body=${encodeURIComponent(text)}`;
+  }
 
   const CHANNELS: Array<{id:"apercu"|"email"|"whatsapp"|"sms"; label:string; color:string}> = [
-    { id:"apercu",   label:"Apercu PDF", color:"#374151" },
-    { id:"email",    label:"E-mail",     color:"#0ea5e9" },
-    { id:"whatsapp", label:"WhatsApp",   color:"#16a34a" },
-    { id:"sms",      label:"SMS",        color:"#7c3aed" },
+    { id:"apercu", label:"Aperçu PDF", color:"#374151" },
+    { id:"email", label:"E-mail", color:"#0ea5e9" },
+    { id:"whatsapp", label:"WhatsApp", color:"#16a34a" },
+    { id:"sms", label:"SMS", color:"#7c3aed" },
   ];
 
   return (
-    <Modal title="Envoyer la facture" color="#374151" onClose={onClose}>
-      {/* Invoice summary */}
+    <Modal title="Partager la facture" color="#374151" onClose={onClose}>
       <div className="flex items-center gap-3 px-4 py-3 rounded-2xl" style={{ background:"#f3f4f6", border:"1px solid #e5e7eb" }}>
         <FileText size={18} className="text-muted-foreground flex-shrink-0"/>
         <div className="flex-1 min-w-0">
           <p className="text-sm font-black">{inv.id} · {inv.client}</p>
           <p className="text-xs text-muted-foreground">{fmtN(inv.montant)} F · {inv.date}</p>
         </div>
-        <span className="text-xs font-bold px-2 py-1 rounded-lg"
-          style={{ background:reste<=0?"#f0fdf4":inv.acompte>0?"#fffbeb":"#fef2f2", color:reste<=0?"#16a34a":inv.acompte>0?"#d97706":"#dc2626" }}>
+        <span className="text-xs font-bold px-2 py-1 rounded-lg" style={{ background:reste<=0?"#f0fdf4":inv.acompte>0?"#fffbeb":"#fef2f2", color:reste<=0?"#16a34a":inv.acompte>0?"#d97706":"#dc2626" }}>
           {reste<=0?"Payé":inv.acompte>0?"Acompte":"Impayé"}
         </span>
       </div>
 
-      {/* Channel tabs */}
+      <div className="px-4 py-3 rounded-2xl text-xs leading-relaxed" style={{background:"#eff6ff",color:"#1d4ed8",border:"1px solid #bfdbfe"}}>
+        Aucun PDF n'est stocké tant que le client ne demande pas sa facture. Pour E-mail, WhatsApp ou SMS, Tournal génère un PDF temporaire et un lien privé valable 48 h. Le fichier est ensuite supprimé automatiquement. La facture reste toujours régénérable depuis les données Tournal.
+      </div>
+
       <div className="grid grid-cols-4 gap-2">
         {CHANNELS.map(ch=>(
-          <button key={ch.id} onClick={()=>setChannel(ch.id)}
-            className="flex flex-col items-center gap-1.5 py-3 rounded-2xl transition-all"
-            style={{ background:channel===ch.id?ch.color+"18":"#f9f9f7", border:channel===ch.id?`2px solid ${ch.color}55`:"2px solid transparent" }}>
-            {ch.id==="apercu"&&<Eye size={17} style={{ color:channel===ch.id?ch.color:"#9ca3af" }}/>}
-            {ch.id==="email"&&<Mail size={17} style={{ color:channel===ch.id?ch.color:"#9ca3af" }}/>}
-            {ch.id==="whatsapp"&&<MessageCircle size={17} style={{ color:channel===ch.id?ch.color:"#9ca3af" }}/>}
-            {ch.id==="sms"&&<Smartphone size={17} style={{ color:channel===ch.id?ch.color:"#9ca3af" }}/>}
+          <button key={ch.id} onClick={()=>{setChannel(ch.id);setShareError("");}} className="flex flex-col items-center gap-1.5 py-3 rounded-2xl transition-all" style={{ background:channel===ch.id?ch.color+"18":"#f9f9f7", border:channel===ch.id?`2px solid ${ch.color}55`:"2px solid transparent" }}>
+            {ch.id==="apercu"&&<Eye size={17} style={{ color:channel===ch.id?ch.color:"#9ca3af" }}/>} 
+            {ch.id==="email"&&<Mail size={17} style={{ color:channel===ch.id?ch.color:"#9ca3af" }}/>} 
+            {ch.id==="whatsapp"&&<MessageCircle size={17} style={{ color:channel===ch.id?ch.color:"#9ca3af" }}/>} 
+            {ch.id==="sms"&&<Smartphone size={17} style={{ color:channel===ch.id?ch.color:"#9ca3af" }}/>} 
             <span className="text-xs font-bold" style={{ color:channel===ch.id?ch.color:"#6b7280" }}>{ch.label}</span>
           </button>
         ))}
       </div>
 
+      {shareError && <div className="px-4 py-3 rounded-xl text-xs font-bold" style={{background:"#fef2f2",color:"#dc2626",border:"1px solid #fecaca"}}>{shareError}</div>}
+
       {channel==="apercu"&&(
         <div className="space-y-3">
-          <div className="px-4 py-3 rounded-2xl" style={{ background:"#f9f9f7", border:"1px solid #e5e7eb" }}>
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              Ouvre la facture PDF dans un nouvel onglet. Utilisez <strong>Fichier → Imprimer → Enregistrer en PDF</strong> pour la télécharger.
-            </p>
-          </div>
-          <button onClick={doPreview} disabled={generating}
-            className="w-full py-4 rounded-2xl text-sm font-black flex items-center justify-center gap-2 active:scale-95 transition-all"
-            style={{ background:"#374151", color:"#fff" }}>
-            {generating
-              ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/><span>Génération...</span></>
-              : <><Eye size={16}/><span>Ouvrir l'aperçu PDF</span></>}
-          </button>
+          <p className="text-xs text-muted-foreground leading-relaxed">L'aperçu est généré localement pour consultation ou impression. Aucun fichier n'est envoyé dans le stockage.</p>
+          <button onClick={doPreview} className="w-full py-4 rounded-2xl text-sm font-black flex items-center justify-center gap-2 active:scale-95" style={{background:"#374151",color:"#fff"}}><Eye size={16}/> Ouvrir l'aperçu PDF</button>
         </div>
       )}
 
       {channel==="email"&&(
         <div className="space-y-3">
-          <div className="px-4 py-3 rounded-2xl" style={{ background:"#0ea5e910", border:"1px solid #0ea5e930" }}>
-            <p className="text-xs leading-relaxed" style={{ color:"#0284c7" }}>
-              Le PDF s'ouvrira d'abord pour téléchargement — puis votre messagerie s'ouvrira avec le texte pré-rempli. Joignez le PDF depuis votre dossier Téléchargements.
-            </p>
-          </div>
-          <div>
-            <label className="text-xs font-black mb-2 block tracking-wider text-muted-foreground">ADRESSE E-MAIL DU CLIENT</label>
-            <input value={emailAddr} onChange={e=>setEmailAddr(e.target.value)} placeholder="client@exemple.com" type="email" className={inputCls2} autoFocus/>
-            {boutique.email&&<p className="text-xs text-muted-foreground mt-1.5">Expéditeur suggéré : {boutique.email}</p>}
-          </div>
-          <button onClick={doEmail} disabled={!emailAddr.trim()}
-            className="w-full py-4 rounded-2xl text-sm font-black flex items-center justify-center gap-2 active:scale-95 transition-all disabled:opacity-40"
-            style={{ background:"#0ea5e9", color:"#fff" }}>
-            <Mail size={16}/><span>Générer et envoyer par e-mail</span>
-          </button>
+          <div><label className="text-xs font-black mb-2 block tracking-wider text-muted-foreground">E-MAIL DU CLIENT</label><input value={emailAddr} onChange={e=>setEmailAddr(e.target.value)} placeholder="client@exemple.com" type="email" className={inputCls2}/></div>
+          <button onClick={()=>void doEmail()} disabled={!emailAddr.trim()||generating} className="w-full py-4 rounded-2xl text-sm font-black flex items-center justify-center gap-2 disabled:opacity-40" style={{background:"#0ea5e9",color:"#fff"}}><Mail size={16}/>{generating?"Création du lien…":"Créer le lien et ouvrir l'e-mail"}</button>
         </div>
       )}
 
       {channel==="whatsapp"&&(
         <div className="space-y-3">
-          <div className="px-4 py-3 rounded-2xl" style={{ background:"#16a34a10", border:"1px solid #16a34a30" }}>
-            <p className="text-xs leading-relaxed" style={{ color:"#15803d" }}>
-              Le PDF s'ouvrira pour téléchargement, puis WhatsApp s'ouvrira avec un message convivial pré-rédigé.
-            </p>
-          </div>
-          <div>
-            <label className="text-xs font-black mb-2 block tracking-wider text-muted-foreground">NUMÉRO WHATSAPP DU CLIENT</label>
-            <input value={waPhone} onChange={e=>setWaPhone(e.target.value)} placeholder="+221 77 000 0000" type="tel" className={inputCls2}/>
-          </div>
-          <div className="px-3 py-3 rounded-xl text-xs leading-relaxed" style={{ background:"#f0fdf4", color:"#166534", border:"1px solid #bbf7d0", fontFamily:"monospace", whiteSpace:"pre-wrap" }}>{waPreview}</div>
-          <button onClick={doWhatsApp} disabled={!(waPhone||phone).trim()}
-            className="w-full py-4 rounded-2xl text-sm font-black flex items-center justify-center gap-2 active:scale-95 transition-all disabled:opacity-40"
-            style={{ background:"#16a34a", color:"#fff" }}>
-            <MessageCircle size={16}/><span>Générer et envoyer via WhatsApp</span>
-          </button>
+          <div><label className="text-xs font-black mb-2 block tracking-wider text-muted-foreground">WHATSAPP DU CLIENT</label><input value={waPhone} onChange={e=>setWaPhone(e.target.value)} placeholder="+221 77 000 0000" type="tel" className={inputCls2}/></div>
+          <button onClick={()=>void doWhatsApp()} disabled={!(waPhone||phone).trim()||generating} className="w-full py-4 rounded-2xl text-sm font-black flex items-center justify-center gap-2 disabled:opacity-40" style={{background:"#16a34a",color:"#fff"}}><MessageCircle size={16}/>{generating?"Création du lien…":"Créer le lien et ouvrir WhatsApp"}</button>
         </div>
       )}
 
       {channel==="sms"&&(
         <div className="space-y-3">
-          <div className="px-4 py-3 rounded-2xl" style={{ background:"#7c3aed10", border:"1px solid #7c3aed30" }}>
-            <p className="text-xs leading-relaxed" style={{ color:"#6d28d9" }}>
-              Le PDF s'ouvrira — téléchargez-le et partagez le lien via SMS. Un message court sera pré-rempli dans votre application SMS.
-            </p>
-          </div>
-          <div>
-            <label className="text-xs font-black mb-2 block tracking-wider text-muted-foreground">NUMÉRO DE TÉLÉPHONE DU CLIENT</label>
-            <input value={smsPhone} onChange={e=>setSmsPhone(e.target.value)} placeholder="+221 77 000 0000" type="tel" className={inputCls2}/>
-          </div>
-          <button onClick={doSMS} disabled={!(smsPhone||phone).trim()}
-            className="w-full py-4 rounded-2xl text-sm font-black flex items-center justify-center gap-2 active:scale-95 transition-all disabled:opacity-40"
-            style={{ background:"#7c3aed", color:"#fff" }}>
-            <Smartphone size={16}/><span>Générer et envoyer par SMS</span>
-          </button>
+          <div><label className="text-xs font-black mb-2 block tracking-wider text-muted-foreground">TÉLÉPHONE DU CLIENT</label><input value={smsPhone} onChange={e=>setSmsPhone(e.target.value)} placeholder="+221 77 000 0000" type="tel" className={inputCls2}/></div>
+          <button onClick={()=>void doSMS()} disabled={!(smsPhone||phone).trim()||generating} className="w-full py-4 rounded-2xl text-sm font-black flex items-center justify-center gap-2 disabled:opacity-40" style={{background:"#7c3aed",color:"#fff"}}><Smartphone size={16}/>{generating?"Création du lien…":"Créer le lien et ouvrir SMS"}</button>
         </div>
       )}
     </Modal>
