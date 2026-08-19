@@ -5,6 +5,7 @@ import type { Boutique, Tab, DashPeriod } from "../types";
 import { SEM, MONTHLY, inputCls } from "../constants";
 import { fmt } from "../utils/formatting";
 import { productQty, invBadge, filterByPeriod } from "../utils/inventory";
+import { filterPaymentEventsByPeriod, invoiceRemainingAmount } from "../utils/payments";
 
 export function DashboardView({ boutique, onNavigate }: { boutique: Boutique; onNavigate: (tab: Tab, filter?: Record<string,string>) => void }) {
   const { products, entries, clients, invoices } = boutique;
@@ -14,15 +15,18 @@ export function DashboardView({ boutique, onNavigate }: { boutique: Boutique; on
   const [customTo, setCustomTo] = useState("");
 
   const filtInv = filterByPeriod(invoices, period, customFrom, customTo);
+  const filtPayments = filterPaymentEventsByPeriod(invoices, period, customFrom, customTo);
   const filtCh  = filterByPeriod(charges, period, customFrom, customTo);
+  const invoiceSign = (invoice: typeof invoices[number]) => invoice.type.toLowerCase() === "retour" ? -1 : 1;
+  const chargeCashAmount = (charge: typeof charges[number]) => charge.source === "transfer" ? Number(charge.paidAmount ?? 0) : charge.montant;
 
-  const ca          = filtInv.reduce((s,i) => s + i.acompte, 0);
-  const caTotal     = filtInv.reduce((s,i) => s + i.montant, 0);
-  const totalCharges= filtCh.reduce((s,c) => s + c.montant, 0);
+  const ca          = filtPayments.reduce((s,p) => s + p.signedAmount, 0);
+  const caTotal     = filtInv.reduce((s,i) => s + invoiceSign(i) * i.montant, 0);
+  const totalCharges= filtCh.reduce((s,c) => s + chargeCashAmount(c), 0);
   const margeBrute  = ca - totalCharges;
-  const tauxMarge   = ca > 0 ? Math.round((margeBrute/ca)*100) : 0;
-  const impayées    = filtInv.filter(i=>i.status!=="payé");
-  const totalImpayé = impayées.reduce((s,i)=>s+(i.montant-i.acompte),0);
+  const tauxMarge   = ca !== 0 ? Math.round((margeBrute/Math.abs(ca))*100) : 0;
+  const impayées    = filtInv.filter(i=>invoiceSign(i)>0 && invoiceRemainingAmount(i)>0);
+  const totalImpayé = impayées.reduce((s,i)=>s+invoiceRemainingAmount(i),0);
   const totalQty    = products.reduce((s,p)=>s+productQty(p.id,entries),0);
   const rupture     = products.filter(p=>productQty(p.id,entries)<=0).length;
   const grossistes  = clients.filter(c=>c.type==="Grossiste").length;
@@ -37,16 +41,17 @@ export function DashboardView({ boutique, onNavigate }: { boutique: Boutique; on
     if (period === "semaine") {
       const days = ["Lun","Mar","Mer","Jeu","Ven","Sam","Dim"];
       return days.map((d,i) => {
-        const v = filtInv.filter(inv => {
-          const raw = inv.date ?? "";
-          const parsed = (() => { try { const parts = raw.toLowerCase().split(" "); const months: Record<string,number> = {jan:0,fév:1,mar:2,avr:3,mai:4,jun:5,jul:6,aoû:7,sep:8,oct:9,nov:10,déc:11}; return new Date(new Date().getFullYear(), months[parts[1]?.slice(0,3)]??0, parseInt(parts[0])); } catch { return new Date(); }})();
-          return (parsed.getDay()+6)%7 === i;
-        }).reduce((s,inv)=>s+inv.acompte,0);
-        return { m: d, v: Math.round(v/1000) };
+        const v = filtPayments.filter(payment => (new Date(payment.paidAt).getDay()+6)%7 === i)
+          .reduce((s,payment)=>s+payment.signedAmount,0);
+        return { m:d, v:Math.round(v/1000) };
       });
     }
     const map = new Map<string,number>();
-    filtInv.forEach(inv => { const k = inv.date.split(" · ")[0]; map.set(k,(map.get(k)??0)+inv.acompte); });
+    filtPayments.forEach(payment => {
+      const date = new Date(payment.paidAt);
+      const k = Number.isNaN(date.getTime()) ? payment.paidAt.slice(0,10) : date.toLocaleDateString("fr-FR",{day:"2-digit",month:"short"});
+      map.set(k,(map.get(k)??0)+payment.signedAmount);
+    });
     return Array.from(map.entries()).slice(-10).map(([m,v])=>({ m, v:Math.round(v/1000) }));
   })();
 
@@ -88,7 +93,7 @@ export function DashboardView({ boutique, onNavigate }: { boutique: Boutique; on
           {[
             {label:"CA Encaissé", value:ca, color:"#1f2937"},
             {label:"Charges",     value:totalCharges, color:"#ef4444"},
-            {label:"Marge nette", value:margeBrute, color:margeBrute>=0?SEM.success.accent:SEM.danger.accent},
+            {label:"Solde net", value:margeBrute, color:margeBrute>=0?SEM.success.accent:SEM.danger.accent},
           ].map(m=>(
             <div key={m.label} className="rounded-xl p-2.5 text-center" style={{background:m.color+"11"}}>
               <p className="text-base font-black leading-tight" style={{color:m.color,fontFamily:"'Nunito',sans-serif"}}>{fmt(m.value)}</p>

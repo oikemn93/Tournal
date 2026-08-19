@@ -27,7 +27,9 @@ export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique:
   const nbVentes     = new Set(filtPayments.filter(payment=>payment.signedAmount>0).map(payment=>payment.invoiceId)).size;
   const panierMoyen  = nbVentes > 0 ? ca / nbVentes : 0;
   const impayé       = filtInv.filter(i=>invoiceSign(i)>0).reduce((s,i)=>s+invoiceRemainingAmount(i),0);
-  const totalCharges = filtCh.reduce((s,c)=>s+c.montant,0);
+  const chargeCashAmount = (charge: typeof charges[number]) => charge.source === "transfer" ? Number(charge.paidAmount ?? 0) : charge.montant;
+  const totalCharges = filtCh.reduce((s,c)=>s+chargeCashAmount(c),0);
+  const chargesExploitation = filtCh.filter(c=>c.categorie!=="Achat stock").reduce((s,c)=>s+chargeCashAmount(c),0);
 
   // Product margin (sale price − FIFO cost of goods), returns counted negatively.
   // Only computed/shown for users with the "Voir les marges" right.
@@ -38,7 +40,7 @@ export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique:
   }, { marge:0, ca:0, cost:0, has:false });
   const margeVentes    = margeVentesData.marge;
   const tauxMargeVentes= margeVentesData.ca !== 0 ? Math.round(margeVentes/Math.abs(margeVentesData.ca)*100) : 0;
-  const resultatApresCharges = margeVentes - totalCharges;
+  const resultatApresCharges = margeVentes - chargesExploitation;
 
   const byMethode = PAYMENT_METHODS.map(m => ({
     m, total: filtPayments.filter(payment=>payment.paymentMethod===m).reduce((sum,payment)=>sum + payment.signedAmount,0),
@@ -46,7 +48,7 @@ export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique:
   })).filter(r=>r.count>0);
 
   const byCategorie = CHARGE_CATS.map(cat=>({
-    cat, montant: filtCh.filter(c=>c.categorie===cat).reduce((s,c)=>s+c.montant,0)
+    cat, montant: filtCh.filter(c=>c.categorie===cat).reduce((s,c)=>s+chargeCashAmount(c),0)
   })).filter(r=>r.montant>0);
 
   const periodLabel: Record<DashPeriod,string> = { jour:"Aujourd'hui", semaine:"Cette semaine", mois:"Ce mois", annee:"Cette année", custom:"Période personnalisée" };
@@ -97,7 +99,7 @@ ${byMethode.map(r=>`<div class="row"><span class="label">${PM_ICON[r.m]} ${r.m} 
 <div class="row total-row"><span class="label">Total encaissé</span><span class="value green">${fmt(ca)}</span></div>`:""}
 ${filtCh.length>0?`<div class="section-title">Charges (${filtCh.length})</div>
 ${byCategorie.map(r=>`<div class="row"><span class="label">${r.cat}</span><span class="value red">${fmt(r.montant)}</span></div>`).join("")}
-${filtCh.map(c=>`<div class="row"><span class="label" style="padding-left:12px;color:#888">· ${c.label}</span><span class="value muted">${fmt(c.montant)}</span></div>`).join("")}
+${filtCh.map(c=>`<div class="row"><span class="label" style="padding-left:12px;color:#888">· ${c.label}</span><span class="value muted">${fmt(chargeCashAmount(c))}</span></div>`).join("")}
 <div class="row total-row"><span class="label">Total charges</span><span class="value red">${fmt(totalCharges)}</span></div>
 ${canSeeMargin && margeVentesData.has ? `<div class="row total-row" style="border-top:2px solid ${resultatApresCharges>=0?"#1E9B1E":"#ef4444"}"><span class="label" style="color:${resultatApresCharges>=0?"#1E9B1E":"#ef4444"}">Résultat après charges</span><span class="value" style="color:${resultatApresCharges>=0?"#1E9B1E":"#ef4444"}">${fmt(resultatApresCharges)}</span></div>` : ""}`:""}
 </body></html>`;
@@ -107,7 +109,7 @@ ${canSeeMargin && margeVentesData.has ? `<div class="row total-row" style="borde
     const chargesBlock = filtCh.length > 0 ? `
 <div class="section-title">Charges (${filtCh.length})</div>
 <table><thead><tr><th>Libellé</th><th>Catégorie</th><th>Date</th><th class="val">Montant</th></tr></thead><tbody>
-${filtCh.map(c=>`<tr><td>${c.label}</td><td>${c.categorie}</td><td>${c.date}</td><td class="val">${fmt(c.montant)}</td></tr>`).join("")}
+${filtCh.map(c=>`<tr><td>${c.label}</td><td>${c.categorie}</td><td>${c.date}</td><td class="val">${fmt(chargeCashAmount(c))}</td></tr>`).join("")}
 <tr class="total-row"><td colspan="3"><b>TOTAL CHARGES</b></td><td class="val red"><b>${fmt(totalCharges)}</b></td></tr>
 </tbody></table>` : "";
     const invLines = filtInv.map(inv=>{
