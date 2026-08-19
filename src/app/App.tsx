@@ -6730,7 +6730,7 @@ function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdat
     {id:"clients"      as Permission, label:"Clients",            icon:"👥"},
     {id:"factures"     as Permission, label:"Factures",           icon:"🧾"},
     {id:"vente"        as Permission, label:"Vente",              icon:"🛒"},
-    {id:"encaissement_vente" as Permission, label:"Encaisser dans Vente", icon:"💳"},
+    {id:"encaissement_vente" as Permission, label:"Encaissement", icon:"💳"},
     {id:"remboursement"as Permission, label:"Remboursement",      icon:"↩️"},
     {id:"charges"      as Permission, label:"Charges",            icon:"💸"},
     {id:"compta"       as Permission, label:"Rapport",            icon:"📊"},
