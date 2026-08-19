@@ -1,5 +1,6 @@
 from pathlib import Path
 
+# Triggered after workflow installation.
 # 1) Browser API client: remove legacy anon JWT and use publishable key for Edge Functions.
 api_path = Path('src/lib/api.ts')
 api = api_path.read_text()
