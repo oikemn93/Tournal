@@ -295,7 +295,7 @@ export async function getData<T>(key: string): Promise<T | null> {
     const day = (value?: string | null) => value ? new Date(value).toLocaleDateString("fr-FR") : "";
     return boutiques.map((b) => ({
       id: b.id, nom: b.nom, ville: b.ville ?? "", color: b.color ?? "#C9A227",
-      initials: b.initials ?? (b.nom ?? "?").split(/\\s+/).map((x: string) => x[0]).join("").slice(0, 2).toUpperCase(),
+      initials: b.initials ?? (b.nom ?? "?").split(/\s+/).map((x: string) => x[0]).join("").slice(0, 2).toUpperCase(),
       logo: b.logo_url ?? undefined, adresse: b.adresse ?? undefined, email: b.email ?? undefined, tel: b.tel ?? undefined,
       categories: categories.filter(c => c.boutique_id === b.id).map(c => ({
         id: c.id,
@@ -326,10 +326,10 @@ export async function getData<T>(key: string): Promise<T | null> {
           ? invoicePayments.reduce((sum, p) => sum + Number(p.amount), 0)
           : Number(i.acompte);
         const operator = userById.get(i.operator_id) ?? {};
-        const clientRecord = clients.find(c => c.boutique_id === b.id && (c.id === i.client_id || (i.client_tel && c.tel === i.client_tel)));
+        const clientRecord = clients.find(c => c.boutique_id === b.id && c.id === i.client_id);
         return {
           id:i.id,
-          clientId:i.client_id ?? clientRecord?.id ?? undefined,
+          clientId:i.client_id ?? undefined,
           client:i.client_nom ?? "Client comptoir",
           clientTel:i.client_tel ?? undefined,
           clientType:clientRecord?.type ?? undefined,
@@ -469,24 +469,24 @@ export async function saveData<T>(key: string, value: T): Promise<void> {
   }
 }
 
-export async function createSale(params: { boutiqueId: string; client: string; clientTel?: string; paymentMethod?: string; lines: Array<{ productId:number; nom:string; qty:number; unit:string; prixUnit:number; sellUnit?:string; sellQty?:number }> }) {
-  return dataRequest<{ invoice_id:string; total:number }>("rpc/create_sale", {
+export async function createSale(params: { boutiqueId: string; clientId?: number; client: string; clientTel?: string; paymentMethod?: string; lines: Array<{ productId:number; nom:string; qty:number; unit:string; prixUnit:number; sellUnit?:string; sellQty?:number }> }) {
+  return dataRequest<{ invoice_id:string; client_id:number|null; total:number }>("rpc/create_sale", {
     method: "POST",
     headers: { Prefer: "return=representation" },
-    body: JSON.stringify({ p_boutique_id:params.boutiqueId, p_idempotency_key:crypto.randomUUID(), p_client_nom:params.client, p_client_tel:params.clientTel ?? null, p_lines:params.lines, p_payment_method:params.paymentMethod ?? null }),
+    body: JSON.stringify({ p_boutique_id:params.boutiqueId, p_idempotency_key:crypto.randomUUID(), p_client_nom:params.client, p_client_tel:params.clientTel ?? null, p_lines:params.lines, p_payment_method:params.paymentMethod ?? null, p_client_id:params.clientId ?? null }),
   });
 }
 
 export async function openCaisseSession(params: { boutiqueId: string; fondOuverture: number }) {
   return dataRequest<{ session_id:string; opened_at:string; fond_ouverture:number; already_open:boolean }>("rpc/open_caisse_session", {
-    method: "POST", headers: { Prefer: "return=representation" },
+    method: "POST", headers: { Prefer:"return=representation" },
     body: JSON.stringify({ p_boutique_id:params.boutiqueId, p_idempotency_key:crypto.randomUUID(), p_fond_ouverture:params.fondOuverture }),
   });
 }
 
 export async function closeCaisseSession(params: { boutiqueId:string; sessionId:string; fondFermeture?:number; totalVentes:number; totalCharges?:number }) {
   return dataRequest<{ session_id:string; closed_at:string }>("rpc/close_caisse_session", {
-    method: "POST", headers: { Prefer: "return=representation" },
+    method: "POST", headers: { Prefer:"return=representation" },
     body: JSON.stringify({ p_boutique_id:params.boutiqueId, p_session_id:params.sessionId, p_idempotency_key:crypto.randomUUID(), p_fond_fermeture:params.fondFermeture ?? null, p_total_ventes:params.totalVentes, p_total_charges:params.totalCharges ?? 0 }),
   });
 }
