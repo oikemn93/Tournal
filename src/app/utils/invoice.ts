@@ -24,6 +24,7 @@ export function buildInvoiceMessage(inv: Invoice, boutique: Boutique): string {
     return `*RETOUR / AVOIR ${inv.id}* — ${boutique.nom}\n📋 Client: ${inv.client}\n` +
       (lines ? `\n${lines}\n` : "") +
       `\n↩️ Montant remboursé: ${fmt(inv.montant)}\n` +
+      (inv.paymentMethod ? `💳 Mode de remboursement: ${inv.paymentMethod}\n` : "") +
       `📅 ${inv.date}\nCe document atteste d'un retour de marchandise.`;
   }
   return `*Facture ${inv.id}* — ${boutique.nom}\n📋 Client: ${inv.client}\n` +
@@ -226,10 +227,10 @@ export function buildInvoicePDFHtml(inv: Invoice, boutique: Boutique, clients: C
       ${reste > 0 && inv.acompte === 0 ? `<div class="totals-reste"><span class="totals-reste-label">Montant impayé</span><span class="totals-reste-value">${fmtF(reste)}</span></div>` : ""}
     </div>
   </div>
-  ${!isReturn && (paymentRows.length > 0 || inv.operatorNom || cashier || paidAtFormatted) ? `
+  ${(paymentRows.length > 0 || inv.operatorNom || cashier || paidAtFormatted) ? `
   <div class="payment-block">
     ${paymentRows.length > 0 ? `
-      <div class="payment-title">${paymentRows.length > 1 ? "Modes de paiement" : "Mode de paiement"}</div>
+      <div class="payment-title">${isReturn ? "Mode de remboursement" : paymentRows.length > 1 ? "Modes de paiement" : "Mode de paiement"}</div>
       ${paymentRows.map(payment => `<div class="payment-row"><span>${payment.method}</span><strong>${fmtF(payment.amount)}</strong></div>`).join("")}
     ` : ""}
     <div class="payment-meta">
