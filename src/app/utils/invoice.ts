@@ -309,6 +309,13 @@ export function buildReceiptHtml(inv: Invoice, boutique: Boutique, fallbackOpera
   const reste = Math.max(0, inv.montant - inv.acompte);
   const lines = inv.lines ?? [];
   const operator = inv.operatorNom ?? fallbackOperator ?? "—";
+  const paymentRows = inv.payments?.length
+    ? inv.payments.map(payment => ({ method:payment.paymentMethod, amount:payment.amount }))
+    : inv.paymentSplit?.length
+      ? inv.paymentSplit.map(payment => ({ method:payment.method, amount:payment.amount }))
+      : inv.paymentMethod && inv.acompte > 0
+        ? [{ method:inv.paymentMethod, amount:inv.acompte }]
+        : [];
   const COL = 32;
   function pad(left: string, right: string, total = COL): string {
     const space = total - left.length - right.length;
@@ -394,7 +401,11 @@ ${lines.map(l => `
     <span class="label">Reste à payer</span>
     <span class="value">${fnum(reste)}&nbsp;F</span>
   </div>
-  ${inv.paymentMethod ? `<div class="row"><span class="label">Mode de paiement</span><span class="value">${inv.paymentMethod}</span></div>` : ""}
+  ${paymentRows.length > 0 ? `
+  <div class="sep-dash"></div>
+  <div class="bold small" style="margin-bottom:1mm;">PAIEMENTS</div>
+  ${paymentRows.map(payment => `<div class="row"><span class="label">${payment.method}</span><span class="value">${fnum(payment.amount)}&nbsp;F</span></div>`).join("")}
+  ` : ""}
   <div style="text-align:right;margin-top:1.5mm;">
     <span class="status">${inv.status.toUpperCase()}</span>
   </div>
