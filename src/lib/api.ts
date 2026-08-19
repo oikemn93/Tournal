@@ -583,10 +583,19 @@ export async function cancelPendingInvoice(invoiceId: string) {
   await dataRequest(`invoices?id=eq.${encodeURIComponent(invoiceId)}&acompte=eq.0`, { method:"DELETE" });
 }
 
-export async function returnSale(params: { boutiqueId:string; invoiceId:string; lines:Array<{productId:number;qty:number}> }) {
-  return dataRequest<{ return_invoice_id:string; source_invoice_id:string; total:number; returned_at:string }>("rpc/return_sale", {
+export async function returnSale(params: { boutiqueId:string; invoiceId:string; lines:Array<{productId:number;qty:number}>; refundMethod:string }) {
+  return dataRequest<{
+    return_invoice_id:string; source_invoice_id:string; total:number; returned_at:string; refund_method:string;
+    payment:{ id:number; amount:number; payment_method:string; paid_at:string; operator_id:string; operator_name:string; batch_id:string; source:"invoice" };
+  }>("rpc/return_sale", {
     method:"POST", headers:{ Prefer:"return=representation" },
-    body:JSON.stringify({ p_boutique_id:params.boutiqueId, p_invoice_id:params.invoiceId, p_idempotency_key:crypto.randomUUID(), p_lines:params.lines }),
+    body:JSON.stringify({
+      p_boutique_id:params.boutiqueId,
+      p_invoice_id:params.invoiceId,
+      p_idempotency_key:crypto.randomUUID(),
+      p_lines:params.lines,
+      p_refund_method:params.refundMethod,
+    }),
   });
 }
 

@@ -201,6 +201,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
   // Return state
   const [returnInv, setReturnInv] = useState<Invoice|null>(null);
   const [returnQtys, setReturnQtys] = useState<Record<number,number>>({});
+  const [returnMethod, setReturnMethod] = useState<PaymentMethod>("Espèces");
   const [returnDone, setReturnDone] = useState(false);
   const [clientRef,setClientRef] = useState(clients[0] ? `client:${clients[0].id}` : siblings[0] ? `boutique:${siblings[0].id}` : "");
   const [lines, setLines]  = useState<InvoiceLine[]>([]);
@@ -419,6 +420,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
     const initQtys: Record<number,number> = {};
     inv.lines.forEach((l,i) => { initQtys[i] = remainingReturnable(inv, l); });
     setReturnQtys(initQtys);
+    setReturnMethod("Espèces");
     setReturnDone(false);
     setReturnInv(inv);
     setDetailInv(null);
@@ -447,7 +449,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
     }
     let persisted;
     try {
-      persisted = await returnSale({ boutiqueId:boutique.id, invoiceId:returnInv.id, lines:returnLines.map(l=>({ productId:l.productId, qty:l.qty })) });
+      persisted = await returnSale({ boutiqueId:boutique.id, invoiceId:returnInv.id, refundMethod:returnMethod, lines:returnLines.map(l=>({ productId:l.productId, qty:l.qty })) });
     } catch (error) {
       alert(error instanceof Error ? error.message : "Retour impossible");
       return;
@@ -460,6 +462,17 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
       lines: returnLines, montant: refundTotal, acompte: refundTotal,
       date: today(), dateRaw:persisted.returned_at, status: "payé", type: "Retour", returnOfInvoiceId:returnInv.id,
       operatorNom: currentUser.nom, operatorColor: currentUser.color,
+      paymentMethod: persisted.refund_method as PaymentMethod,
+      payments: persisted.payment ? [{
+        id:persisted.payment.id,
+        amount:persisted.payment.amount,
+        paymentMethod:persisted.payment.payment_method as PaymentMethod,
+        paidAt:persisted.payment.paid_at,
+        operatorId:persisted.payment.operator_id,
+        operatorName:persisted.payment.operator_name,
+        batchId:persisted.payment.batch_id,
+        source:persisted.payment.source,
+      }] : [],
     };
     // Restore stock
     const restoreEntries: StockEntry[] = returnLines.map((l,i) => ({
@@ -889,6 +902,19 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
               </div>
             ) : null;
           })()}
+          {!returnDone && (
+            <div className="space-y-2">
+              <p className="text-xs font-black tracking-wider text-muted-foreground">MODE DE REMBOURSEMENT</p>
+              <div className="grid grid-cols-2 gap-2">
+                {PAYMENT_METHODS.map(method => (
+                  <button key={method} type="button" onClick={()=>setReturnMethod(method)} className="flex items-center gap-2 rounded-xl px-3 py-3 text-sm font-bold" style={{ background:returnMethod===method?(PM_COLOR[method]??"#6b7280")+"18":"#f9fafb", border:returnMethod===method?`2px solid ${(PM_COLOR[method]??"#6b7280")}55`:"2px solid transparent", color:returnMethod===method?(PM_COLOR[method]??"#374151"):"#6b7280" }}>
+                    <span>{PM_ICON[method]}</span><span>{method}</span>
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground">Le mode choisi sera enregistré sur l'avoir et dans l'écriture de remboursement.</p>
+            </div>
+          )}
           {returnDone ? (
             <div className="flex items-center justify-center gap-3 py-4 rounded-2xl" style={{ background:SEM.success.bg }}>
               <CheckCircle size={22} style={{ color:SEM.success.accent }}/>
