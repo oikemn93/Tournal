@@ -1,0 +1,36 @@
+name: Predeploy patch runner
+
+on:
+  push:
+    branches:
+      - feature/predeploy-hardening-20260819
+    paths:
+      - scripts/predeploy_patch.py
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/predeploy-hardening-20260819
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply guarded patch
+        run: python scripts/predeploy_patch.py
+      - name: Commit patched files
+        run: |
+          if git diff --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git config user.name "Tournal predeploy bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add src
+          git commit -m "feat: apply guarded predeploy sale defaults"
+          git push origin HEAD:feature/predeploy-hardening-20260819
