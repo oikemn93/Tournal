@@ -97,6 +97,26 @@ async function adminProvision<T>(action: string, payload: Record<string, unknown
   return body as T;
 }
 
+export async function createInvoiceShare(params: { boutiqueId:string; invoiceId:string; pdf:Blob }) {
+  const session = readSession();
+  if (!session?.access_token) throw new Error("Connexion requise");
+  const form = new FormData();
+  form.append("boutique_id", params.boutiqueId);
+  form.append("invoice_id", params.invoiceId);
+  form.append("file", params.pdf, `facture-${params.invoiceId}.pdf`);
+  const response = await fetch(`${SUPABASE_URL}/functions/v1/create-invoice-share`, {
+    method: "POST",
+    headers: {
+      apikey: ANON_KEY,
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: form,
+  });
+  const body = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(body?.error ?? "Création du lien de facture impossible");
+  return body as { url:string; expires_at:string };
+}
+
 export async function signInWithPhone(phone: string, password: string) {
   const body = await authRequest("/token?grant_type=password", {
     method: "POST",
@@ -295,7 +315,7 @@ export async function getData<T>(key: string): Promise<T | null> {
     const day = (value?: string | null) => value ? new Date(value).toLocaleDateString("fr-FR") : "";
     return boutiques.map((b) => ({
       id: b.id, nom: b.nom, ville: b.ville ?? "", color: b.color ?? "#C9A227",
-      initials: b.initials ?? (b.nom ?? "?").split(/\\s+/).map((x: string) => x[0]).join("").slice(0, 2).toUpperCase(),
+      initials: b.initials ?? (b.nom ?? "?").split(/\s+/).map((x: string) => x[0]).join("").slice(0, 2).toUpperCase(),
       logo: b.logo_url ?? undefined, adresse: b.adresse ?? undefined, email: b.email ?? undefined, tel: b.tel ?? undefined,
       categories: categories.filter(c => c.boutique_id === b.id).map(c => ({
         id: c.id,
@@ -326,20 +346,31 @@ export async function getData<T>(key: string): Promise<T | null> {
           ? invoicePayments.reduce((sum, p) => sum + Number(p.amount), 0)
           : Number(i.acompte);
         const operator = userById.get(i.operator_id) ?? {};
-        const clientRecord = clients.find(c => c.boutique_id === b.id && (c.id === i.client_id || (i.client_tel && c.tel === i.client_tel)));
+        const clientRecord = clients.find(c => c.boutique_id === b.id && c.id === i.client_id);
         return {
           id:i.id,
-          clientId:i.client_id ?? clientRecord?.id ?? undefined,
+          clientId:i.client_id ?? undefined,
           client:i.client_nom ?? "Client comptoir",
           clientTel:i.client_tel ?? undefined,
-          clientType:clientRecord?.type ?? undefined,
+          clientType:i.client_type_snapshot ?? clientRecord?.type ?? undefined,
+          clientEmailSnapshot:i.client_email_snapshot ?? undefined,
+          clientAdresseSnapshot:i.client_adresse_snapshot ?? undefined,
+          clientVilleSnapshot:i.client_ville_snapshot ?? undefined,
+          clientTypeSnapshot:i.client_type_snapshot ?? undefined,
+          boutiqueNomSnapshot:i.boutique_nom_snapshot ?? undefined,
+          boutiqueVilleSnapshot:i.boutique_ville_snapshot ?? undefined,
+          boutiqueAdresseSnapshot:i.boutique_adresse_snapshot ?? undefined,
+          boutiqueTelSnapshot:i.boutique_tel_snapshot ?? undefined,
+          boutiqueEmailSnapshot:i.boutique_email_snapshot ?? undefined,
+          boutiqueLogoSnapshot:i.boutique_logo_snapshot ?? undefined,
           montant:Number(i.montant),
           acompte:paid,
           date:day(i.invoice_date),
           dateRaw:i.invoice_date,
           status:paid >= Number(i.montant) ? "payé" : paid > 0 ? "acompte" : i.status === "en_attente" ? "en attente" : i.status,
           type:i.type,
-          operatorNom:operator.nom ?? undefined,
+          returnOfInvoiceId:i.return_of_invoice_id ?? undefined,
+          operatorNom:i.operator_nom_snapshot ?? operator.nom ?? undefined,
           operatorColor:operator.color ?? undefined,
           paymentMethod:i.payment_method ?? undefined,
           payments:invoicePayments.map(p => ({
@@ -469,24 +500,24 @@ export async function saveData<T>(key: string, value: T): Promise<void> {
   }
 }
 
-export async function createSale(params: { boutiqueId: string; client: string; clientTel?: string; paymentMethod?: string; lines: Array<{ productId:number; nom:string; qty:number; unit:string; prixUnit:number; sellUnit?:string; sellQty?:number }> }) {
-  return dataRequest<{ invoice_id:string; total:number }>("rpc/create_sale", {
+export async function createSale(params: { boutiqueId: string; clientId?: number; client: string; clientTel?: string; paymentMethod?: string; lines: Array<{ productId:number; nom:string; qty:number; unit:string; prixUnit:number; sellUnit?:string; sellQty?:number }> }) {
+  return dataRequest<{ invoice_id:string; client_id:number|null; total:number }>("rpc/create_sale", {
     method: "POST",
     headers: { Prefer: "return=representation" },
-    body: JSON.stringify({ p_boutique_id:params.boutiqueId, p_idempotency_key:crypto.randomUUID(), p_client_nom:params.client, p_client_tel:params.clientTel ?? null, p_lines:params.lines, p_payment_method:params.paymentMethod ?? null }),
+    body: JSON.stringify({ p_boutique_id:params.boutiqueId, p_idempotency_key:crypto.randomUUID(), p_client_nom:params.client, p_client_tel:params.clientTel ?? null, p_lines:params.lines, p_payment_method:params.paymentMethod ?? null, p_client_id:params.clientId ?? null }),
   });
 }
 
 export async function openCaisseSession(params: { boutiqueId: string; fondOuverture: number }) {
   return dataRequest<{ session_id:string; opened_at:string; fond_ouverture:number; already_open:boolean }>("rpc/open_caisse_session", {
-    method: "POST", headers: { Prefer: "return=representation" },
+    method: "POST", headers: { Prefer:"return=representation" },
     body: JSON.stringify({ p_boutique_id:params.boutiqueId, p_idempotency_key:crypto.randomUUID(), p_fond_ouverture:params.fondOuverture }),
   });
 }
 
 export async function closeCaisseSession(params: { boutiqueId:string; sessionId:string; fondFermeture?:number; totalVentes:number; totalCharges?:number }) {
   return dataRequest<{ session_id:string; closed_at:string }>("rpc/close_caisse_session", {
-    method: "POST", headers: { Prefer: "return=representation" },
+    method: "POST", headers: { Prefer:"return=representation" },
     body: JSON.stringify({ p_boutique_id:params.boutiqueId, p_session_id:params.sessionId, p_idempotency_key:crypto.randomUUID(), p_fond_fermeture:params.fondFermeture ?? null, p_total_ventes:params.totalVentes, p_total_charges:params.totalCharges ?? 0 }),
   });
 }
@@ -495,6 +526,18 @@ export async function recordPayment(params: { boutiqueId:string; invoiceId:strin
   return dataRequest<{ invoice_id:string; acompte:number; applied_amount:number; status:string; stock_deducted:boolean; payment:{ id:number; amount:number; payment_method:string; paid_at:string; operator_id:string; operator_name:string; batch_id:string; source:"invoice" } }>("rpc/record_payment", {
     method:"POST", headers:{ Prefer:"return=representation" },
     body:JSON.stringify({ p_boutique_id:params.boutiqueId, p_invoice_id:params.invoiceId, p_idempotency_key:crypto.randomUUID(), p_amount:params.amount, p_payment_method:params.paymentMethod }),
+  });
+}
+
+export async function recordMultiPayment(params: { boutiqueId:string; invoiceId:string; payments:Array<{amount:number;paymentMethod:string}> }) {
+  return dataRequest<{ invoice_id:string; acompte:number; applied_amount:number; status:string; stock_deducted:boolean; batch_id:string; payments:Array<{ id:number; amount:number; payment_method:string; paid_at:string; operator_id:string; operator_name:string; batch_id:string; source:"invoice" }> }>("rpc/record_multi_payment", {
+    method:"POST", headers:{ Prefer:"return=representation" },
+    body:JSON.stringify({
+      p_boutique_id:params.boutiqueId,
+      p_invoice_id:params.invoiceId,
+      p_idempotency_key:crypto.randomUUID(),
+      p_payments:params.payments,
+    }),
   });
 }
 
@@ -520,7 +563,7 @@ export async function cancelPendingInvoice(invoiceId: string) {
 }
 
 export async function returnSale(params: { boutiqueId:string; invoiceId:string; lines:Array<{productId:number;qty:number}> }) {
-  return dataRequest<{ return_invoice_id:string; total:number }>("rpc/return_sale", {
+  return dataRequest<{ return_invoice_id:string; source_invoice_id:string; total:number; returned_at:string }>("rpc/return_sale", {
     method:"POST", headers:{ Prefer:"return=representation" },
     body:JSON.stringify({ p_boutique_id:params.boutiqueId, p_invoice_id:params.invoiceId, p_idempotency_key:crypto.randomUUID(), p_lines:params.lines }),
   });
@@ -533,8 +576,8 @@ export async function recordStockMovement(params:{ boutiqueId:string; productId:
   });
 }
 
-export async function createCharge(params:{ boutiqueId:string; label:string; amount:number; category:string; note?:string }) {
-  return dataRequest<{ charge_id:number }>("rpc/create_charge", { method:"POST", headers:{ Prefer:"return=representation" }, body:JSON.stringify({ p_boutique_id:params.boutiqueId,p_idempotency_key:crypto.randomUUID(),p_label:params.label,p_montant:params.amount,p_categorie:params.category,p_note:params.note ?? null }) });
+export async function createCharge(params:{ boutiqueId:string; label:string; amount:number; category:string; note?:string; supplier?:string }) {
+  return dataRequest<{ charge_id:number }>("rpc/create_charge", { method:"POST", headers:{ Prefer:"return=representation" }, body:JSON.stringify({ p_boutique_id:params.boutiqueId,p_idempotency_key:crypto.randomUUID(),p_label:params.label,p_montant:params.amount,p_categorie:params.category,p_note:params.note ?? null,p_fournisseur:params.supplier ?? null }) });
 }
 
 // Marker stored in the free-text `contact` column to distinguish wholesale
@@ -566,6 +609,30 @@ export async function updateBoutiqueProfile(params: { boutiqueId:string; nom:str
     method: "PATCH",
     headers: { Prefer: "return=minimal" },
     body: JSON.stringify({ nom: params.nom, ville: params.ville, adresse: params.adresse ?? null, email: params.email ?? null, tel: params.tel ?? null }),
+  });
+}
+
+export type BoutiqueDirectoryEntry = {
+  boutique_id:string; nom:string; ville:string; tel:string; is_partner?:boolean; transfer_count:number;
+};
+export async function searchBoutiqueDirectory(boutiqueId:string, query="") {
+  return dataRequest<BoutiqueDirectoryEntry[]>("rpc/search_boutique_directory", {
+    method:"POST", body:JSON.stringify({ p_source_boutique_id:boutiqueId, p_query:query || null }),
+  });
+}
+export async function getBoutiquePartners(boutiqueId:string) {
+  return dataRequest<BoutiqueDirectoryEntry[]>("rpc/get_boutique_partners", {
+    method:"POST", body:JSON.stringify({ p_boutique_id:boutiqueId }),
+  });
+}
+export async function addBoutiquePartner(boutiqueId:string, partnerBoutiqueId:string) {
+  return dataRequest<{boutique_id:string;nom:string;ville:string|null;tel:string|null}>("rpc/add_boutique_partner", {
+    method:"POST", body:JSON.stringify({ p_boutique_id:boutiqueId, p_partner_boutique_id:partnerBoutiqueId }),
+  });
+}
+export async function removeBoutiquePartner(boutiqueId:string, partnerBoutiqueId:string) {
+  return dataRequest<{removed:boolean;boutique_id:string}>("rpc/remove_boutique_partner", {
+    method:"POST", body:JSON.stringify({ p_boutique_id:boutiqueId, p_partner_boutique_id:partnerBoutiqueId }),
   });
 }
 

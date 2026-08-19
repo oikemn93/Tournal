@@ -6730,7 +6730,7 @@ function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdat
     {id:"clients"      as Permission, label:"Clients",            icon:"👥"},
     {id:"factures"     as Permission, label:"Factures",           icon:"🧾"},
     {id:"vente"        as Permission, label:"Vente",              icon:"🛒"},
-    {id:"encaissement_vente" as Permission, label:"Encaisser dans Vente", icon:"💳"},
+    {id:"encaissement_vente" as Permission, label:"Encaissement", icon:"💳"},
     {id:"remboursement"as Permission, label:"Remboursement",      icon:"↩️"},
     {id:"charges"      as Permission, label:"Charges",            icon:"💸"},
     {id:"compta"       as Permission, label:"Rapport",            icon:"📊"},
@@ -6780,9 +6780,6 @@ function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdat
     const bid=boutique.id;
     const assignment=u.assignments.find(a=>a.boutiqueId===boutique.id);
     if (!assignment) return;
-
-    // Encaisser dans Vente dépend obligatoirement de l'accès Vente.
-    if (perm === "encaissement_vente" && !assignment.droits.vente) return;
 
     const nextValue = !assignment.droits[perm];
     onUpdateUsers(prev=>prev.map(x=>x.id!==userId?x:{...x,assignments:x.assignments.map(a=>{

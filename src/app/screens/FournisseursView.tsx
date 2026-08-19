@@ -34,13 +34,16 @@ export function FournisseursView({ boutique, onUpdate, logAction }: {
     <div data-screen-source="relational-suppliers" className="space-y-3 pb-24">
       <div className="relative"><Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground"/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Chercher un fournisseur…" className={inputCls+" pl-11"}/></div>
       {filteredSuppliers.map(s=>{
-        const isOpen=expanded===s.id; const balance=supplierBalance(s.nom,entries,boutique.charges); const se=entries.filter(e=>e.fournisseur===s.nom&&e.qty>0).sort((a,b)=>b.id-a.id);
+        const isOpen=expanded===s.id;
+        const balance=supplierBalance(s.nom,entries,boutique.charges);
+        const se=entries.filter(e=>e.fournisseur===s.nom&&e.qty>0).sort((a,b)=>b.id-a.id);
+        const transferPurchases=(boutique.charges??[]).filter(c=>c.source==="transfer"&&c.fournisseur===s.nom).sort((a,b)=>b.id-a.id);
         return (
           <div key={s.id} className="bg-card rounded-2xl border border-border overflow-hidden">
             <button className="w-full flex items-center gap-3 p-4 text-left" onClick={()=>setExpanded(isOpen?null:s.id)}>
               <div className="w-14 h-14 rounded-2xl flex-shrink-0 flex items-center justify-center text-base font-black" style={{ background:s.color+"22", color:s.color, fontFamily:"'Nunito', sans-serif" }}>{s.initials}</div>
               <div className="flex-1 min-w-0"><p className="font-bold">{s.nom}</p><div className="flex items-center gap-1.5 mt-0.5"><MapPin size={11} className="text-muted-foreground"/><span className="text-xs text-muted-foreground">{s.ville}</span></div></div>
-              <div className="text-right mr-1"><p className="text-sm font-black" style={{ color:balance>0?"#ef4444":"#6b7280", fontFamily:"'Nunito', sans-serif" }}>{balance>0?fmt(balance):"—"}</p><p className="text-xs text-muted-foreground">{se.length} livraisons</p></div>
+              <div className="text-right mr-1"><p className="text-sm font-black" style={{ color:balance>0?"#ef4444":"#6b7280", fontFamily:"'Nunito', sans-serif" }}>{balance>0?fmt(balance):"—"}</p><p className="text-xs text-muted-foreground">{se.length+transferPurchases.length} achats/livraisons</p></div>
               <ChevronRight size={16} className="text-muted-foreground transition-transform duration-200" style={{ transform:isOpen?"rotate(90deg)":"rotate(0deg)" }}/>
             </button>
             {isOpen&&<div className="border-t border-border">
@@ -76,20 +79,32 @@ export function FournisseursView({ boutique, onUpdate, logAction }: {
                   <p className="text-sm text-muted-foreground">Aucune livraison</p>
                 )}
               </div>
-              {(() => { const pays = (boutique.charges??[]).filter(c=>c.fournisseur===s.nom).sort((a,b)=>b.id-a.id); return pays.length>0?(
+              {transferPurchases.length>0&&<div className="px-4 pb-3 border-t border-border">
+                <p className="text-xs font-black tracking-wider mb-3 mt-3" style={{color:"#ea580c"}}>ACHATS PAR TRANSFERT</p>
+                <div className="space-y-2">{transferPurchases.map(c=>{
+                  const paid=Number(c.paidAmount??0); const due=Math.max(0,c.montant-paid);
+                  return <div key={c.id} className="rounded-xl px-3 py-2.5" style={{background:"#fff7ed"}}>
+                    <div className="flex items-center justify-between"><p className="text-sm font-bold">{c.label}</p><p className="text-sm font-black" style={{color:"#ea580c"}}>{fmt(c.montant)}</p></div>
+                    <div className="flex items-center justify-between mt-1 text-xs text-muted-foreground"><span>{c.date}</span><span>Réglé {fmt(paid)} · Reste {fmt(due)}</span></div>
+                  </div>;
+                })}</div>
+              </div>}
+              {(() => {
+                const manualPays=(boutique.charges??[]).filter(c=>c.fournisseur===s.nom&&c.source!=="transfer");
+                const transferPays=transferPurchases.filter(c=>Number(c.paidAmount??0)>0);
+                const pays=[...manualPays,...transferPays].sort((a,b)=>b.id-a.id);
+                return pays.length>0?(
                 <div className="px-4 pb-3 border-t border-border">
                   <p className="text-xs font-black tracking-wider mb-3 mt-3" style={{ color:SEM.success.text }}>PAIEMENTS EFFECTUÉS</p>
                   <div className="space-y-2">
-                    {pays.map(c=>(
-                      <div key={c.id} className="flex items-center gap-3 rounded-xl px-3 py-2.5" style={{ background:SEM.success.bg }}>
+                    {pays.map(c=>{
+                      const paid=c.source==="transfer"?Number(c.paidAmount??0):c.montant;
+                      return <div key={`${c.id}-${c.source}`} className="flex items-center gap-3 rounded-xl px-3 py-2.5" style={{ background:SEM.success.bg }}>
                         <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background:SEM.success.accent }}/>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-bold">{c.label}</p>
-                          <p className="text-xs text-muted-foreground">{c.date}</p>
-                        </div>
-                        <p className="text-sm font-black" style={{ color:SEM.success.text, fontFamily:"'Nunito',sans-serif" }}>−{fmt(c.montant)}</p>
-                      </div>
-                    ))}
+                        <div className="flex-1 min-w-0"><p className="text-sm font-bold">{c.label}</p><p className="text-xs text-muted-foreground">{c.date}</p></div>
+                        <p className="text-sm font-black" style={{ color:SEM.success.text, fontFamily:"'Nunito',sans-serif" }}>−{fmt(paid)}</p>
+                      </div>;
+                    })}
                   </div>
                 </div>
               ):null; })()}

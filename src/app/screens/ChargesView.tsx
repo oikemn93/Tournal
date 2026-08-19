@@ -48,7 +48,7 @@ export function ChargesView({ boutique, onUpdate, logAction }: {
     const dateRaw = now.toISOString().split("T")[0];
     const linkedFourn = (cat === "Achat stock" && fourn) ? fourn : undefined;
     let persisted;
-    try { persisted = await createCharge({ boutiqueId:boutique.id, label:label.trim(), amount:Number(montant), category:cat, note:note.trim() || undefined }); }
+    try { persisted = await createCharge({ boutiqueId:boutique.id, label:label.trim(), amount:Number(montant), category:cat, note:note.trim() || undefined, supplier:linkedFourn }); }
     catch (error) { alert(error instanceof Error ? error.message : "Création de charge impossible"); return; }
     const newCharge: Charge = { id: persisted.charge_id, label: label.trim(), montant: Number(montant), date: dateStr, dateRaw, categorie: cat, recurrence, note: note.trim()||undefined, fournisseur: linkedFourn };
     onUpdate({ charges: [...charges, newCharge] });
@@ -74,7 +74,7 @@ export function ChargesView({ boutique, onUpdate, logAction }: {
       {/* Summary bar */}
       <div className="grid grid-cols-2 gap-3">
         <div className="bg-card rounded-2xl p-4 border border-border">
-          <div className="flex items-center gap-2 mb-2"><Wallet size={18} style={{color:"#ef4444"}}/><span className="text-xs font-bold text-muted-foreground">TOTAL CHARGES</span></div>
+          <div className="flex items-center gap-2 mb-2"><Wallet size={18} style={{color:"#ef4444"}}/><span className="text-xs font-bold text-muted-foreground">SORTIES / CHARGES PAYÉES</span></div>
           <p className="text-2xl font-black" style={{fontFamily:"'Nunito',sans-serif",color:"#ef4444"}}>{fmt(totalMois)}</p>
           <p className="text-xs text-muted-foreground mt-0.5">{charges.length} entrées</p>
         </div>

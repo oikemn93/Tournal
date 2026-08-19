@@ -37,9 +37,20 @@ export function productMontantNet(pid: number, entries: StockEntry[], charges: C
   return Math.max(0, Math.round(net));
 }
 export function supplierBalance(nom: string, entries: StockEntry[], charges?: Charge[]) {
-  const dû = entries.filter(e => e.fournisseur === nom && e.qty > 0).reduce((s, e) => s + e.montantDu, 0);
-  const payé = (charges ?? []).filter(c => c.fournisseur === nom).reduce((s, c) => s + c.montant, 0);
-  return Math.max(0, dû - payé);
+  const linkedCharges = (charges ?? []).filter(c => c.fournisseur === nom);
+  const regularPurchases = entries
+    .filter(e => e.fournisseur === nom && e.qty > 0)
+    .reduce((s, e) => s + e.montantDu, 0);
+  const transferPurchases = linkedCharges
+    .filter(c => c.source === "transfer")
+    .reduce((s, c) => s + c.montant, 0);
+  const regularPayments = linkedCharges
+    .filter(c => c.source !== "transfer")
+    .reduce((s, c) => s + c.montant, 0);
+  const transferPayments = linkedCharges
+    .filter(c => c.source === "transfer")
+    .reduce((s, c) => s + Number(c.paidAmount ?? 0), 0);
+  return Math.max(0, regularPurchases + transferPurchases - regularPayments - transferPayments);
 }
 // ─── MARGIN (FIFO cost of stock entries) ────────────────────────────────────
 // Unit cost for selling `qty` base units of a product, walking stock receipts
@@ -77,6 +88,9 @@ export function fifoUnitCost(pid: number, qty: number, entries: StockEntry[]): n
 // back to the product's recorded purchase price. Returns null when no cost is
 // known (so the UI can hide margin instead of showing a misleading 100%).
 export function lineUnitCost(line: InvoiceLine, entries: StockEntry[], products: Product[]): number | null {
+  // Once the first payment freezes the FIFO unit cost on the invoice line,
+  // historical margins must never be recomputed from future stock movements.
+  if (line.prixAchat != null && line.prixAchat > 0) return line.prixAchat;
   if (line.productId > 0) {
     const fifo = fifoUnitCost(line.productId, line.qty, entries);
     if (fifo > 0) return fifo;

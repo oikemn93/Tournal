@@ -32,11 +32,30 @@ export function buildInvoicePDFHtml(inv: Invoice, boutique: Boutique, clients: C
   const fmtN = (n: number) => new Intl.NumberFormat("fr-FR").format(n);
   const fmtF = (n: number) => fmtN(n) + " F";
   const isReturn = inv.type === "Retour";
-  const clientRecord = clients.find(c => c.nom === inv.client);
+  const clientRecord = inv.clientId != null
+    ? clients.find(c => c.id === inv.clientId)
+    : clients.find(c => c.nom === inv.client);
   const reste = Math.max(0, inv.montant - inv.acompte);
   const lines = inv.lines ?? [];
   const subtotal = lines.reduce((s, l) => s + lineTotal(l), 0);
   const accent = isReturn ? "#dc2626" : boutique.color;
+  const paymentEvents = [...(inv.payments ?? [])].sort((a,b) => a.paidAt.localeCompare(b.paidAt));
+  const rawPayments = paymentEvents.length
+    ? paymentEvents.map(payment => ({ method:payment.paymentMethod, amount:payment.amount }))
+    : inv.paymentSplit?.length
+      ? inv.paymentSplit.map(payment => ({ method:payment.method, amount:payment.amount }))
+      : inv.paymentMethod && inv.acompte > 0
+        ? [{ method:inv.paymentMethod, amount:inv.acompte }]
+        : [];
+  const paymentByMethod = new Map<string,number>();
+  for (const payment of rawPayments) paymentByMethod.set(payment.method, (paymentByMethod.get(payment.method) ?? 0) + payment.amount);
+  const paymentRows = [...paymentByMethod.entries()].map(([method, amount]) => ({ method, amount }));
+  const lastPayment = paymentEvents.length ? paymentEvents[paymentEvents.length - 1] : undefined;
+  const cashier = lastPayment?.operatorName ?? null;
+  const parsedPaidAt = lastPayment?.paidAt ? new Date(lastPayment.paidAt) : null;
+  const paidAtFormatted = parsedPaidAt && !Number.isNaN(parsedPaidAt.getTime())
+    ? parsedPaidAt.toLocaleString("fr-FR", { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit" })
+    : null;
 
   const statusColor = isReturn ? "#dc2626" : reste <= 0 ? "#16a34a" : inv.acompte > 0 ? "#d97706" : "#dc2626";
   const statusBg    = isReturn ? "#fef2f2" : reste <= 0 ? "#f0fdf4" : inv.acompte > 0 ? "#fffbeb" : "#fef2f2";
@@ -58,18 +77,28 @@ export function buildInvoicePDFHtml(inv: Invoice, boutique: Boutique, clients: C
       </tr>`;
   }).join("");
 
-  const clientTypeLabel = clientRecord?.type === "B2B" ? "Client B2B (Grossiste)"
-    : clientRecord?.type === "Intergroupe" ? "Client Intergroupe"
+  const clientType = inv.clientTypeSnapshot ?? inv.clientType ?? clientRecord?.type;
+  const clientTypeLabel = clientType === "B2B" ? "Client B2B (Grossiste)"
     : "Client B2C (Particulier)";
+  const invoiceBoutiqueNom = inv.boutiqueNomSnapshot ?? boutique.nom;
+  const invoiceBoutiqueVille = inv.boutiqueVilleSnapshot ?? boutique.ville;
+  const invoiceBoutiqueAdresse = inv.boutiqueAdresseSnapshot ?? boutique.adresse;
+  const invoiceBoutiqueTel = inv.boutiqueTelSnapshot ?? boutique.tel;
+  const invoiceBoutiqueEmail = inv.boutiqueEmailSnapshot ?? boutique.email;
+  const invoiceClientAdresse = inv.clientAdresseSnapshot ?? clientRecord?.adresse;
+  const invoiceClientEmail = inv.clientEmailSnapshot ?? clientRecord?.email;
+  const invoiceClientVille = inv.clientVilleSnapshot ?? clientRecord?.ville;
 
-  const today = new Date(inv.date + "T00:00:00");
-  const dateFormatted = today.toLocaleDateString("fr-FR", { day:"2-digit", month:"long", year:"numeric" });
+  const parsedInvoiceDate = inv.dateRaw ? new Date(inv.dateRaw) : null;
+  const dateFormatted = parsedInvoiceDate && !Number.isNaN(parsedInvoiceDate.getTime())
+    ? parsedInvoiceDate.toLocaleDateString("fr-FR", { day:"2-digit", month:"long", year:"numeric" })
+    : inv.date;
 
   return `<!DOCTYPE html>
 <html lang="fr">
 <head>
 <meta charset="UTF-8"/>
-<title>${docLabel} ${inv.id} — ${boutique.nom}</title>
+<title>${docLabel} ${inv.id} — ${invoiceBoutiqueNom}</title>
 <style>
   @page { size: A4; margin: 14mm 16mm; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -110,6 +139,11 @@ export function buildInvoicePDFHtml(inv: Invoice, boutique: Boutique, clients: C
   .totals-reste { display: flex; justify-content: space-between; padding: 5px 10px; margin-top: 4px; background: ${statusBg}; border-radius: 4px; border-left: 3px solid ${statusColor}; }
   .totals-reste-label { font-size: 9pt; font-weight: 700; color: ${statusColor}; }
   .totals-reste-value { font-size: 10pt; font-weight: 900; color: ${statusColor}; }
+  .payment-block { margin: 0 0 8mm auto; width: 86mm; border: 1px solid #e5e7eb; border-radius: 6px; padding: 4mm; }
+  .payment-title { font-size: 7pt; font-weight: 900; letter-spacing: 1.4px; color: #777; text-transform: uppercase; margin-bottom: 3px; }
+  .payment-row { display: flex; justify-content: space-between; gap: 8mm; padding: 2px 0; font-size: 8.5pt; border-bottom: 1px solid #f2f2f2; }
+  .payment-row:last-child { border-bottom: 0; }
+  .payment-meta { margin-top: 3mm; padding-top: 2.5mm; border-top: 1px dashed #d1d5db; font-size: 7.8pt; color: #555; line-height: 1.7; }
   .footer { margin-top: 10mm; padding-top: 6mm; border-top: 1px solid #e0e0e0; display: flex; justify-content: space-between; align-items: flex-end; }
   .footer-note { font-size: 7.5pt; color: #888; max-width: 110mm; line-height: 1.6; }
   .footer-thanks { font-size: 8pt; font-weight: 700; color: ${accent}; }
@@ -120,11 +154,11 @@ export function buildInvoicePDFHtml(inv: Invoice, boutique: Boutique, clients: C
 <div class="page">
   <div class="header">
     <div>
-      <div class="brand-name">${boutique.nom}</div>
+      <div class="brand-name">${invoiceBoutiqueNom}</div>
       <div class="brand-meta">
-        ${boutique.adresse ? boutique.adresse + "<br/>" : ""}
-        ${boutique.tel ? "Tél : " + boutique.tel + "<br/>" : ""}
-        ${boutique.email ? boutique.email : ""}
+        ${invoiceBoutiqueAdresse ? invoiceBoutiqueAdresse + "<br/>" : ""}
+        ${invoiceBoutiqueTel ? "Tél : " + invoiceBoutiqueTel + "<br/>" : ""}
+        ${invoiceBoutiqueEmail ? invoiceBoutiqueEmail : ""}
       </div>
     </div>
     <div class="inv-meta">
@@ -138,11 +172,12 @@ export function buildInvoicePDFHtml(inv: Invoice, boutique: Boutique, clients: C
   <div class="parties">
     <div class="party">
       <div class="party-label">Émetteur</div>
-      <div class="party-name">${boutique.nom}</div>
+      <div class="party-name">${invoiceBoutiqueNom}</div>
       <div class="party-detail">
-        ${boutique.adresse ?? ""}<br/>
-        ${boutique.tel ? "Tél : " + boutique.tel : ""}<br/>
-        ${boutique.email ?? ""}
+        ${invoiceBoutiqueAdresse ?? ""}<br/>
+        ${invoiceBoutiqueVille ?? ""}<br/>
+        ${invoiceBoutiqueTel ? "Tél : " + invoiceBoutiqueTel : ""}<br/>
+        ${invoiceBoutiqueEmail ?? ""}
       </div>
     </div>
     <div class="party">
@@ -151,8 +186,9 @@ export function buildInvoicePDFHtml(inv: Invoice, boutique: Boutique, clients: C
       <div class="party-name">${inv.client}</div>
       <div class="party-detail">
         ${inv.clientTel ? "Tél : " + inv.clientTel : ""}<br/>
-        ${clientRecord?.adresse ?? ""}<br/>
-        ${clientRecord?.email ?? ""}
+        ${invoiceClientAdresse ?? ""}<br/>
+        ${invoiceClientVille ?? ""}<br/>
+        ${invoiceClientEmail ?? ""}
       </div>
     </div>
   </div>
@@ -173,18 +209,30 @@ export function buildInvoicePDFHtml(inv: Invoice, boutique: Boutique, clients: C
   <div class="totals-block">
     <div class="totals-inner">
       ${lines.length > 1 ? `<div class="totals-row"><span>Sous-total</span><span>${fmtF(subtotal)}</span></div>` : ""}
-      ${inv.acompte > 0 ? `<div class="totals-row"><span>Acompte versé</span><span>- ${fmtF(inv.acompte)}</span></div>` : ""}
       <div class="totals-total">
-        <span class="totals-total-label">${isReturn ? "Montant remboursé" : "Total à payer"}</span>
+        <span class="totals-total-label">${isReturn ? "Montant remboursé" : "Total facture"}</span>
         <span class="totals-total-value">${isReturn ? "- " : ""}${fmtF(inv.montant)}</span>
       </div>
+      ${!isReturn && inv.acompte > 0 ? `<div class="totals-row" style="margin-top:4px;"><span>Total encaissé</span><span>${fmtF(inv.acompte)}</span></div>` : ""}
       ${reste > 0 && inv.acompte > 0 ? `<div class="totals-reste"><span class="totals-reste-label">Reste dû</span><span class="totals-reste-value">${fmtF(reste)}</span></div>` : ""}
       ${reste > 0 && inv.acompte === 0 ? `<div class="totals-reste"><span class="totals-reste-label">Montant impayé</span><span class="totals-reste-value">${fmtF(reste)}</span></div>` : ""}
     </div>
   </div>
+  ${!isReturn && (paymentRows.length > 0 || inv.operatorNom || cashier || paidAtFormatted) ? `
+  <div class="payment-block">
+    ${paymentRows.length > 0 ? `
+      <div class="payment-title">${paymentRows.length > 1 ? "Modes de paiement" : "Mode de paiement"}</div>
+      ${paymentRows.map(payment => `<div class="payment-row"><span>${payment.method}</span><strong>${fmtF(payment.amount)}</strong></div>`).join("")}
+    ` : ""}
+    <div class="payment-meta">
+      ${inv.operatorNom ? `<div><strong>Vendeur :</strong> ${inv.operatorNom}</div>` : ""}
+      ${cashier ? `<div><strong>Caissier :</strong> ${cashier}</div>` : ""}
+      ${paidAtFormatted ? `<div><strong>Dernier encaissement :</strong> ${paidAtFormatted}</div>` : ""}
+    </div>
+  </div>` : ""}
   <div class="footer">
     <div class="footer-note">
-      Document généré par ${boutique.nom} — ${new Date().toLocaleDateString("fr-FR", { day:"2-digit", month:"long", year:"numeric" })}.<br/>
+      Document régénéré depuis les données de la facture ${inv.id} — ${new Date().toLocaleDateString("fr-FR", { day:"2-digit", month:"long", year:"numeric" })}.<br/>
       ${isReturn ? "Ce document atteste d'un retour de marchandise (avoir). Conservez-le pour vos archives." : "Ce document tient lieu de facture. Conservez-le pour vos archives."}
     </div>
     <div class="footer-thanks">Merci pour votre confiance.</div>
@@ -192,6 +240,55 @@ export function buildInvoicePDFHtml(inv: Invoice, boutique: Boutique, clients: C
 </div>
 </body>
 </html>`;
+}
+
+export async function generateInvoicePDFBlob(inv: Invoice, boutique: Boutique, clients: Client[]): Promise<Blob> {
+  const [{ jsPDF }, html2canvasModule] = await Promise.all([
+    import("jspdf"),
+    import("html2canvas"),
+  ]);
+  const html2canvas = html2canvasModule.default;
+  const iframe = document.createElement("iframe");
+  iframe.style.cssText = "position:fixed;left:-10000px;top:0;width:794px;height:1123px;border:0;visibility:hidden;pointer-events:none;";
+  document.body.appendChild(iframe);
+  try {
+    const doc = iframe.contentDocument ?? iframe.contentWindow?.document;
+    if (!doc) throw new Error("Préparation PDF impossible");
+    doc.open();
+    doc.write(buildInvoicePDFHtml(inv, boutique, clients));
+    doc.close();
+    await new Promise(resolve => setTimeout(resolve, 120));
+    if (doc.fonts?.ready) await doc.fonts.ready;
+    doc.body.style.width = "794px";
+    doc.body.style.minHeight = "1123px";
+    doc.body.style.padding = "53px 60px";
+    doc.body.style.background = "#fff";
+
+    const canvas = await html2canvas(doc.body, {
+      scale: 1.5,
+      useCORS: true,
+      backgroundColor: "#ffffff",
+      logging: false,
+    });
+    const pdf = new jsPDF({ orientation:"portrait", unit:"mm", format:"a4", compress:true });
+    const pageWidth = 210;
+    const pageHeight = 297;
+    const imgHeight = canvas.height * pageWidth / canvas.width;
+    const image = canvas.toDataURL("image/jpeg", 0.9);
+    let position = 0;
+    let remaining = imgHeight;
+    pdf.addImage(image, "JPEG", 0, position, pageWidth, imgHeight, undefined, "FAST");
+    remaining -= pageHeight;
+    while (remaining > 0) {
+      position -= pageHeight;
+      pdf.addPage();
+      pdf.addImage(image, "JPEG", 0, position, pageWidth, imgHeight, undefined, "FAST");
+      remaining -= pageHeight;
+    }
+    return pdf.output("blob");
+  } finally {
+    iframe.remove();
+  }
 }
 
 export function openInvoicePDF(inv: Invoice, boutique: Boutique, clients: Client[]) {
@@ -308,7 +405,26 @@ export function buildReceiptHtml(inv: Invoice, boutique: Boutique, fallbackOpera
   const isReturn = inv.type === "Retour";
   const reste = Math.max(0, inv.montant - inv.acompte);
   const lines = inv.lines ?? [];
-  const operator = inv.operatorNom ?? fallbackOperator ?? "—";
+  const paymentEvents = [...(inv.payments ?? [])].sort((a,b) => a.paidAt.localeCompare(b.paidAt));
+  const lastPayment = paymentEvents.length ? paymentEvents[paymentEvents.length - 1] : undefined;
+  const seller = inv.operatorNom ?? "—";
+  const cashier = lastPayment?.operatorName ?? fallbackOperator ?? seller;
+  const parsedSaleDate = inv.dateRaw ? new Date(inv.dateRaw) : null;
+  const saleDateLabel = parsedSaleDate && !Number.isNaN(parsedSaleDate.getTime())
+    ? parsedSaleDate.toLocaleString("fr-FR", { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit" })
+    : inv.date;
+  const parsedPaidAt = lastPayment?.paidAt ? new Date(lastPayment.paidAt) : null;
+  const paidDateLabel = parsedPaidAt && !Number.isNaN(parsedPaidAt.getTime())
+    ? parsedPaidAt.toLocaleString("fr-FR", { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit" })
+    : null;
+  const printedLabel = new Date().toLocaleString("fr-FR", { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit" });
+  const paymentRows = paymentEvents.length
+    ? paymentEvents.map(payment => ({ method:payment.paymentMethod, amount:payment.amount }))
+    : inv.paymentSplit?.length
+      ? inv.paymentSplit.map(payment => ({ method:payment.method, amount:payment.amount }))
+      : inv.paymentMethod && inv.acompte > 0
+        ? [{ method:inv.paymentMethod, amount:inv.acompte }]
+        : [];
   const COL = 32;
   function pad(left: string, right: string, total = COL): string {
     const space = total - left.length - right.length;
@@ -349,12 +465,16 @@ export function buildReceiptHtml(inv: Invoice, boutique: Boutique, fallbackOpera
   ${boutique.tel ? `<div class="small">Tél : ${boutique.tel}</div>` : ""}
   ${boutique.email ? `<div class="small">${boutique.email}</div>` : ""}
   ${isReturn ? `<div class="bold big" style="margin-top:2mm;border:2px solid #000;padding:1mm 2mm;">RETOUR / AVOIR</div>` : ""}
+  ${isDuplicate ? `<div class="bold" style="margin-top:2mm;border:2px solid #000;padding:1mm 2mm;letter-spacing:2px;">DUPLICATA</div>` : ""}
 </div>
 <div class="sep-solid"></div>
 <div class="row"><span class="label">N°</span><span class="value">${inv.id}</span></div>
-<div class="row"><span class="label">Date</span><span class="value">${inv.date}</span></div>
+<div class="row"><span class="label">Commande</span><span class="value">${saleDateLabel}</span></div>
+${paidDateLabel ? `<div class="row"><span class="label">Encaissement</span><span class="value">${paidDateLabel}</span></div>` : ""}
+${isDuplicate ? `<div class="row"><span class="label">Réimpression</span><span class="value">${printedLabel}</span></div>` : ""}
 <div class="row"><span class="label">Client</span><span class="value">${inv.client}${inv.clientTel ? " · " + inv.clientTel : ""}</span></div>
-<div class="row"><span class="label">Opérateur</span><span class="value">${operator}</span></div>
+<div class="row"><span class="label">Vendeur</span><span class="value">${seller}</span></div>
+${!isReturn && inv.acompte > 0 ? `<div class="row"><span class="label">Caissier</span><span class="value">${cashier}</span></div>` : ""}
 <div class="sep-dash"></div>
 ${lines.length > 0 ? `
 <div class="bold small" style="margin-bottom:1.5mm;">DÉSIGNATION&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;QTÉ&nbsp;&nbsp;&nbsp;&nbsp;TOTAL</div>
@@ -387,14 +507,22 @@ ${lines.map(l => `
   </div>
   ` : `
   <div class="row">
-    <span class="label">Acompte versé</span>
+    <span class="label">Total facture</span>
+    <span class="value">${fnum(inv.montant)}&nbsp;F</span>
+  </div>
+  <div class="row">
+    <span class="label">Total encaissé</span>
     <span class="value">${fnum(inv.acompte)}&nbsp;F</span>
   </div>
   <div class="row">
     <span class="label">Reste à payer</span>
     <span class="value">${fnum(reste)}&nbsp;F</span>
   </div>
-  ${inv.paymentMethod ? `<div class="row"><span class="label">Mode de paiement</span><span class="value">${inv.paymentMethod}</span></div>` : ""}
+  ${paymentRows.length > 0 ? `
+  <div class="sep-dash"></div>
+  <div class="bold small" style="margin-bottom:1mm;">PAIEMENTS</div>
+  ${paymentRows.map(payment => `<div class="row"><span class="label">${payment.method}</span><span class="value">${fnum(payment.amount)}&nbsp;F</span></div>`).join("")}
+  ` : ""}
   <div style="text-align:right;margin-top:1.5mm;">
     <span class="status">${inv.status.toUpperCase()}</span>
   </div>
@@ -417,7 +545,13 @@ export function printReceipt(inv: Invoice, boutique: Boutique, fallbackOperator?
 
 export function buildOrderTicketHtml(inv: Invoice, boutique: Boutique, operatorNom: string, isDuplicate?: boolean): string {
   const fnum = (n: number) => n.toLocaleString("fr-FR");
-  const now = new Date();
+  const printedAt = new Date();
+  const parsedCreatedAt = inv.dateRaw ? new Date(inv.dateRaw) : null;
+  const hasCreatedAt = parsedCreatedAt != null && !Number.isNaN(parsedCreatedAt.getTime());
+  const createdLabel = hasCreatedAt
+    ? parsedCreatedAt!.toLocaleString("fr-FR", { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit" })
+    : inv.date;
+  const printedLabel = printedAt.toLocaleString("fr-FR", { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit" });
   const lines = inv.lines ?? [];
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width"/>
 <title>Bon ${inv.id}</title>
@@ -437,14 +571,15 @@ export function buildOrderTicketHtml(inv: Invoice, boutique: Boutique, operatorN
 <div class="center bold" style="font-size:10pt;">BON DE COMMANDE</div>
 ${isDuplicate ? '<div class="center bold" style="font-size:9pt;letter-spacing:2px;border:1.5px solid #000;padding:1.5mm 3mm;margin:2mm 0;">DUPLICATA</div>' : ""}
 <div class="row"><span>N°</span><span class="value">${inv.id}</span></div>
-<div class="row"><span>Date</span><span class="value">${now.toLocaleDateString("fr-FR")} ${now.toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"})}</span></div>
+<div class="row"><span>Créée le</span><span class="value">${createdLabel}</span></div>
+${isDuplicate ? `<div class="row"><span>Réimprimée le</span><span class="value">${printedLabel}</span></div>` : ""}
 <div class="row"><span>Client</span><span class="value">${inv.client}${inv.clientTel?" · "+inv.clientTel:""}</span></div>
 <div class="row"><span>Vendeur</span><span class="value">${operatorNom}</span></div>
 <div class="sep-dash"></div>
-${lines.map(l=>`<div style="margin:1.5mm 0;"><div class="bold">${l.nom}</div><div class="row small" style="margin-top:0.5mm;"><span>${fnum(l.qty)}&nbsp;${l.unit}&nbsp;×&nbsp;${fnum(l.prixUnit)}&nbsp;F</span><span class="bold" style="color:#000;">${fnum(l.qty*l.prixUnit)}&nbsp;F</span></div></div>`).join("")}
+${lines.map(l=>`<div style="margin:1.5mm 0;"><div class="bold">${l.nom}</div><div class="row small" style="margin-top:0.5mm;"><span>${fnum(lineDispQty(l))}&nbsp;${lineDispUnit(l)}&nbsp;×&nbsp;${fnum(l.prixUnit)}&nbsp;F</span><span class="bold" style="color:#000;">${fnum(lineTotal(l))}&nbsp;F</span></div></div>`).join("")}
 <div class="sep-dash"></div>
 <div class="total-block"><div class="row"><span class="bold">TOTAL</span><span class="value">${fnum(inv.montant)}&nbsp;F CFA</span></div></div>
-<div class="alert">⚠ À RÉGLER EN CAISSE ⚠<br/>Ce bon n'est pas une preuve de paiement</div>
+<div class="alert">⚠ NON PAYÉ — À RÉGLER EN CAISSE ⚠<br/>Ce bon n'est pas une preuve de paiement</div>
 <div class="footer">Présentez ce bon au caissier · Tournal</div>
 </body></html>`;
   return html;

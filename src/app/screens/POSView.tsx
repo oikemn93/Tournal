@@ -9,6 +9,7 @@ import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
 import { createSale, recordPayment, cancelPendingInvoice } from "../../lib/api";
+import { getDefaultSaleUnit, getLastSalePrice, getSaleUnitOptions, toBaseSaleQty } from "../utils/sales";
 
 export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente = false, onUpdate, logAction }: {
   boutique: Boutique; allBoutiques: Boutique[]; currentUser: PlatformUser;
@@ -23,7 +24,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
   const [search, setSearch] = useState("");
   const [cart, setCart] = useState<CartItem[]>([]);
   const [addModal, setAddModal] = useState<Product|null>(null);
-  const [addQty, setAddQty] = useState("1");
+  const [addQty, setAddQty] = useState("");
   const [addPrice, setAddPrice] = useState("");
   const [addSellUnit, setAddSellUnit] = useState("");
   const [printerOpen, setPrinterOpen] = useState(false);
@@ -43,24 +44,11 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
   }
 
   function getSellOptions(p: Product): string[] {
-    const cat = posCats.find(c => c.nom === p.categorie);
-    if (!cat || cat.nbPiecesParLot <= 0) return [p.unit];
-    const opts: string[] = ["Lot"];
-    if (cat.unitVente !== "pièces") opts.push("Pièce");
-    opts.push(cat.unitVente);
-    return opts;
+    return getSaleUnitOptions(p, boutique);
   }
 
   function toBaseQty(sellQty: number, sellUnit: string, p: Product): number {
-    const cat = posCats.find(c => c.nom === p.categorie);
-    if (!cat || cat.nbPiecesParLot <= 0) return sellQty;
-    if (sellUnit === "Lot")
-      return cat.unitVente === "pièces"
-        ? sellQty * cat.nbPiecesParLot
-        : sellQty * cat.nbPiecesParLot * (cat.longueurParPiece || 1);
-    if (sellUnit === "Pièce")
-      return cat.unitVente === "pièces" ? sellQty : sellQty * (cat.longueurParPiece || 1);
-    return sellQty;
+    return toBaseSaleQty(sellQty, sellUnit, p, boutique);
   }
 
   function sellConversion(sellQty: number, sellUnit: string, p: Product): string | null {
@@ -124,7 +112,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
 
   // ── Vente express : vend un seul produit, encaisse et imprime immédiatement ──
   const [expressModal, setExpressModal] = useState<Product|null>(null);
-  const [expQty, setExpQty] = useState("1");
+  const [expQty, setExpQty] = useState("");
   const [expPrice, setExpPrice] = useState("");
   const [expSellUnit, setExpSellUnit] = useState("");
   const [expMethod, setExpMethod] = useState<PaymentMethod>("Espèces");
@@ -133,15 +121,12 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
 
   function openExpress(e: React.MouseEvent, p: Product) {
     e.stopPropagation();
-    const opts = getSellOptions(p);
-    const cat = posCats.find(c => c.nom === p.categorie);
-    const baseU = cat?.unitVente ?? p.unit;
-    const isFabric = baseU === "yards" || baseU === "mètres" || baseU === "metres";
-    const defaultUnit = isFabric && opts.includes(baseU) ? baseU : opts.includes("Pièce") ? "Pièce" : opts[0];
+    const defaultUnit = getDefaultSaleUnit(p, boutique);
+    const lastPrice = getLastSalePrice(p.id, invoices, defaultUnit);
     setExpressModal(p);
     setExpSellUnit(defaultUnit);
-    setExpQty("1");
-    setExpPrice(p.prixVente ? String(p.prixVente) : "");
+    setExpQty("");
+    setExpPrice(lastPrice != null ? String(lastPrice) : "");
     setExpMethod("Espèces");
     setExpDone(false);
   }
@@ -196,19 +181,12 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
 
   function openAdd(p: Product) {
     const inCart = cart.find(i => i.productId === p.id);
-    const opts = getSellOptions(p);
-    const cat2 = posCats.find(c => c.nom === p.categorie);
-    const baseU = cat2?.unitVente ?? p.unit;
-    const isFabric = baseU === "yards" || baseU === "mètres" || baseU === "metres";
-    const defaultUnit = inCart?.sellUnit ?? (
-      isFabric && opts.includes(baseU) ? baseU :
-      opts.includes("Pièce") ? "Pièce" :
-      opts[0]
-    );
+    const defaultUnit = inCart?.sellUnit ?? getDefaultSaleUnit(p, boutique);
+    const lastPrice = inCart ? inCart.prixUnit : getLastSalePrice(p.id, invoices, defaultUnit);
     setAddModal(p);
     setAddSellUnit(defaultUnit);
     setAddQty(inCart ? String(inCart.sellQty ?? inCart.qty) : "");
-    setAddPrice(inCart ? String(inCart.prixUnit) : "");
+    setAddPrice(lastPrice != null ? String(lastPrice) : "");
   }
   function confirmAdd() {
     if (!addModal || !addQty || !addPrice || Number(addQty) <= 0) return;
@@ -674,7 +652,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
               <Field label="VENDRE PAR" color={POS_COLOR}>
                 <div className="flex gap-2">
                   {getSellOptions(expressModal).map(u => (
-                    <button key={u} onClick={() => setExpSellUnit(u)} className="flex-1 py-3 rounded-xl text-sm font-bold"
+                    <button key={u} onClick={() => { setExpSellUnit(u); setExpQty(""); const last = getLastSalePrice(expressModal.id, invoices, u); setExpPrice(last != null ? String(last) : ""); }} className="flex-1 py-3 rounded-xl text-sm font-bold"
                       style={{ background: expSellUnit === u ? POS_COLOR : POS_COLOR+"22", color: expSellUnit === u ? "#fff" : POS_COLOR }}>{u}</button>
                   ))}
                 </div>
@@ -733,7 +711,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
             <Field label="VENDRE PAR" color={POS_COLOR}>
               <div className="flex gap-2">
                 {getSellOptions(addModal).map(u => (
-                  <button key={u} onClick={() => { setAddSellUnit(u); setAddQty(""); }} className="flex-1 py-3 rounded-xl text-sm font-bold"
+                  <button key={u} onClick={() => { setAddSellUnit(u); setAddQty(""); const last = getLastSalePrice(addModal.id, invoices, u); setAddPrice(last != null ? String(last) : ""); }} className="flex-1 py-3 rounded-xl text-sm font-bold"
                     style={{ background: addSellUnit === u ? POS_COLOR : POS_COLOR+"22", color: addSellUnit === u ? "#fff" : POS_COLOR }}>
                     {u}
                   </button>

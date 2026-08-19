@@ -2,188 +2,149 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Search, Plus, Send, FileText, Eye, Mail, MessageCircle, Smartphone, Phone, Wallet, CreditCard, RotateCcw, ShoppingCart, Receipt, AlertCircle, Trash2, CheckCircle, Minus, Store, X, ChevronLeft, ChevronRight, CalendarDays, PlusCircle } from "lucide-react";
 import type { Boutique, Invoice, InvoiceStatus, InvoiceLine, StockEntry, PaymentMethod, Client, PlatformUser, CaisseSession, PaymentEntry } from "../types";
 import { SEM, inputCls, PAYMENT_METHODS, PM_ICON, PM_COLOR, PLACEHOLDER_IMGS } from "../constants";
-import { createSale, recordPayment, returnSale, openCaisseSession, closeCaisseSession } from "../../lib/api";
+import { createSale, recordPayment, recordMultiPayment, returnSale, openCaisseSession, closeCaisseSession, createInvoiceShare } from "../../lib/api";
 import { fmt, today, imgSrc } from "../utils/formatting";
 import { invBadge, lineTotal, lineDispQty, lineDispUnit, genInvoiceId, productQty, getSiblings, invoiceMargin, lineUnitCost } from "../utils/inventory";
-import { buildReceiptHtml, openInvoicePDF, buildInvoiceMessage, agentPrint, printReceipt, printCaisseReport } from "../utils/invoice";
+import { buildReceiptHtml, openInvoicePDF, buildInvoiceMessage, generateInvoicePDFBlob, agentPrint, printReceipt, printCaisseReport } from "../utils/invoice";
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
 import { formatPreciseDateTime, invoicePaidAmount, invoiceRemainingAmount, invoicePaymentEvents } from "../utils/payments";
+import { getDefaultSaleUnit, getLastSalePrice, getSaleUnitOptions, toBaseSaleQty } from "../utils/sales";
 
 // ─── SHARE INVOICE MODAL ──────────────────────────────────────────────────────
 
 function ShareInvoiceModal({ inv, boutique, clients, onClose }: { inv: Invoice; boutique: Boutique; clients: Client[]; onClose: () => void }) {
-  const msg = buildInvoiceMessage(inv, boutique);
-  const phone = inv.clientTel ? inv.clientTel.replace(/[\s\-().]/g,"").replace("+","") : "";
-  const clientRecord = clients.find(c=>c.nom===inv.client);
+  const phone = inv.clientTel ? inv.clientTel.replace(/[\s\-().]/g, "").replace("+", "") : "";
+  const clientRecord = inv.clientId != null ? clients.find(c=>c.id===inv.clientId) : clients.find(c=>c.nom===inv.client);
   const reste = Math.max(0, inv.montant - inv.acompte);
   const [channel, setChannel] = useState<"apercu"|"email"|"whatsapp"|"sms">("apercu");
   const [emailAddr, setEmailAddr] = useState(clientRecord?.email ?? "");
   const [waPhone, setWaPhone] = useState(inv.clientTel ?? "");
   const [smsPhone, setSmsPhone] = useState(inv.clientTel ?? "");
   const [generating, setGenerating] = useState(false);
+  const [shareError, setShareError] = useState("");
 
   const inputCls2 = "w-full rounded-xl border border-border bg-background px-4 py-3 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-ring";
+  const fmtN = (n: number) => new Intl.NumberFormat("fr-FR").format(n);
 
   function doPreview() {
+    openInvoicePDF(inv, boutique, clients);
+  }
+
+  async function createTemporaryLink() {
+    setShareError("");
     setGenerating(true);
-    setTimeout(() => { openInvoicePDF(inv, boutique, clients); setGenerating(false); }, 100);
+    try {
+      const pdf = await generateInvoicePDFBlob(inv, boutique, clients);
+      return await createInvoiceShare({ boutiqueId:boutique.id, invoiceId:inv.id, pdf });
+    } catch (error) {
+      setShareError(error instanceof Error ? error.message : "Création du lien impossible");
+      return null;
+    } finally {
+      setGenerating(false);
+    }
   }
 
-  function doEmail() {
-    if (!emailAddr.trim()) return;
-    openInvoicePDF(inv, boutique, clients);
-    const subject = encodeURIComponent(`Facture ${inv.id} — ${boutique.nom}`);
-    const fmtN = (n: number) => new Intl.NumberFormat("fr-FR").format(n);
-    const bodyText = `Bonjour ${inv.client},\n\nVeuillez trouver ci-joint votre facture N° ${inv.id} d'un montant de ${fmtN(inv.montant)} F.`
-      + (reste > 0 ? `\nMontant restant dû : ${fmtN(reste)} F.` : `\nStatut : Payé.`)
-      + `\n\nCordialement,\n${boutique.nom}` + (boutique.tel ? `\n${boutique.tel}` : "") + (boutique.email ? `\n${boutique.email}` : "");
-    const body = encodeURIComponent(bodyText);
-    setTimeout(() => { window.location.href = `mailto:${emailAddr}?subject=${subject}&body=${body}`; }, 800);
-  }
-
-  function doWhatsApp() {
-    const rawPhone = (waPhone||phone).replace(/[\s\-().+]/g,"");
-    if (!rawPhone) return;
-    const fmtN = (n: number) => new Intl.NumberFormat("fr-FR").format(n);
+  function shareText(url:string) {
     const statusLine = reste<=0 ? "Statut : Payé"
-      : inv.acompte>0 ? `Acompte de ${fmtN(inv.acompte)} F versé — reste dû : ${fmtN(reste)} F`
+      : inv.acompte>0 ? `Encaissé : ${fmtN(inv.acompte)} F — reste dû : ${fmtN(reste)} F`
       : "Statut : Impayé";
-    const text = encodeURIComponent(
-      `Bonjour ${inv.client}\n\nVoici votre facture *${inv.id}* de *${boutique.nom}* :\n` +
-      `Total : *${fmtN(inv.montant)} F*\n${statusLine}\nDate : ${inv.date}\n\nMerci pour votre confiance`
-    );
-    openInvoicePDF(inv, boutique, clients);
-    setTimeout(() => window.open(`https://wa.me/${rawPhone}?text=${text}`, "_blank"), 800);
+    return `Bonjour ${inv.client}\n\nVoici votre facture ${inv.id} de ${boutique.nom}.\nTotal : ${fmtN(inv.montant)} F\n${statusLine}\n\nConsulter / télécharger la facture :\n${url}\n\nLien valable 48 h. Après expiration, la facture peut être régénérée sur demande.\n\nMerci pour votre confiance.`;
   }
 
-  function doSMS() {
-    const rawPhone = (smsPhone||phone).replace(/[\s\-()]/g,"");
-    if (!rawPhone) return;
-    const fmtN = (n: number) => new Intl.NumberFormat("fr-FR").format(n);
-    const text = encodeURIComponent(
-      `Facture ${inv.id} - ${boutique.nom} : ${fmtN(inv.montant)} F`
-      + (reste > 0 ? ` (reste: ${fmtN(reste)} F)` : " (Paye)")
-      + `. Consultez le PDF envoye separement.`
-    );
-    openInvoicePDF(inv, boutique, clients);
-    setTimeout(() => window.open(`sms:${rawPhone}?body=${text}`, "_self"), 800);
+  async function doEmail() {
+    if (!emailAddr.trim() || generating) return;
+    const share = await createTemporaryLink();
+    if (!share) return;
+    const subject = encodeURIComponent(`Facture ${inv.id} — ${boutique.nom}`);
+    const body = encodeURIComponent(shareText(share.url));
+    window.location.href = `mailto:${emailAddr.trim()}?subject=${subject}&body=${body}`;
   }
 
-  const fmtN = (n: number) => new Intl.NumberFormat("fr-FR").format(n);
-  const waPreview = `Bonjour ${inv.client}\n\nVoici votre facture *${inv.id}* de *${boutique.nom}* :\nTotal : *${fmtN(inv.montant)} F*\n${reste<=0?"Statut : Paye":inv.acompte>0?`Acompte de ${fmtN(inv.acompte)} F verse — reste du : ${fmtN(reste)} F`:"Statut : Impaie"}\nDate : ${inv.date}\n\nMerci pour votre confiance`;
+  async function doWhatsApp() {
+    const rawPhone = (waPhone || phone).replace(/[\s\-().+]/g, "");
+    if (!rawPhone || generating) return;
+    const popup = window.open("about:blank", "_blank");
+    const share = await createTemporaryLink();
+    if (!share) { popup?.close(); return; }
+    const target = `https://wa.me/${rawPhone}?text=${encodeURIComponent(shareText(share.url))}`;
+    if (popup) popup.location.href = target;
+    else window.location.href = target;
+  }
+
+  async function doSMS() {
+    const rawPhone = (smsPhone || phone).replace(/[\s\-()]/g, "");
+    if (!rawPhone || generating) return;
+    const share = await createTemporaryLink();
+    if (!share) return;
+    const text = `Facture ${inv.id} - ${boutique.nom} : ${fmtN(inv.montant)} F. ${reste > 0 ? `Reste ${fmtN(reste)} F. ` : "Payée. "}Lien valable 48 h : ${share.url}`;
+    window.location.href = `sms:${rawPhone}?body=${encodeURIComponent(text)}`;
+  }
 
   const CHANNELS: Array<{id:"apercu"|"email"|"whatsapp"|"sms"; label:string; color:string}> = [
-    { id:"apercu",   label:"Apercu PDF", color:"#374151" },
-    { id:"email",    label:"E-mail",     color:"#0ea5e9" },
-    { id:"whatsapp", label:"WhatsApp",   color:"#16a34a" },
-    { id:"sms",      label:"SMS",        color:"#7c3aed" },
+    { id:"apercu", label:"Aperçu PDF", color:"#374151" },
+    { id:"email", label:"E-mail", color:"#0ea5e9" },
+    { id:"whatsapp", label:"WhatsApp", color:"#16a34a" },
+    { id:"sms", label:"SMS", color:"#7c3aed" },
   ];
 
   return (
-    <Modal title="Envoyer la facture" color="#374151" onClose={onClose}>
-      {/* Invoice summary */}
+    <Modal title="Partager la facture" color="#374151" onClose={onClose}>
       <div className="flex items-center gap-3 px-4 py-3 rounded-2xl" style={{ background:"#f3f4f6", border:"1px solid #e5e7eb" }}>
         <FileText size={18} className="text-muted-foreground flex-shrink-0"/>
         <div className="flex-1 min-w-0">
           <p className="text-sm font-black">{inv.id} · {inv.client}</p>
           <p className="text-xs text-muted-foreground">{fmtN(inv.montant)} F · {inv.date}</p>
         </div>
-        <span className="text-xs font-bold px-2 py-1 rounded-lg"
-          style={{ background:reste<=0?"#f0fdf4":inv.acompte>0?"#fffbeb":"#fef2f2", color:reste<=0?"#16a34a":inv.acompte>0?"#d97706":"#dc2626" }}>
+        <span className="text-xs font-bold px-2 py-1 rounded-lg" style={{ background:reste<=0?"#f0fdf4":inv.acompte>0?"#fffbeb":"#fef2f2", color:reste<=0?"#16a34a":inv.acompte>0?"#d97706":"#dc2626" }}>
           {reste<=0?"Payé":inv.acompte>0?"Acompte":"Impayé"}
         </span>
       </div>
 
-      {/* Channel tabs */}
+      <div className="px-4 py-3 rounded-2xl text-xs leading-relaxed" style={{background:"#eff6ff",color:"#1d4ed8",border:"1px solid #bfdbfe"}}>
+        Aucun PDF n'est stocké tant que le client ne demande pas sa facture. Pour E-mail, WhatsApp ou SMS, Tournal génère un PDF temporaire et un lien privé valable 48 h. Le fichier est ensuite supprimé automatiquement. La facture reste toujours régénérable depuis les données Tournal.
+      </div>
+
       <div className="grid grid-cols-4 gap-2">
         {CHANNELS.map(ch=>(
-          <button key={ch.id} onClick={()=>setChannel(ch.id)}
-            className="flex flex-col items-center gap-1.5 py-3 rounded-2xl transition-all"
-            style={{ background:channel===ch.id?ch.color+"18":"#f9f9f7", border:channel===ch.id?`2px solid ${ch.color}55`:"2px solid transparent" }}>
-            {ch.id==="apercu"&&<Eye size={17} style={{ color:channel===ch.id?ch.color:"#9ca3af" }}/>}
-            {ch.id==="email"&&<Mail size={17} style={{ color:channel===ch.id?ch.color:"#9ca3af" }}/>}
-            {ch.id==="whatsapp"&&<MessageCircle size={17} style={{ color:channel===ch.id?ch.color:"#9ca3af" }}/>}
-            {ch.id==="sms"&&<Smartphone size={17} style={{ color:channel===ch.id?ch.color:"#9ca3af" }}/>}
+          <button key={ch.id} onClick={()=>{setChannel(ch.id);setShareError("");}} className="flex flex-col items-center gap-1.5 py-3 rounded-2xl transition-all" style={{ background:channel===ch.id?ch.color+"18":"#f9f9f7", border:channel===ch.id?`2px solid ${ch.color}55`:"2px solid transparent" }}>
+            {ch.id==="apercu"&&<Eye size={17} style={{ color:channel===ch.id?ch.color:"#9ca3af" }}/>} 
+            {ch.id==="email"&&<Mail size={17} style={{ color:channel===ch.id?ch.color:"#9ca3af" }}/>} 
+            {ch.id==="whatsapp"&&<MessageCircle size={17} style={{ color:channel===ch.id?ch.color:"#9ca3af" }}/>} 
+            {ch.id==="sms"&&<Smartphone size={17} style={{ color:channel===ch.id?ch.color:"#9ca3af" }}/>} 
             <span className="text-xs font-bold" style={{ color:channel===ch.id?ch.color:"#6b7280" }}>{ch.label}</span>
           </button>
         ))}
       </div>
 
+      {shareError && <div className="px-4 py-3 rounded-xl text-xs font-bold" style={{background:"#fef2f2",color:"#dc2626",border:"1px solid #fecaca"}}>{shareError}</div>}
+
       {channel==="apercu"&&(
         <div className="space-y-3">
-          <div className="px-4 py-3 rounded-2xl" style={{ background:"#f9f9f7", border:"1px solid #e5e7eb" }}>
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              Ouvre la facture PDF dans un nouvel onglet. Utilisez <strong>Fichier → Imprimer → Enregistrer en PDF</strong> pour la télécharger.
-            </p>
-          </div>
-          <button onClick={doPreview} disabled={generating}
-            className="w-full py-4 rounded-2xl text-sm font-black flex items-center justify-center gap-2 active:scale-95 transition-all"
-            style={{ background:"#374151", color:"#fff" }}>
-            {generating
-              ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/><span>Génération...</span></>
-              : <><Eye size={16}/><span>Ouvrir l'aperçu PDF</span></>}
-          </button>
+          <p className="text-xs text-muted-foreground leading-relaxed">L'aperçu est généré localement pour consultation ou impression. Aucun fichier n'est envoyé dans le stockage.</p>
+          <button onClick={doPreview} className="w-full py-4 rounded-2xl text-sm font-black flex items-center justify-center gap-2 active:scale-95" style={{background:"#374151",color:"#fff"}}><Eye size={16}/> Ouvrir l'aperçu PDF</button>
         </div>
       )}
 
       {channel==="email"&&(
         <div className="space-y-3">
-          <div className="px-4 py-3 rounded-2xl" style={{ background:"#0ea5e910", border:"1px solid #0ea5e930" }}>
-            <p className="text-xs leading-relaxed" style={{ color:"#0284c7" }}>
-              Le PDF s'ouvrira d'abord pour téléchargement — puis votre messagerie s'ouvrira avec le texte pré-rempli. Joignez le PDF depuis votre dossier Téléchargements.
-            </p>
-          </div>
-          <div>
-            <label className="text-xs font-black mb-2 block tracking-wider text-muted-foreground">ADRESSE E-MAIL DU CLIENT</label>
-            <input value={emailAddr} onChange={e=>setEmailAddr(e.target.value)} placeholder="client@exemple.com" type="email" className={inputCls2} autoFocus/>
-            {boutique.email&&<p className="text-xs text-muted-foreground mt-1.5">Expéditeur suggéré : {boutique.email}</p>}
-          </div>
-          <button onClick={doEmail} disabled={!emailAddr.trim()}
-            className="w-full py-4 rounded-2xl text-sm font-black flex items-center justify-center gap-2 active:scale-95 transition-all disabled:opacity-40"
-            style={{ background:"#0ea5e9", color:"#fff" }}>
-            <Mail size={16}/><span>Générer et envoyer par e-mail</span>
-          </button>
+          <div><label className="text-xs font-black mb-2 block tracking-wider text-muted-foreground">E-MAIL DU CLIENT</label><input value={emailAddr} onChange={e=>setEmailAddr(e.target.value)} placeholder="client@exemple.com" type="email" className={inputCls2}/></div>
+          <button onClick={()=>void doEmail()} disabled={!emailAddr.trim()||generating} className="w-full py-4 rounded-2xl text-sm font-black flex items-center justify-center gap-2 disabled:opacity-40" style={{background:"#0ea5e9",color:"#fff"}}><Mail size={16}/>{generating?"Création du lien…":"Créer le lien et ouvrir l'e-mail"}</button>
         </div>
       )}
 
       {channel==="whatsapp"&&(
         <div className="space-y-3">
-          <div className="px-4 py-3 rounded-2xl" style={{ background:"#16a34a10", border:"1px solid #16a34a30" }}>
-            <p className="text-xs leading-relaxed" style={{ color:"#15803d" }}>
-              Le PDF s'ouvrira pour téléchargement, puis WhatsApp s'ouvrira avec un message convivial pré-rédigé.
-            </p>
-          </div>
-          <div>
-            <label className="text-xs font-black mb-2 block tracking-wider text-muted-foreground">NUMÉRO WHATSAPP DU CLIENT</label>
-            <input value={waPhone} onChange={e=>setWaPhone(e.target.value)} placeholder="+221 77 000 0000" type="tel" className={inputCls2}/>
-          </div>
-          <div className="px-3 py-3 rounded-xl text-xs leading-relaxed" style={{ background:"#f0fdf4", color:"#166534", border:"1px solid #bbf7d0", fontFamily:"monospace", whiteSpace:"pre-wrap" }}>{waPreview}</div>
-          <button onClick={doWhatsApp} disabled={!(waPhone||phone).trim()}
-            className="w-full py-4 rounded-2xl text-sm font-black flex items-center justify-center gap-2 active:scale-95 transition-all disabled:opacity-40"
-            style={{ background:"#16a34a", color:"#fff" }}>
-            <MessageCircle size={16}/><span>Générer et envoyer via WhatsApp</span>
-          </button>
+          <div><label className="text-xs font-black mb-2 block tracking-wider text-muted-foreground">WHATSAPP DU CLIENT</label><input value={waPhone} onChange={e=>setWaPhone(e.target.value)} placeholder="+221 77 000 0000" type="tel" className={inputCls2}/></div>
+          <button onClick={()=>void doWhatsApp()} disabled={!(waPhone||phone).trim()||generating} className="w-full py-4 rounded-2xl text-sm font-black flex items-center justify-center gap-2 disabled:opacity-40" style={{background:"#16a34a",color:"#fff"}}><MessageCircle size={16}/>{generating?"Création du lien…":"Créer le lien et ouvrir WhatsApp"}</button>
         </div>
       )}
 
       {channel==="sms"&&(
         <div className="space-y-3">
-          <div className="px-4 py-3 rounded-2xl" style={{ background:"#7c3aed10", border:"1px solid #7c3aed30" }}>
-            <p className="text-xs leading-relaxed" style={{ color:"#6d28d9" }}>
-              Le PDF s'ouvrira — téléchargez-le et partagez le lien via SMS. Un message court sera pré-rempli dans votre application SMS.
-            </p>
-          </div>
-          <div>
-            <label className="text-xs font-black mb-2 block tracking-wider text-muted-foreground">NUMÉRO DE TÉLÉPHONE DU CLIENT</label>
-            <input value={smsPhone} onChange={e=>setSmsPhone(e.target.value)} placeholder="+221 77 000 0000" type="tel" className={inputCls2}/>
-          </div>
-          <button onClick={doSMS} disabled={!(smsPhone||phone).trim()}
-            className="w-full py-4 rounded-2xl text-sm font-black flex items-center justify-center gap-2 active:scale-95 transition-all disabled:opacity-40"
-            style={{ background:"#7c3aed", color:"#fff" }}>
-            <Smartphone size={16}/><span>Générer et envoyer par SMS</span>
-          </button>
+          <div><label className="text-xs font-black mb-2 block tracking-wider text-muted-foreground">TÉLÉPHONE DU CLIENT</label><input value={smsPhone} onChange={e=>setSmsPhone(e.target.value)} placeholder="+221 77 000 0000" type="tel" className={inputCls2}/></div>
+          <button onClick={()=>void doSMS()} disabled={!(smsPhone||phone).trim()||generating} className="w-full py-4 rounded-2xl text-sm font-black flex items-center justify-center gap-2 disabled:opacity-40" style={{background:"#7c3aed",color:"#fff"}}><Smartphone size={16}/>{generating?"Création du lien…":"Créer le lien et ouvrir SMS"}</button>
         </div>
       )}
     </Modal>
@@ -241,7 +202,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
   const [returnInv, setReturnInv] = useState<Invoice|null>(null);
   const [returnQtys, setReturnQtys] = useState<Record<number,number>>({});
   const [returnDone, setReturnDone] = useState(false);
-  const [client,setClient] = useState(clients[0]?.nom??"");
+  const [clientRef,setClientRef] = useState(clients[0] ? `client:${clients[0].id}` : siblings[0] ? `boutique:${siblings[0].id}` : "");
   const [lines, setLines]  = useState<InvoiceLine[]>([]);
   const [acompte,setAcompte]=useState("");
   const [status,setStatus] = useState<InvoiceStatus>("en attente");
@@ -323,52 +284,47 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
     if (initialClientId != null) {
       const selectedClient = clients.find(item => item.id === initialClientId);
       if (selectedClient) {
-        setClient(selectedClient.nom);
+        setClientRef(`client:${selectedClient.id}`);
         setLines([]);
         setAcompte("");
+        const firstProduct = products[0];
+        if (firstProduct) {
+          const unit = getDefaultSaleUnit(firstProduct, boutique);
+          setLPid(firstProduct.id);
+          setLSellUnit(unit);
+          setLQty("");
+          const last = getLastSalePrice(firstProduct.id, invoices, unit);
+          setLPrix(last != null ? String(last) : "");
+        }
         setModal(true);
       }
     }
   }, [initialClientId, initialInvoiceId]);
 
-  // Sell options for the invoice line form — mirrors getSellOptions in POS
+  // Sale defaults are shared with POS so quantity/unit/price behave identically everywhere.
   function getInvSellOptions(pid: number): string[] {
     const prod = products.find(p=>p.id===pid);
-    if (!prod) return [];
-    const cat = (boutique.categories??[]).find(c=>c.nom===prod.categorie);
-    if (!cat || cat.nbPiecesParLot<=0) return [prod.unit];
-    const opts: string[] = ["Lot"];
-    if (cat.unitVente !== "pièces") opts.push("Pièce");
-    opts.push(cat.unitVente);
-    return opts;
+    return prod ? getSaleUnitOptions(prod, boutique) : [];
   }
   function invToBaseQty(sellQty: number, sellUnit: string, pid: number): number {
     const prod = products.find(p=>p.id===pid);
-    if (!prod) return sellQty;
-    const cat = (boutique.categories??[]).find(c=>c.nom===prod.categorie);
-    if (!cat || cat.nbPiecesParLot<=0) return sellQty;
-    if (sellUnit==="Lot") return cat.unitVente==="pièces"
-      ? sellQty*cat.nbPiecesParLot
-      : sellQty*cat.nbPiecesParLot*(cat.longueurParPiece||1);
-    if (sellUnit==="Pièce") return cat.unitVente==="pièces" ? sellQty : sellQty*(cat.longueurParPiece||1);
-    return sellQty; // direct unit (yards/mètres)
+    return prod ? toBaseSaleQty(sellQty, sellUnit, prod, boutique) : sellQty;
   }
   function invDefaultUnit(pid: number): string {
-    const opts = getInvSellOptions(pid);
-    if (opts.length===0) return "";
     const prod = products.find(p=>p.id===pid);
-    const cat = (boutique.categories??[]).find(c=>c.nom===prod?.categorie);
-    const base = cat?.unitVente ?? prod?.unit ?? "";
-    const isFabric = base==="yards"||base==="mètres"||base==="metres";
-    if (isFabric && opts.includes(base)) return base;
-    if (opts.includes("Pièce")) return "Pièce";
-    return opts[0];
+    return prod ? getDefaultSaleUnit(prod, boutique) : "";
   }
 
   const montant = lines.reduce((s,l)=>s+lineTotal(l),0);
   const aNum = canCollectPayment ? (Number(acompte)||0) : 0;
   const pct  = montant>0?Math.min(100,Math.round(aNum/montant*100)):0;
-  const siblingClient = siblings.find(s=>s.nom===client);
+  const selectedClient = clientRef.startsWith("client:")
+    ? clients.find(c => c.id === Number(clientRef.slice("client:".length)))
+    : undefined;
+  const siblingClient = clientRef.startsWith("boutique:")
+    ? siblings.find(s => s.id === clientRef.slice("boutique:".length))
+    : undefined;
+  const selectedClientName = siblingClient?.nom ?? selectedClient?.nom ?? "";
 
   function addLine() {
     const prod = products.find(p=>p.id===lPid); if (!prod||!lQty) return;
@@ -393,42 +349,48 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
     const validSplit = encaissSplit.filter(s => s.amount > 0);
     const totalSplit = validSplit.reduce((s, e) => s + e.amount, 0);
     if (validSplit.length === 0 || totalSplit <= 0) return;
+    if (totalSplit > invoiceRemainingAmount(encaissInv)) {
+      alert("Le total des paiements dépasse le reste à encaisser.");
+      return;
+    }
     setSubmittingPayment(true);
     let updatedInv: Invoice = { ...encaissInv };
     let saleEntries: StockEntry[] = [];
     try {
-      for (const entry of validSplit) {
-        const persisted = await recordPayment({ boutiqueId:boutique.id, invoiceId:encaissInv.id, amount:entry.amount, paymentMethod:entry.method });
-        const newStatus: InvoiceStatus = persisted.status === "payée" ? "payé" : "acompte";
-        updatedInv = {
-          ...updatedInv,
-          acompte:persisted.acompte,
-          status:newStatus,
-          paymentMethod:entry.method,
-          paymentSplit:validSplit,
-          payments:[...(updatedInv.payments ?? []), {
-            id:persisted.payment.id,
-            amount:persisted.payment.amount,
-            paymentMethod:persisted.payment.payment_method as PaymentMethod,
-            paidAt:persisted.payment.paid_at,
-            operatorId:persisted.payment.operator_id,
-            operatorName:persisted.payment.operator_name,
-            batchId:persisted.payment.batch_id,
-            source:persisted.payment.source,
-          }],
-        };
-        if (persisted.stock_deducted && saleEntries.length === 0) {
-          saleEntries = (encaissInv.lines ?? []).map((line, index) => ({
-            id: Date.now() + index,
-            productId: line.productId,
-            qty: -line.qty,
-            unit: line.unit,
-            montantDu: 0,
-            date: today(),
-            fournisseur: `Vente ${encaissInv.id}`,
-            invoiceId: encaissInv.id,
-          }));
-        }
+      const persisted = await recordMultiPayment({
+        boutiqueId:boutique.id,
+        invoiceId:encaissInv.id,
+        payments:validSplit.map(entry => ({ amount:entry.amount, paymentMethod:entry.method })),
+      });
+      const newPayments = persisted.payments.map(payment => ({
+        id:payment.id,
+        amount:payment.amount,
+        paymentMethod:payment.payment_method as PaymentMethod,
+        paidAt:payment.paid_at,
+        operatorId:payment.operator_id,
+        operatorName:payment.operator_name,
+        batchId:payment.batch_id,
+        source:payment.source,
+      }));
+      updatedInv = {
+        ...updatedInv,
+        acompte:persisted.acompte,
+        status:persisted.status === "payée" ? "payé" : "acompte",
+        paymentMethod:validSplit[validSplit.length - 1].method,
+        paymentSplit:validSplit,
+        payments:[...(updatedInv.payments ?? []), ...newPayments],
+      };
+      if (persisted.stock_deducted) {
+        saleEntries = (encaissInv.lines ?? []).map((line, index) => ({
+          id: Date.now() + index,
+          productId: line.productId,
+          qty: -line.qty,
+          unit: line.unit,
+          montantDu: 0,
+          date: today(),
+          fournisseur: `Vente ${encaissInv.id}`,
+          invoiceId: encaissInv.id,
+        }));
       }
     } catch (error) {
       setSubmittingPayment(false);
@@ -465,7 +427,17 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
   async function submitReturn() {
     if (!returnInv || !returnInv.lines) return;
     const lines = returnInv.lines;
-    const returnLines = lines.map((l,i) => ({ ...l, qty: returnQtys[i] ?? 0 })).filter(l => l.qty > 0);
+    const returnLines = lines.map((l,i) => {
+      const qty = returnQtys[i] ?? 0;
+      const proportionalSellQty = l.sellUnit && l.sellQty != null && l.qty > 0
+        ? l.sellQty * qty / l.qty
+        : undefined;
+      return {
+        ...l,
+        qty,
+        ...(proportionalSellQty != null ? { sellQty: proportionalSellQty } : {}),
+      };
+    }).filter(l => l.qty > 0);
     if (returnLines.length === 0) return;
     // Never let a line send back more than what is still returnable.
     const overLine = lines.find((l,i) => (returnQtys[i] ?? 0) > remainingReturnable(returnInv, l));
@@ -480,12 +452,13 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
       alert(error instanceof Error ? error.message : "Retour impossible");
       return;
     }
-    const refundTotal = returnLines.reduce((s, l) => s + l.qty * l.prixUnit, 0);
+    const refundTotal = Number(persisted.total);
     const retId = persisted.return_invoice_id;
     const retInv: Invoice = {
-      id: retId, client: returnInv.client, clientTel: returnInv.clientTel,
+      id: retId, clientId:returnInv.clientId, client: returnInv.client, clientTel: returnInv.clientTel,
+      clientType:returnInv.clientType,
       lines: returnLines, montant: refundTotal, acompte: refundTotal,
-      date: today(), dateRaw: new Date().toISOString(), status: "payé", type: "Retour",
+      date: today(), dateRaw:persisted.returned_at, status: "payé", type: "Retour", returnOfInvoiceId:returnInv.id,
       operatorNom: currentUser.nom, operatorColor: currentUser.color,
     };
     // Restore stock
@@ -500,14 +473,14 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
   }
 
   async function submit() {
-    if (!client||lines.length===0 || submittingInvoice) return;
+    if (!clientRef || !selectedClientName || lines.length===0 || submittingInvoice) return;
     setSubmittingInvoice(true);
     const isSiblingTransfer = !!siblingClient;
-    const ct  = isSiblingTransfer ? "Inter-tenant" : (clients.find(c=>c.nom===client)?.type??"B2C");
-    const cTel = clients.find(c=>c.nom===client)?.tel;
+    const ct  = isSiblingTransfer ? "Inter-tenant" : (selectedClient?.type??"B2C");
+    const cTel = selectedClient?.tel;
     let persisted;
     try {
-      persisted = await createSale({ boutiqueId:boutique.id, client, clientTel:cTel, lines });
+      persisted = await createSale({ boutiqueId:boutique.id, clientId:selectedClient?.id, client:selectedClientName, clientTel:cTel, lines });
     } catch (error) {
       setSubmittingInvoice(false);
       alert(error instanceof Error ? error.message : "Création de facture impossible");
@@ -538,9 +511,8 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
           invoiceId:id,
         }))
       : [];
-    const selectedClient = clients.find(c=>c.nom===client);
     const newInv: Invoice = {
-      id, clientId:selectedClient?.id, client, clientTel:cTel, clientType:selectedClient?.type,
+      id, clientId:selectedClient?.id, client:selectedClientName, clientTel:cTel, clientType:selectedClient?.type,
       lines, montant, acompte:paidAtCreation, date:today(), dateRaw:new Date().toISOString(), status:s, type:ct,
       operatorNom:currentUser.nom, operatorColor:currentUser.color,
       paymentMethod:initialPayment ? "Espèces" : undefined,
@@ -570,7 +542,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
       });
       onUpdateOtherBoutique(siblingClient.id, { products:sbProducts, entries:sbEntries });
     }
-    logAction(isSiblingTransfer?"Transfert inter-tenant":"Nouvelle facture", `${id} · ${client} · ${fmt(montant)}`, isSiblingTransfer?"🔄":"🧾");
+    logAction(isSiblingTransfer?"Transfert inter-tenant":"Nouvelle facture", `${id} · ${selectedClientName} · ${fmt(montant)}`, isSiblingTransfer?"🔄":"🧾");
     setLines([]); setAcompte(""); setModal(false); setSubmittingInvoice(false);
   }
 
@@ -809,15 +781,15 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
         )}
       </Modal>}
 
-      <button onClick={()=>{ setLines([]); setAcompte(""); setLQty(""); setLPrix(""); setModal(true); }} className="fixed bottom-20 right-4 w-14 h-14 rounded-full shadow-2xl flex items-center justify-center z-20 active:scale-95" style={{ background:"#a855f7", boxShadow:"0 0 24px #a855f760" }}>
+      <button onClick={()=>{ setLines([]); setAcompte(""); const first=products[0]; if(first){ const unit=getDefaultSaleUnit(first,boutique); setLPid(first.id); setLSellUnit(unit); setLQty(""); const last=getLastSalePrice(first.id,invoices,unit); setLPrix(last!=null?String(last):""); } setModal(true); }} className="fixed bottom-20 right-4 w-14 h-14 rounded-full shadow-2xl flex items-center justify-center z-20 active:scale-95" style={{ background:"#a855f7", boxShadow:"0 0 24px #a855f760" }}>
         <Plus size={28} color="white" strokeWidth={2.5}/>
       </button>
 
       {modal&&<Modal title="Nouvelle facture" color="#374151" onClose={()=>setModal(false)}>
         <Field label="CLIENT">
-          <select value={client} onChange={e=>setClient(e.target.value)} className={inputCls} style={{ appearance:"none" }}>
-            {siblings.length>0&&<optgroup label="🏪 Mes autres boutiques">{siblings.map(sb=><option key={sb.id} value={sb.nom}>{sb.nom} — {sb.ville} (inter-tenant)</option>)}</optgroup>}
-            <optgroup label="Clients">{clients.map(c=><option key={c.id} value={c.nom}>{c.nom} ({c.type})</option>)}</optgroup>
+          <select value={clientRef} onChange={e=>setClientRef(e.target.value)} className={inputCls} style={{ appearance:"none" }}>
+            {siblings.length>0&&<optgroup label="🏪 Mes autres boutiques">{siblings.map(sb=><option key={sb.id} value={`boutique:${sb.id}`}>{sb.nom} — {sb.ville} (inter-tenant)</option>)}</optgroup>}
+            <optgroup label="Clients">{clients.map(c=><option key={c.id} value={`client:${c.id}`}>{c.nom} ({c.type})</option>)}</optgroup>
           </select>
           {siblingClient&&<div className="mt-2 flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background:"#a855f715" }}>
             <Store size={14} style={{ color:"#a855f7" }}/>
@@ -835,7 +807,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
             </div>
           ))}</div>}
           <div className="bg-muted rounded-2xl p-3 space-y-3">
-            <select value={lPid} onChange={e=>{ const newPid=Number(e.target.value); setLPid(newPid); setLSellUnit(invDefaultUnit(newPid)); }} className="w-full bg-card border border-border rounded-xl px-3 py-2.5 text-sm focus:outline-none" style={{ appearance:"none" }}>
+            <select value={lPid} onChange={e=>{ const newPid=Number(e.target.value); const prod=products.find(p=>p.id===newPid); setLPid(newPid); setLQty(""); if(prod){ const unit=getDefaultSaleUnit(prod,boutique); setLSellUnit(unit); const last=getLastSalePrice(prod.id,invoices,unit); setLPrix(last!=null?String(last):""); } else { setLSellUnit(""); setLPrix(""); } }} className="w-full bg-card border border-border rounded-xl px-3 py-2.5 text-sm focus:outline-none" style={{ appearance:"none" }}>
               {products.map(p=><option key={p.id} value={p.id}>{p.nom} (stock: {productQty(p.id,entries)} {p.unit})</option>)}
             </select>
             {getInvSellOptions(lPid).length>1&&(()=>{
@@ -843,7 +815,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
               const effUnit=lSellUnit||invDefaultUnit(lPid);
               return(<div className="flex gap-2 flex-wrap">{getInvSellOptions(lPid).map(u=>{
                 const lbl=u==="Lot"?(cat2?'Lot ('+cat2.nbPiecesParLot+'p)':'Lot'):u==="Pièce"?"Pièce":u;
-                return(<button key={u} onClick={()=>setLSellUnit(u)} className="flex-1 py-2 rounded-xl text-xs font-bold whitespace-nowrap"
+                return(<button key={u} onClick={()=>{ setLSellUnit(u); setLQty(""); const last=getLastSalePrice(lPid,invoices,u); setLPrix(last!=null?String(last):""); }} className="flex-1 py-2 rounded-xl text-xs font-bold whitespace-nowrap"
                   style={{ background:effUnit===u?"#1f2937":"#EEE9D8", color:effUnit===u?"#fff":"#374151" }}>{lbl}</button>);
               })}</div>);
             })()}
@@ -875,7 +847,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
             <AlertCircle size={16}/> La facture sera créée en attente d'encaissement.
           </div>
         )}
-        <SubmitBtn color={boutique.color} label={submittingInvoice ? "Création…" : "Créer la facture"} onClick={submit} disabled={submittingInvoice || !client||lines.length===0}/>
+        <SubmitBtn color={boutique.color} label={submittingInvoice ? "Création…" : "Créer la facture"} onClick={submit} disabled={submittingInvoice || !clientRef||lines.length===0}/>
       </Modal>}
 
       {shareInv&&<ShareInvoiceModal inv={shareInv} boutique={boutique} clients={clients} onClose={()=>setShareInv(null)}/>}
@@ -980,10 +952,18 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs font-black tracking-wider text-muted-foreground">MODES DE PAIEMENT</span>
-              <button type="button" onClick={()=>setEncaissSplit(prev=>[...prev, {method:"Espèces", amount:0}])}
-                className="flex items-center gap-1 text-xs font-bold px-2.5 py-1.5 rounded-xl"
+              <button type="button"
+                disabled={encaissSplit.reduce((sum,item)=>sum+item.amount,0) >= invoiceRemainingAmount(encaissInv)}
+                onClick={()=>setEncaissSplit(prev=>{
+                  const allocated = prev.reduce((sum,item)=>sum+item.amount,0);
+                  const remaining = Math.max(0, invoiceRemainingAmount(encaissInv) - allocated);
+                  if (remaining <= 0) return prev;
+                  const method = PAYMENT_METHODS.find(m=>!prev.some(item=>item.method===m)) ?? "Espèces";
+                  return [...prev, {method, amount:remaining}];
+                })}
+                className="flex items-center gap-1.5 text-sm font-black px-3.5 py-2.5 rounded-xl disabled:opacity-40 disabled:cursor-not-allowed"
                 style={{background:SEM.success.bg, color:SEM.success.accent}}>
-                <PlusCircle size={12}/> Ajouter
+                <PlusCircle size={15}/> Ajouter un paiement
               </button>
             </div>
             {encaissSplit.map((entry, idx) => (

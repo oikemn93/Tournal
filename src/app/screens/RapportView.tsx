@@ -27,9 +27,9 @@ export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique:
   const nbVentes     = new Set(filtPayments.filter(payment=>payment.signedAmount>0).map(payment=>payment.invoiceId)).size;
   const panierMoyen  = nbVentes > 0 ? ca / nbVentes : 0;
   const impayé       = filtInv.filter(i=>invoiceSign(i)>0).reduce((s,i)=>s+invoiceRemainingAmount(i),0);
-  const totalCharges = filtCh.reduce((s,c)=>s+c.montant,0);
-  const margeBrute   = ca - totalCharges;
-  const tauxMarge    = ca > 0 ? (margeBrute/ca*100).toFixed(1) : "0";
+  const chargeCashAmount = (charge: typeof charges[number]) => charge.source === "transfer" ? Number(charge.paidAmount ?? 0) : charge.montant;
+  const totalCharges = filtCh.reduce((s,c)=>s+chargeCashAmount(c),0);
+  const chargesExploitation = filtCh.filter(c=>c.categorie!=="Achat stock").reduce((s,c)=>s+chargeCashAmount(c),0);
 
   // Product margin (sale price − FIFO cost of goods), returns counted negatively.
   // Only computed/shown for users with the "Voir les marges" right.
@@ -40,6 +40,7 @@ export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique:
   }, { marge:0, ca:0, cost:0, has:false });
   const margeVentes    = margeVentesData.marge;
   const tauxMargeVentes= margeVentesData.ca !== 0 ? Math.round(margeVentes/Math.abs(margeVentesData.ca)*100) : 0;
+  const resultatApresCharges = margeVentes - chargesExploitation;
 
   const byMethode = PAYMENT_METHODS.map(m => ({
     m, total: filtPayments.filter(payment=>payment.paymentMethod===m).reduce((sum,payment)=>sum + payment.signedAmount,0),
@@ -47,10 +48,21 @@ export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique:
   })).filter(r=>r.count>0);
 
   const byCategorie = CHARGE_CATS.map(cat=>({
-    cat, montant: filtCh.filter(c=>c.categorie===cat).reduce((s,c)=>s+c.montant,0)
+    cat, montant: filtCh.filter(c=>c.categorie===cat).reduce((s,c)=>s+chargeCashAmount(c),0)
   })).filter(r=>r.montant>0);
 
   const periodLabel: Record<DashPeriod,string> = { jour:"Aujourd'hui", semaine:"Cette semaine", mois:"Ce mois", annee:"Cette année", custom:"Période personnalisée" };
+
+  function invoicePaymentLabel(inv: typeof invoices[number]): string {
+    const rows = inv.payments?.length
+      ? inv.payments.map(payment => ({ method:payment.paymentMethod, amount:payment.amount }))
+      : inv.paymentSplit?.length
+        ? inv.paymentSplit.map(payment => ({ method:payment.method, amount:payment.amount }))
+        : inv.paymentMethod && invoicePaidAmount(inv) > 0
+          ? [{ method:inv.paymentMethod, amount:invoicePaidAmount(inv) }]
+          : [];
+    return rows.map(payment => `${payment.method} ${fmt(payment.amount)}`).join(" + ");
+  }
 
   function buildSummaryHtml() {
     return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Rapport — ${boutique.nom}</title>
@@ -80,17 +92,16 @@ h1{font-size:22px;font-weight:900;margin:0 0 2px}
   <div class="kpi"><div class="label">Panier moyen</div><div class="value">${fmt(panierMoyen)}</div></div>
   <div class="kpi"><div class="label">CA facturé (date de facture)</div><div class="value muted">${fmt(caTotal)}</div></div>
   <div class="kpi"><div class="label">Impayé</div><div class="value orange">${fmt(impayé)}</div></div>
-  <div class="kpi"><div class="label">Marge brute</div><div class="value ${margeBrute>=0?"green":"red"}">${fmt(margeBrute)}</div></div>
-  ${canSeeMargin && margeVentesData.has ? `<div class="kpi"><div class="label">Marge sur ventes (${tauxMargeVentes}%)</div><div class="value ${margeVentes>=0?"green":"red"}">${fmt(margeVentes)}</div></div>` : ""}
+  ${canSeeMargin && margeVentesData.has ? `<div class="kpi"><div class="label">Marge commerciale (${tauxMargeVentes}%)</div><div class="value ${margeVentes>=0?"green":"red"}">${fmt(margeVentes)}</div></div><div class="kpi"><div class="label">Résultat après charges</div><div class="value ${resultatApresCharges>=0?"green":"red"}">${fmt(resultatApresCharges)}</div></div>` : ""}
 </div>
 ${byMethode.length>0?`<div class="section-title">Répartition par mode de paiement</div>
 ${byMethode.map(r=>`<div class="row"><span class="label">${PM_ICON[r.m]} ${r.m} <span class="muted">(${r.count})</span></span><span class="value">${fmt(r.total)}</span></div>`).join("")}
 <div class="row total-row"><span class="label">Total encaissé</span><span class="value green">${fmt(ca)}</span></div>`:""}
 ${filtCh.length>0?`<div class="section-title">Charges (${filtCh.length})</div>
 ${byCategorie.map(r=>`<div class="row"><span class="label">${r.cat}</span><span class="value red">${fmt(r.montant)}</span></div>`).join("")}
-${filtCh.map(c=>`<div class="row"><span class="label" style="padding-left:12px;color:#888">· ${c.label}</span><span class="value muted">${fmt(c.montant)}</span></div>`).join("")}
+${filtCh.map(c=>`<div class="row"><span class="label" style="padding-left:12px;color:#888">· ${c.label}</span><span class="value muted">${fmt(chargeCashAmount(c))}</span></div>`).join("")}
 <div class="row total-row"><span class="label">Total charges</span><span class="value red">${fmt(totalCharges)}</span></div>
-<div class="row total-row" style="border-top:2px solid #1E9B1E"><span class="label" style="color:#1E9B1E">Marge brute</span><span class="value" style="color:#1E9B1E">${fmt(margeBrute)}</span></div>`:""}
+${canSeeMargin && margeVentesData.has ? `<div class="row total-row" style="border-top:2px solid ${resultatApresCharges>=0?"#1E9B1E":"#ef4444"}"><span class="label" style="color:${resultatApresCharges>=0?"#1E9B1E":"#ef4444"}">Résultat après charges</span><span class="value" style="color:${resultatApresCharges>=0?"#1E9B1E":"#ef4444"}">${fmt(resultatApresCharges)}</span></div>` : ""}`:""}
 </body></html>`;
   }
 
@@ -98,13 +109,15 @@ ${filtCh.map(c=>`<div class="row"><span class="label" style="padding-left:12px;c
     const chargesBlock = filtCh.length > 0 ? `
 <div class="section-title">Charges (${filtCh.length})</div>
 <table><thead><tr><th>Libellé</th><th>Catégorie</th><th>Date</th><th class="val">Montant</th></tr></thead><tbody>
-${filtCh.map(c=>`<tr><td>${c.label}</td><td>${c.categorie}</td><td>${c.date}</td><td class="val">${fmt(c.montant)}</td></tr>`).join("")}
+${filtCh.map(c=>`<tr><td>${c.label}</td><td>${c.categorie}</td><td>${c.date}</td><td class="val">${fmt(chargeCashAmount(c))}</td></tr>`).join("")}
 <tr class="total-row"><td colspan="3"><b>TOTAL CHARGES</b></td><td class="val red"><b>${fmt(totalCharges)}</b></td></tr>
 </tbody></table>` : "";
     const invLines = filtInv.map(inv=>{
-      const linesHtml = (inv.lines??[]).map(l=>`<tr style="background:#fafafa"><td style="padding-left:24px;color:#888">↳ ${l.nom}</td><td></td><td></td><td class="val muted">${lineDispQty(l)} ${lineDispUnit(l)} × ${fmt(l.prixUnit)}</td><td class="val muted">${fmt(lineTotal(l))}</td></tr>`).join("");
+      const linesHtml = (inv.lines??[]).map(l=>`<tr style="background:#fafafa"><td style="padding-left:24px;color:#888">↳ ${l.nom}</td><td></td><td></td><td class="val muted">${lineDispQty(l)} ${lineDispUnit(l)} × ${fmt(l.prixUnit)}</td><td class="val muted">${fmt(lineTotal(l))}</td><td></td></tr>`).join("");
+      const paymentLabel = invoicePaymentLabel(inv);
+      const paymentHtml = paymentLabel ? `<tr style="background:#f0fdf4"><td colspan="6" style="padding-left:24px;color:#166534;font-size:10px;font-weight:700">Paiements : ${paymentLabel}</td></tr>` : "";
       const [tc,bc]=invBadge(inv.status);
-      return `<tr><td>${inv.id}</td><td>${inv.client}</td><td>${inv.date}</td><td><span style="background:${bc};color:${tc};padding:2px 7px;border-radius:20px;font-size:10px;font-weight:700">${inv.status}</span></td><td class="val">${fmt(inv.montant)}</td><td class="val green">${fmt(invoicePaidAmount(inv))}</td></tr>${linesHtml}`;
+      return `<tr><td>${inv.id}</td><td>${inv.client}</td><td>${inv.date}</td><td><span style="background:${bc};color:${tc};padding:2px 7px;border-radius:20px;font-size:10px;font-weight:700">${inv.status}</span></td><td class="val">${fmt(inv.montant)}</td><td class="val green">${fmt(invoicePaidAmount(inv))}</td></tr>${paymentHtml}${linesHtml}`;
     }).join("");
     return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Rapport complet — ${boutique.nom}</title>
 <style>
@@ -129,8 +142,7 @@ th{font-weight:700;color:#666;font-size:10px;text-transform:uppercase}
   <div class="kpi"><div class="label">Panier moyen</div><div class="value">${fmt(panierMoyen)}</div></div>
   <div class="kpi"><div class="label">CA facturé (date de facture)</div><div class="value">${fmt(caTotal)}</div></div>
   <div class="kpi"><div class="label">Impayé</div><div class="value muted">${fmt(impayé)}</div></div>
-  <div class="kpi"><div class="label">Marge brute</div><div class="value ${margeBrute>=0?"green":"red"}">${fmt(margeBrute)}</div></div>
-  ${canSeeMargin && margeVentesData.has ? `<div class="kpi"><div class="label">Marge sur ventes (${tauxMargeVentes}%)</div><div class="value ${margeVentes>=0?"green":"red"}">${fmt(margeVentes)}</div></div>` : ""}
+  ${canSeeMargin && margeVentesData.has ? `<div class="kpi"><div class="label">Marge commerciale (${tauxMargeVentes}%)</div><div class="value ${margeVentes>=0?"green":"red"}">${fmt(margeVentes)}</div></div><div class="kpi"><div class="label">Résultat après charges</div><div class="value ${resultatApresCharges>=0?"green":"red"}">${fmt(resultatApresCharges)}</div></div>` : ""}
 </div>
 ${chargesBlock}
 <div id="transactions" class="section-title">Transactions (${filtInv.length})</div>
@@ -154,6 +166,39 @@ ${invLines}
     setExportModal(null);
   }
 
+  async function downloadRapportPDF(type: "summary"|"full") {
+    const html = type === "summary" ? buildSummaryHtml() : buildFullHtml();
+    const iframe = document.createElement("iframe");
+    iframe.style.cssText = "position:fixed;left:-10000px;top:0;width:900px;height:1200px;border:0;background:#fff";
+    document.body.appendChild(iframe);
+    try {
+      const doc = iframe.contentDocument ?? iframe.contentWindow?.document;
+      if (!doc) throw new Error("Aperçu PDF indisponible");
+      await new Promise<void>((resolve) => {
+        iframe.onload = () => resolve();
+        doc.open(); doc.write(html); doc.close();
+        setTimeout(resolve, 300);
+      });
+      const { default: html2canvas } = await import("html2canvas");
+      const { default: jsPDF } = await import("jspdf");
+      const canvas = await html2canvas(doc.body, { scale:1.5, useCORS:true, backgroundColor:"#ffffff", windowWidth:900 });
+      const pdf = new jsPDF({ orientation:"portrait", unit:"mm", format:"a4" });
+      const img = canvas.toDataURL("image/jpeg", 0.86);
+      const pdfW = pdf.internal.pageSize.getWidth();
+      const pdfH = pdf.internal.pageSize.getHeight();
+      const imgH = canvas.height / canvas.width * pdfW;
+      for (let offset=0; offset<imgH; offset+=pdfH) {
+        if (offset>0) pdf.addPage();
+        pdf.addImage(img, "JPEG", 0, -offset, pdfW, imgH);
+      }
+      const safeName = boutique.nom.replace(/[^a-zA-Z0-9_-]+/g,"-");
+      pdf.save(`Rapport-${safeName}-${period}.pdf`);
+      setExportModal(null);
+    } finally {
+      iframe.remove();
+    }
+  }
+
   const periodBtns: Array<{id:DashPeriod;label:string}> = [
     {id:"jour",label:"Aujourd'hui"},{id:"semaine",label:"Semaine"},{id:"mois",label:"Mois"},{id:"custom",label:"Personnalisé"},
   ];
@@ -166,11 +211,10 @@ ${invLines}
     { label:"Impayé",        value:impayé,        color:SEM.warning.accent                        },
     { label:"Charges",       value:totalCharges,  color:"#ef4444"                        },
     ...(canSeeMargin && margeVentesData.has ? [
-      { label:"Marge sur ventes", value:margeVentes, color:margeVentes>=0?SEM.success.accent:SEM.danger.accent, bold:true },
-      { label:"Taux marge/ventes", value:-1, color:"#a855f7", txt:`${tauxMargeVentes}%` },
+      { label:"Marge commerciale", value:margeVentes, color:margeVentes>=0?SEM.success.accent:SEM.danger.accent, bold:true },
+      { label:"Taux de marge commerciale", value:-1, color:"#a855f7", txt:`${tauxMargeVentes}%` },
+      { label:"Résultat après charges", value:resultatApresCharges, color:resultatApresCharges>=0?SEM.success.accent:SEM.danger.accent, bold:true },
     ] : []),
-    { label:"Marge brute",   value:margeBrute,    color:margeBrute>=0?SEM.success.accent:SEM.danger.accent, bold:true },
-    { label:"Taux de marge", value:-1,            color:"#a855f7", txt:`${tauxMarge}%`   },
   ];
 
   return (
@@ -196,9 +240,9 @@ ${invLines}
           { label:"CA encaissé (paiements)", value:fmt(ca), color:RC },
           { label:"Ventes", value:`${nbVentes}`, color:"#6b7280" },
           { label:"Panier moyen", value:fmt(panierMoyen), color:"#a855f7" },
-          { label:"Marge brute (CA − charges)", value:fmt(margeBrute), color:margeBrute>=0?SEM.success.accent:SEM.danger.accent },
           ...(canSeeMargin && margeVentesData.has ? [
-            { label:`Marge sur ventes (${tauxMargeVentes}%)`, value:fmt(margeVentes), color:margeVentes>=0?SEM.success.accent:SEM.danger.accent },
+            { label:`Marge commerciale (${tauxMargeVentes}%)`, value:fmt(margeVentes), color:margeVentes>=0?SEM.success.accent:SEM.danger.accent },
+            { label:"Résultat après charges", value:fmt(resultatApresCharges), color:resultatApresCharges>=0?SEM.success.accent:SEM.danger.accent },
           ] : []),
         ].map((k,i)=>(
           <div key={i} className="bg-card rounded-2xl border border-border p-4">
@@ -255,24 +299,6 @@ ${invLines}
         </div>
       )}
 
-      {/* Factures */}
-      <div className="bg-card rounded-2xl border border-border overflow-hidden">
-        <div className="px-4 py-3 border-b border-border flex items-center gap-2"><FileText size={16} style={{color:"#a855f7"}}/><p className="font-bold text-sm">Transactions ({filtInv.length})</p></div>
-        {filtInv.length === 0 && <p className="text-center py-8 text-sm text-muted-foreground">Aucune transaction sur cette période</p>}
-        {[...filtInv].reverse().slice(0,30).map(inv=>{
-          const [tc,bc]=invBadge(inv.status);
-          return (
-            <div key={inv.id} className="flex items-center justify-between px-4 py-3 border-b border-border last:border-0">
-              <div><p className="text-sm font-semibold">{inv.client}</p><p className="text-xs text-muted-foreground">{inv.id} · {inv.date}</p></div>
-              <div className="text-right">
-                <p className="text-sm font-black" style={{fontFamily:"'Nunito',sans-serif"}}>{fmt(invoicePaidAmount(inv) > 0 ? invoicePaidAmount(inv) : inv.montant)}</p>
-                <span className="text-xs px-2 py-0.5 rounded-full font-bold capitalize" style={{background:bc,color:tc}}>{inv.status}</span>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
       {/* Export */}
       <div className="bg-card rounded-2xl border border-border overflow-hidden">
         <div className="px-4 py-3 border-b border-border flex items-center gap-2"><Download size={16} style={{color:RC}}/><p className="font-bold text-sm">Exporter</p></div>
@@ -288,6 +314,24 @@ ${invLines}
             <p className="text-xs text-muted-foreground text-center leading-tight">Toutes les transactions + détail lignes</p>
           </button>
         </div>
+      </div>
+
+      {/* Factures */}
+      <div className="bg-card rounded-2xl border border-border overflow-hidden">
+        <div className="px-4 py-3 border-b border-border flex items-center gap-2"><FileText size={16} style={{color:"#a855f7"}}/><p className="font-bold text-sm">Transactions ({filtInv.length})</p></div>
+        {filtInv.length === 0 && <p className="text-center py-8 text-sm text-muted-foreground">Aucune transaction sur cette période</p>}
+        {[...filtInv].reverse().slice(0,30).map(inv=>{
+          const [tc,bc]=invBadge(inv.status);
+          return (
+            <div key={inv.id} className="flex items-center justify-between px-4 py-3 border-b border-border last:border-0">
+              <div className="min-w-0 flex-1"><p className="text-sm font-semibold">{inv.client}</p><p className="text-xs text-muted-foreground">{inv.id} · {inv.date}</p>{invoicePaymentLabel(inv)&&<p className="text-xs font-bold mt-0.5 truncate" style={{color:SEM.success.accent}}>💳 {invoicePaymentLabel(inv)}</p>}</div>
+              <div className="text-right">
+                <p className="text-sm font-black" style={{fontFamily:"'Nunito',sans-serif"}}>{fmt(invoicePaidAmount(inv) > 0 ? invoicePaidAmount(inv) : inv.montant)}</p>
+                <span className="text-xs px-2 py-0.5 rounded-full font-bold capitalize" style={{background:bc,color:tc}}>{inv.status}</span>
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       {/* Export preview modal */}
@@ -310,12 +354,15 @@ ${invLines}
                 }}
               />
             </div>
-            <div className="flex gap-2">
-              <button onClick={()=>setExportModal(null)} className="flex-1 py-3 rounded-2xl font-black text-sm border-2 border-border active:scale-95">Annuler</button>
-              <button onClick={()=>doPrint(exportModal)} className="flex-1 py-3 rounded-2xl font-black text-sm active:scale-95 text-white flex items-center justify-center gap-2" style={{background:RC}}>
-                <Download size={15}/> Imprimer / Exporter
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={()=>downloadRapportPDF(exportModal)} className="py-3 rounded-2xl font-black text-sm active:scale-95 text-white flex items-center justify-center gap-2" style={{background:RC}}>
+                <Download size={15}/> Télécharger PDF
+              </button>
+              <button onClick={()=>doPrint(exportModal)} className="py-3 rounded-2xl font-black text-sm active:scale-95 border-2 border-border flex items-center justify-center gap-2">
+                <FileText size={15}/> Imprimer
               </button>
             </div>
+            <button onClick={()=>setExportModal(null)} className="w-full py-2.5 rounded-2xl font-bold text-sm text-muted-foreground active:scale-95">Annuler</button>
           </div>
         </Modal>
       )}
