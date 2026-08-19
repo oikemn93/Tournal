@@ -1,3 +1,4 @@
+# Triggered after workflow installation
 from pathlib import Path
 
 # API additions
