@@ -32,11 +32,30 @@ export function buildInvoicePDFHtml(inv: Invoice, boutique: Boutique, clients: C
   const fmtN = (n: number) => new Intl.NumberFormat("fr-FR").format(n);
   const fmtF = (n: number) => fmtN(n) + " F";
   const isReturn = inv.type === "Retour";
-  const clientRecord = clients.find(c => c.nom === inv.client);
+  const clientRecord = inv.clientId != null
+    ? clients.find(c => c.id === inv.clientId)
+    : clients.find(c => c.nom === inv.client);
   const reste = Math.max(0, inv.montant - inv.acompte);
   const lines = inv.lines ?? [];
   const subtotal = lines.reduce((s, l) => s + lineTotal(l), 0);
   const accent = isReturn ? "#dc2626" : boutique.color;
+  const paymentEvents = [...(inv.payments ?? [])].sort((a,b) => a.paidAt.localeCompare(b.paidAt));
+  const rawPayments = paymentEvents.length
+    ? paymentEvents.map(payment => ({ method:payment.paymentMethod, amount:payment.amount }))
+    : inv.paymentSplit?.length
+      ? inv.paymentSplit.map(payment => ({ method:payment.method, amount:payment.amount }))
+      : inv.paymentMethod && inv.acompte > 0
+        ? [{ method:inv.paymentMethod, amount:inv.acompte }]
+        : [];
+  const paymentByMethod = new Map<string,number>();
+  for (const payment of rawPayments) paymentByMethod.set(payment.method, (paymentByMethod.get(payment.method) ?? 0) + payment.amount);
+  const paymentRows = [...paymentByMethod.entries()].map(([method, amount]) => ({ method, amount }));
+  const lastPayment = paymentEvents.length ? paymentEvents[paymentEvents.length - 1] : undefined;
+  const cashier = lastPayment?.operatorName ?? null;
+  const parsedPaidAt = lastPayment?.paidAt ? new Date(lastPayment.paidAt) : null;
+  const paidAtFormatted = parsedPaidAt && !Number.isNaN(parsedPaidAt.getTime())
+    ? parsedPaidAt.toLocaleString("fr-FR", { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit" })
+    : null;
 
   const statusColor = isReturn ? "#dc2626" : reste <= 0 ? "#16a34a" : inv.acompte > 0 ? "#d97706" : "#dc2626";
   const statusBg    = isReturn ? "#fef2f2" : reste <= 0 ? "#f0fdf4" : inv.acompte > 0 ? "#fffbeb" : "#fef2f2";
@@ -62,8 +81,10 @@ export function buildInvoicePDFHtml(inv: Invoice, boutique: Boutique, clients: C
     : clientRecord?.type === "Intergroupe" ? "Client Intergroupe"
     : "Client B2C (Particulier)";
 
-  const today = new Date(inv.date + "T00:00:00");
-  const dateFormatted = today.toLocaleDateString("fr-FR", { day:"2-digit", month:"long", year:"numeric" });
+  const parsedInvoiceDate = inv.dateRaw ? new Date(inv.dateRaw) : null;
+  const dateFormatted = parsedInvoiceDate && !Number.isNaN(parsedInvoiceDate.getTime())
+    ? parsedInvoiceDate.toLocaleDateString("fr-FR", { day:"2-digit", month:"long", year:"numeric" })
+    : inv.date;
 
   return `<!DOCTYPE html>
 <html lang="fr">
@@ -110,6 +131,11 @@ export function buildInvoicePDFHtml(inv: Invoice, boutique: Boutique, clients: C
   .totals-reste { display: flex; justify-content: space-between; padding: 5px 10px; margin-top: 4px; background: ${statusBg}; border-radius: 4px; border-left: 3px solid ${statusColor}; }
   .totals-reste-label { font-size: 9pt; font-weight: 700; color: ${statusColor}; }
   .totals-reste-value { font-size: 10pt; font-weight: 900; color: ${statusColor}; }
+  .payment-block { margin: 0 0 8mm auto; width: 86mm; border: 1px solid #e5e7eb; border-radius: 6px; padding: 4mm; }
+  .payment-title { font-size: 7pt; font-weight: 900; letter-spacing: 1.4px; color: #777; text-transform: uppercase; margin-bottom: 3px; }
+  .payment-row { display: flex; justify-content: space-between; gap: 8mm; padding: 2px 0; font-size: 8.5pt; border-bottom: 1px solid #f2f2f2; }
+  .payment-row:last-child { border-bottom: 0; }
+  .payment-meta { margin-top: 3mm; padding-top: 2.5mm; border-top: 1px dashed #d1d5db; font-size: 7.8pt; color: #555; line-height: 1.7; }
   .footer { margin-top: 10mm; padding-top: 6mm; border-top: 1px solid #e0e0e0; display: flex; justify-content: space-between; align-items: flex-end; }
   .footer-note { font-size: 7.5pt; color: #888; max-width: 110mm; line-height: 1.6; }
   .footer-thanks { font-size: 8pt; font-weight: 700; color: ${accent}; }
@@ -173,15 +199,27 @@ export function buildInvoicePDFHtml(inv: Invoice, boutique: Boutique, clients: C
   <div class="totals-block">
     <div class="totals-inner">
       ${lines.length > 1 ? `<div class="totals-row"><span>Sous-total</span><span>${fmtF(subtotal)}</span></div>` : ""}
-      ${inv.acompte > 0 ? `<div class="totals-row"><span>Acompte versé</span><span>- ${fmtF(inv.acompte)}</span></div>` : ""}
       <div class="totals-total">
-        <span class="totals-total-label">${isReturn ? "Montant remboursé" : "Total à payer"}</span>
+        <span class="totals-total-label">${isReturn ? "Montant remboursé" : "Total facture"}</span>
         <span class="totals-total-value">${isReturn ? "- " : ""}${fmtF(inv.montant)}</span>
       </div>
+      ${!isReturn && inv.acompte > 0 ? `<div class="totals-row" style="margin-top:4px;"><span>Total encaissé</span><span>${fmtF(inv.acompte)}</span></div>` : ""}
       ${reste > 0 && inv.acompte > 0 ? `<div class="totals-reste"><span class="totals-reste-label">Reste dû</span><span class="totals-reste-value">${fmtF(reste)}</span></div>` : ""}
       ${reste > 0 && inv.acompte === 0 ? `<div class="totals-reste"><span class="totals-reste-label">Montant impayé</span><span class="totals-reste-value">${fmtF(reste)}</span></div>` : ""}
     </div>
   </div>
+  ${!isReturn && (paymentRows.length > 0 || inv.operatorNom || cashier || paidAtFormatted) ? `
+  <div class="payment-block">
+    ${paymentRows.length > 0 ? `
+      <div class="payment-title">${paymentRows.length > 1 ? "Modes de paiement" : "Mode de paiement"}</div>
+      ${paymentRows.map(payment => `<div class="payment-row"><span>${payment.method}</span><strong>${fmtF(payment.amount)}</strong></div>`).join("")}
+    ` : ""}
+    <div class="payment-meta">
+      ${inv.operatorNom ? `<div><strong>Vendeur :</strong> ${inv.operatorNom}</div>` : ""}
+      ${cashier ? `<div><strong>Caissier :</strong> ${cashier}</div>` : ""}
+      ${paidAtFormatted ? `<div><strong>Dernier encaissement :</strong> ${paidAtFormatted}</div>` : ""}
+    </div>
+  </div>` : ""}
   <div class="footer">
     <div class="footer-note">
       Document généré par ${boutique.nom} — ${new Date().toLocaleDateString("fr-FR", { day:"2-digit", month:"long", year:"numeric" })}.<br/>
