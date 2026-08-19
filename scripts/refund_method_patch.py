@@ -1,3 +1,4 @@
+# trigger
 from pathlib import Path
 
 api_path = Path('src/lib/api.ts')
@@ -96,7 +97,6 @@ if old not in s: raise SystemExit('return method UI anchor missing')
 s = s.replace(old,new,1)
 p.write_text(s)
 
-# Return documents: label refund method explicitly.
 ip = Path('src/app/utils/invoice.ts')
 i = ip.read_text()
 old = '''      `\\n↩️ Montant remboursé: ${fmt(inv.montant)}\\n` +
@@ -115,7 +115,6 @@ old = '''<div class="payment-title">MODES DE PAIEMENT</div>'''
 if old in i:
     i = i.replace(old, '''<div class="payment-title">${paymentBlockTitle}</div>''', 1)
 else:
-    # tolerate current title casing if already dynamic elsewhere
     old2 = '''<div class="payment-title">Modes de paiement</div>'''
     if old2 not in i: raise SystemExit('payment title anchor missing')
     i = i.replace(old2, '''<div class="payment-title">${paymentBlockTitle}</div>''', 1)
