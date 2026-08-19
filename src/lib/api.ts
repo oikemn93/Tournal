@@ -498,6 +498,18 @@ export async function recordPayment(params: { boutiqueId:string; invoiceId:strin
   });
 }
 
+export async function recordMultiPayment(params: { boutiqueId:string; invoiceId:string; payments:Array<{amount:number;paymentMethod:string}> }) {
+  return dataRequest<{ invoice_id:string; acompte:number; applied_amount:number; status:string; stock_deducted:boolean; batch_id:string; payments:Array<{ id:number; amount:number; payment_method:string; paid_at:string; operator_id:string; operator_name:string; batch_id:string; source:"invoice" }> }>("rpc/record_multi_payment", {
+    method:"POST", headers:{ Prefer:"return=representation" },
+    body:JSON.stringify({
+      p_boutique_id:params.boutiqueId,
+      p_invoice_id:params.invoiceId,
+      p_idempotency_key:crypto.randomUUID(),
+      p_payments:params.payments,
+    }),
+  });
+}
+
 export async function recordClientPayment(params: { boutiqueId:string; clientId:number; amount:number; paymentMethod:string; paymentDate:string }) {
   return dataRequest<{ client_id:number; requested_amount:number; applied_amount:number; remaining_due:number; paid_at:string; operator_id:string; operator_name:string; allocations:Array<{invoice_id:string;amount:number}> }>("rpc/record_client_payment", {
     method:"POST", headers:{ Prefer:"return=representation" },

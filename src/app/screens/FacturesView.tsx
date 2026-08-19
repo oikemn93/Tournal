@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Search, Plus, Send, FileText, Eye, Mail, MessageCircle, Smartphone, Phone, Wallet, CreditCard, RotateCcw, ShoppingCart, Receipt, AlertCircle, Trash2, CheckCircle, Minus, Store, X, ChevronLeft, ChevronRight, CalendarDays, PlusCircle } from "lucide-react";
 import type { Boutique, Invoice, InvoiceStatus, InvoiceLine, StockEntry, PaymentMethod, Client, PlatformUser, CaisseSession, PaymentEntry } from "../types";
 import { SEM, inputCls, PAYMENT_METHODS, PM_ICON, PM_COLOR, PLACEHOLDER_IMGS } from "../constants";
-import { createSale, recordPayment, returnSale, openCaisseSession, closeCaisseSession } from "../../lib/api";
+import { createSale, recordPayment, recordMultiPayment, returnSale, openCaisseSession, closeCaisseSession } from "../../lib/api";
 import { fmt, today, imgSrc } from "../utils/formatting";
 import { invBadge, lineTotal, lineDispQty, lineDispUnit, genInvoiceId, productQty, getSiblings, invoiceMargin, lineUnitCost } from "../utils/inventory";
 import { buildReceiptHtml, openInvoicePDF, buildInvoiceMessage, agentPrint, printReceipt, printCaisseReport } from "../utils/invoice";
@@ -389,42 +389,48 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
     const validSplit = encaissSplit.filter(s => s.amount > 0);
     const totalSplit = validSplit.reduce((s, e) => s + e.amount, 0);
     if (validSplit.length === 0 || totalSplit <= 0) return;
+    if (totalSplit > invoiceRemainingAmount(encaissInv)) {
+      alert("Le total des paiements dépasse le reste à encaisser.");
+      return;
+    }
     setSubmittingPayment(true);
     let updatedInv: Invoice = { ...encaissInv };
     let saleEntries: StockEntry[] = [];
     try {
-      for (const entry of validSplit) {
-        const persisted = await recordPayment({ boutiqueId:boutique.id, invoiceId:encaissInv.id, amount:entry.amount, paymentMethod:entry.method });
-        const newStatus: InvoiceStatus = persisted.status === "payée" ? "payé" : "acompte";
-        updatedInv = {
-          ...updatedInv,
-          acompte:persisted.acompte,
-          status:newStatus,
-          paymentMethod:entry.method,
-          paymentSplit:validSplit,
-          payments:[...(updatedInv.payments ?? []), {
-            id:persisted.payment.id,
-            amount:persisted.payment.amount,
-            paymentMethod:persisted.payment.payment_method as PaymentMethod,
-            paidAt:persisted.payment.paid_at,
-            operatorId:persisted.payment.operator_id,
-            operatorName:persisted.payment.operator_name,
-            batchId:persisted.payment.batch_id,
-            source:persisted.payment.source,
-          }],
-        };
-        if (persisted.stock_deducted && saleEntries.length === 0) {
-          saleEntries = (encaissInv.lines ?? []).map((line, index) => ({
-            id: Date.now() + index,
-            productId: line.productId,
-            qty: -line.qty,
-            unit: line.unit,
-            montantDu: 0,
-            date: today(),
-            fournisseur: `Vente ${encaissInv.id}`,
-            invoiceId: encaissInv.id,
-          }));
-        }
+      const persisted = await recordMultiPayment({
+        boutiqueId:boutique.id,
+        invoiceId:encaissInv.id,
+        payments:validSplit.map(entry => ({ amount:entry.amount, paymentMethod:entry.method })),
+      });
+      const newPayments = persisted.payments.map(payment => ({
+        id:payment.id,
+        amount:payment.amount,
+        paymentMethod:payment.payment_method as PaymentMethod,
+        paidAt:payment.paid_at,
+        operatorId:payment.operator_id,
+        operatorName:payment.operator_name,
+        batchId:payment.batch_id,
+        source:payment.source,
+      }));
+      updatedInv = {
+        ...updatedInv,
+        acompte:persisted.acompte,
+        status:persisted.status === "payée" ? "payé" : "acompte",
+        paymentMethod:validSplit[validSplit.length - 1].method,
+        paymentSplit:validSplit,
+        payments:[...(updatedInv.payments ?? []), ...newPayments],
+      };
+      if (persisted.stock_deducted) {
+        saleEntries = (encaissInv.lines ?? []).map((line, index) => ({
+          id: Date.now() + index,
+          productId: line.productId,
+          qty: -line.qty,
+          unit: line.unit,
+          montantDu: 0,
+          date: today(),
+          fournisseur: `Vente ${encaissInv.id}`,
+          invoiceId: encaissInv.id,
+        }));
       }
     } catch (error) {
       setSubmittingPayment(false);
@@ -975,10 +981,18 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs font-black tracking-wider text-muted-foreground">MODES DE PAIEMENT</span>
-              <button type="button" onClick={()=>setEncaissSplit(prev=>[...prev, {method:"Espèces", amount:0}])}
-                className="flex items-center gap-1 text-xs font-bold px-2.5 py-1.5 rounded-xl"
+              <button type="button"
+                disabled={encaissSplit.reduce((sum,item)=>sum+item.amount,0) >= invoiceRemainingAmount(encaissInv)}
+                onClick={()=>setEncaissSplit(prev=>{
+                  const allocated = prev.reduce((sum,item)=>sum+item.amount,0);
+                  const remaining = Math.max(0, invoiceRemainingAmount(encaissInv) - allocated);
+                  if (remaining <= 0) return prev;
+                  const method = PAYMENT_METHODS.find(m=>!prev.some(item=>item.method===m)) ?? "Espèces";
+                  return [...prev, {method, amount:remaining}];
+                })}
+                className="flex items-center gap-1.5 text-sm font-black px-3.5 py-2.5 rounded-xl disabled:opacity-40 disabled:cursor-not-allowed"
                 style={{background:SEM.success.bg, color:SEM.success.accent}}>
-                <PlusCircle size={12}/> Ajouter
+                <PlusCircle size={15}/> Ajouter un paiement
               </button>
             </div>
             {encaissSplit.map((entry, idx) => (
