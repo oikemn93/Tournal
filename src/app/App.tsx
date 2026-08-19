@@ -6781,9 +6781,6 @@ function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdat
     const assignment=u.assignments.find(a=>a.boutiqueId===boutique.id);
     if (!assignment) return;
 
-    // Encaisser dans Vente dépend obligatoirement de l'accès Vente.
-    if (perm === "encaissement_vente" && !assignment.droits.vente) return;
-
     const nextValue = !assignment.droits[perm];
     onUpdateUsers(prev=>prev.map(x=>x.id!==userId?x:{...x,assignments:x.assignments.map(a=>{
       if (a.boutiqueId!==bid) return a;
