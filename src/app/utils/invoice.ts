@@ -77,9 +77,17 @@ export function buildInvoicePDFHtml(inv: Invoice, boutique: Boutique, clients: C
       </tr>`;
   }).join("");
 
-  const clientTypeLabel = clientRecord?.type === "B2B" ? "Client B2B (Grossiste)"
-    : clientRecord?.type === "Intergroupe" ? "Client Intergroupe"
+  const clientType = inv.clientTypeSnapshot ?? inv.clientType ?? clientRecord?.type;
+  const clientTypeLabel = clientType === "B2B" ? "Client B2B (Grossiste)"
     : "Client B2C (Particulier)";
+  const invoiceBoutiqueNom = inv.boutiqueNomSnapshot ?? boutique.nom;
+  const invoiceBoutiqueVille = inv.boutiqueVilleSnapshot ?? boutique.ville;
+  const invoiceBoutiqueAdresse = inv.boutiqueAdresseSnapshot ?? boutique.adresse;
+  const invoiceBoutiqueTel = inv.boutiqueTelSnapshot ?? boutique.tel;
+  const invoiceBoutiqueEmail = inv.boutiqueEmailSnapshot ?? boutique.email;
+  const invoiceClientAdresse = inv.clientAdresseSnapshot ?? clientRecord?.adresse;
+  const invoiceClientEmail = inv.clientEmailSnapshot ?? clientRecord?.email;
+  const invoiceClientVille = inv.clientVilleSnapshot ?? clientRecord?.ville;
 
   const parsedInvoiceDate = inv.dateRaw ? new Date(inv.dateRaw) : null;
   const dateFormatted = parsedInvoiceDate && !Number.isNaN(parsedInvoiceDate.getTime())
@@ -90,7 +98,7 @@ export function buildInvoicePDFHtml(inv: Invoice, boutique: Boutique, clients: C
 <html lang="fr">
 <head>
 <meta charset="UTF-8"/>
-<title>${docLabel} ${inv.id} — ${boutique.nom}</title>
+<title>${docLabel} ${inv.id} — ${invoiceBoutiqueNom}</title>
 <style>
   @page { size: A4; margin: 14mm 16mm; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -146,11 +154,11 @@ export function buildInvoicePDFHtml(inv: Invoice, boutique: Boutique, clients: C
 <div class="page">
   <div class="header">
     <div>
-      <div class="brand-name">${boutique.nom}</div>
+      <div class="brand-name">${invoiceBoutiqueNom}</div>
       <div class="brand-meta">
-        ${boutique.adresse ? boutique.adresse + "<br/>" : ""}
-        ${boutique.tel ? "Tél : " + boutique.tel + "<br/>" : ""}
-        ${boutique.email ? boutique.email : ""}
+        ${invoiceBoutiqueAdresse ? invoiceBoutiqueAdresse + "<br/>" : ""}
+        ${invoiceBoutiqueTel ? "Tél : " + invoiceBoutiqueTel + "<br/>" : ""}
+        ${invoiceBoutiqueEmail ? invoiceBoutiqueEmail : ""}
       </div>
     </div>
     <div class="inv-meta">
@@ -164,11 +172,12 @@ export function buildInvoicePDFHtml(inv: Invoice, boutique: Boutique, clients: C
   <div class="parties">
     <div class="party">
       <div class="party-label">Émetteur</div>
-      <div class="party-name">${boutique.nom}</div>
+      <div class="party-name">${invoiceBoutiqueNom}</div>
       <div class="party-detail">
-        ${boutique.adresse ?? ""}<br/>
-        ${boutique.tel ? "Tél : " + boutique.tel : ""}<br/>
-        ${boutique.email ?? ""}
+        ${invoiceBoutiqueAdresse ?? ""}<br/>
+        ${invoiceBoutiqueVille ?? ""}<br/>
+        ${invoiceBoutiqueTel ? "Tél : " + invoiceBoutiqueTel : ""}<br/>
+        ${invoiceBoutiqueEmail ?? ""}
       </div>
     </div>
     <div class="party">
@@ -177,8 +186,9 @@ export function buildInvoicePDFHtml(inv: Invoice, boutique: Boutique, clients: C
       <div class="party-name">${inv.client}</div>
       <div class="party-detail">
         ${inv.clientTel ? "Tél : " + inv.clientTel : ""}<br/>
-        ${clientRecord?.adresse ?? ""}<br/>
-        ${clientRecord?.email ?? ""}
+        ${invoiceClientAdresse ?? ""}<br/>
+        ${invoiceClientVille ?? ""}<br/>
+        ${invoiceClientEmail ?? ""}
       </div>
     </div>
   </div>
@@ -222,7 +232,7 @@ export function buildInvoicePDFHtml(inv: Invoice, boutique: Boutique, clients: C
   </div>` : ""}
   <div class="footer">
     <div class="footer-note">
-      Document généré par ${boutique.nom} — ${new Date().toLocaleDateString("fr-FR", { day:"2-digit", month:"long", year:"numeric" })}.<br/>
+      Document régénéré depuis les données de la facture ${inv.id} — ${new Date().toLocaleDateString("fr-FR", { day:"2-digit", month:"long", year:"numeric" })}.<br/>
       ${isReturn ? "Ce document atteste d'un retour de marchandise (avoir). Conservez-le pour vos archives." : "Ce document tient lieu de facture. Conservez-le pour vos archives."}
     </div>
     <div class="footer-thanks">Merci pour votre confiance.</div>
