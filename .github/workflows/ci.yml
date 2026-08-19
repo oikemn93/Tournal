@@ -1,0 +1,66 @@
+name: Tournal CI
+
+on:
+  push:
+    branches: [main, feature/superadmin-user-control-20260819]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Dependency security audit
+        run: pnpm audit --prod --audit-level high
+
+      - name: Prevent privileged secrets in browser source
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -RInE 'SUPABASE_SERVICE_ROLE_KEY|sb_secret_' src public index.html; then
+            echo 'Privileged Supabase secret reference found in browser-delivered source.' >&2
+            exit 1
+          fi
+          if grep -RInE 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9' src; then
+            echo 'Legacy JWT API key embedded in browser source.' >&2
+            exit 1
+          fi
+
+      - name: Verify hardened session storage
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! grep -n 'localStorage.getItem(SESSION_STORAGE_KEY)' src/lib/api.ts
+          ! grep -n 'localStorage.setItem(SESSION_STORAGE_KEY' src/lib/api.ts
+          grep -n 'sessionStorage.getItem(SESSION_STORAGE_KEY)' src/lib/api.ts
+
+      - name: Verify temporary patchers are gone
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e scripts/refund_method_patch.py
+          test ! -e scripts/security_hardening_patch.py
+          test ! -e .github/workflows/refund-method-patcher.yml
+          test ! -e .github/workflows/security-hardening-patcher.yml
+
+      - name: Production build
+        run: pnpm build
