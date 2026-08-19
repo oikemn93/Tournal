@@ -581,6 +581,30 @@ export async function updateBoutiqueProfile(params: { boutiqueId:string; nom:str
   });
 }
 
+export type BoutiqueDirectoryEntry = {
+  boutique_id:string; nom:string; ville:string; tel:string; is_partner?:boolean; transfer_count:number;
+};
+export async function searchBoutiqueDirectory(boutiqueId:string, query="") {
+  return dataRequest<BoutiqueDirectoryEntry[]>("rpc/search_boutique_directory", {
+    method:"POST", body:JSON.stringify({ p_source_boutique_id:boutiqueId, p_query:query || null }),
+  });
+}
+export async function getBoutiquePartners(boutiqueId:string) {
+  return dataRequest<BoutiqueDirectoryEntry[]>("rpc/get_boutique_partners", {
+    method:"POST", body:JSON.stringify({ p_boutique_id:boutiqueId }),
+  });
+}
+export async function addBoutiquePartner(boutiqueId:string, partnerBoutiqueId:string) {
+  return dataRequest<{boutique_id:string;nom:string;ville:string|null;tel:string|null}>("rpc/add_boutique_partner", {
+    method:"POST", body:JSON.stringify({ p_boutique_id:boutiqueId, p_partner_boutique_id:partnerBoutiqueId }),
+  });
+}
+export async function removeBoutiquePartner(boutiqueId:string, partnerBoutiqueId:string) {
+  return dataRequest<{removed:boolean;boutique_id:string}>("rpc/remove_boutique_partner", {
+    method:"POST", body:JSON.stringify({ p_boutique_id:boutiqueId, p_partner_boutique_id:partnerBoutiqueId }),
+  });
+}
+
 export type RelationalTransfer = {
   id:string; from_boutique_id:string; to_boutique_id:string; status:"pending"|"accepted"|"rejected"|"cancelled";
   relationship_type:"same_owner"|"commercial"|null; total_amount:number; invoice_id:string|null; charge_id:number|null;
