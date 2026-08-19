@@ -6,6 +6,7 @@ on:
       - feature/superadmin-user-control-20260819
     paths:
       - scripts/refund_method_patch.py
+      - .github/workflows/refund-method-patcher.yml
 
 permissions:
   contents: write
