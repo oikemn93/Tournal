@@ -115,18 +115,18 @@ type Boutique   = {
 
 const SESSION_KEY = "tournal_session";
 type StoredSession = { userId: string; boutiqueId: string | null; assignJson: string | null; loginAt?: number };
-const SESSION_EXPIRY_MS = 12 * 60 * 60 * 1000; // 12h
+const SESSION_EXPIRY_MS = 60 * 60 * 1000; // 60 min idle session default
 function saveSession(userId: string, boutiqueId: string | null, assign: BoutiqueAssignment | null) {
-  try { localStorage.setItem(SESSION_KEY, JSON.stringify({ userId, boutiqueId, assignJson: assign ? JSON.stringify(assign) : null, loginAt: Date.now() })); } catch {}
+  try { sessionStorage.setItem(SESSION_KEY, JSON.stringify({ userId, boutiqueId, assignJson: assign ? JSON.stringify(assign) : null, loginAt: Date.now() })); } catch {}
 }
 function loadSession(): StoredSession | null {
   try {
-    const s = localStorage.getItem(SESSION_KEY);
+    const s = sessionStorage.getItem(SESSION_KEY);
     if (!s) return null;
     return JSON.parse(s) as StoredSession;
   } catch { return null; }
 }
-function clearSession() { try { localStorage.removeItem(SESSION_KEY); } catch {} }
+function clearSession() { try { sessionStorage.removeItem(SESSION_KEY); } catch {} }
 
 // ─── TECHNICAL LOGGING ───────────────────────────────────────────────────────
 type TechLogCat   = "sync"|"email"|"pdf"|"qz"|"session"|"backend";
@@ -8883,12 +8883,10 @@ export default function App() {
       lockTimer.current   = setTimeout(() => setLocked(true), LOCK_TIMEOUT_MS);
       logoutTimer.current = setTimeout(() => {
         const bid = activeBoutiqueIdRef.current;
-        if (!bid) return;
-        void validateServerSession().then(valid => {
-          if (valid) return;
-          logTech(bid, { level:"info", cat:"session", msg:"Session expirée côté serveur" });
-          clearSession(); setCurrentUser(null); setActiveBoutiqueId(null); setActiveAssign(null); setScreen("login");
-        }).catch(() => undefined);
+        if (bid) void logTech(bid, { level:"info", cat:"session", msg:"Session expirée après inactivité" });
+        void signOutFromSupabase().catch(() => undefined).finally(() => {
+          clearSession(); setCurrentUser(null); setActiveBoutiqueId(null); setActiveAssign(null); setLocked(false); setScreen("login");
+        });
       }, sessionExpiryMs);
     }
     const events = ["mousemove", "keydown", "touchstart", "click"];
