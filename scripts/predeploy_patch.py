@@ -12,41 +12,90 @@ def replace_once(old: str, new: str, label: str):
     text = text.replace(old, new, 1)
 
 replace_once(
-    '''export function buildOrderTicketHtml(inv: Invoice, boutique: Boutique, operatorNom: string, isDuplicate?: boolean): string {
-  const fnum = (n: number) => n.toLocaleString("fr-FR");
-  const now = new Date();
-  const lines = inv.lines ?? [];''',
-    '''export function buildOrderTicketHtml(inv: Invoice, boutique: Boutique, operatorNom: string, isDuplicate?: boolean): string {
-  const fnum = (n: number) => n.toLocaleString("fr-FR");
-  const printedAt = new Date();
-  const parsedCreatedAt = inv.dateRaw ? new Date(inv.dateRaw) : null;
-  const hasCreatedAt = parsedCreatedAt != null && !Number.isNaN(parsedCreatedAt.getTime());
-  const createdLabel = hasCreatedAt
-    ? parsedCreatedAt!.toLocaleString("fr-FR", { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit" })
+    '''export function buildReceiptHtml(inv: Invoice, boutique: Boutique, fallbackOperator?: string, isDuplicate?: boolean): string {
+  const isReturn = inv.type === "Retour";
+  const reste = Math.max(0, inv.montant - inv.acompte);
+  const lines = inv.lines ?? [];
+  const operator = inv.operatorNom ?? fallbackOperator ?? "—";
+  const paymentRows = inv.payments?.length
+    ? inv.payments.map(payment => ({ method:payment.paymentMethod, amount:payment.amount }))
+    : inv.paymentSplit?.length
+      ? inv.paymentSplit.map(payment => ({ method:payment.method, amount:payment.amount }))
+      : inv.paymentMethod && inv.acompte > 0
+        ? [{ method:inv.paymentMethod, amount:inv.acompte }]
+        : [];''',
+    '''export function buildReceiptHtml(inv: Invoice, boutique: Boutique, fallbackOperator?: string, isDuplicate?: boolean): string {
+  const isReturn = inv.type === "Retour";
+  const reste = Math.max(0, inv.montant - inv.acompte);
+  const lines = inv.lines ?? [];
+  const paymentEvents = [...(inv.payments ?? [])].sort((a,b) => a.paidAt.localeCompare(b.paidAt));
+  const lastPayment = paymentEvents.length ? paymentEvents[paymentEvents.length - 1] : undefined;
+  const seller = inv.operatorNom ?? "—";
+  const cashier = lastPayment?.operatorName ?? fallbackOperator ?? seller;
+  const parsedSaleDate = inv.dateRaw ? new Date(inv.dateRaw) : null;
+  const saleDateLabel = parsedSaleDate && !Number.isNaN(parsedSaleDate.getTime())
+    ? parsedSaleDate.toLocaleString("fr-FR", { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit" })
     : inv.date;
-  const printedLabel = printedAt.toLocaleString("fr-FR", { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit" });
-  const lines = inv.lines ?? [];''',
-    'order ticket original timestamp',
+  const parsedPaidAt = lastPayment?.paidAt ? new Date(lastPayment.paidAt) : null;
+  const paidDateLabel = parsedPaidAt && !Number.isNaN(parsedPaidAt.getTime())
+    ? parsedPaidAt.toLocaleString("fr-FR", { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit" })
+    : null;
+  const printedLabel = new Date().toLocaleString("fr-FR", { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit" });
+  const paymentRows = paymentEvents.length
+    ? paymentEvents.map(payment => ({ method:payment.paymentMethod, amount:payment.amount }))
+    : inv.paymentSplit?.length
+      ? inv.paymentSplit.map(payment => ({ method:payment.method, amount:payment.amount }))
+      : inv.paymentMethod && inv.acompte > 0
+        ? [{ method:inv.paymentMethod, amount:inv.acompte }]
+        : [];''',
+    'receipt payment metadata',
 )
 
 replace_once(
-    '''<div class="row"><span>Date</span><span class="value">${now.toLocaleDateString("fr-FR")} ${now.toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"})}</span></div>''',
-    '''<div class="row"><span>Créée le</span><span class="value">${createdLabel}</span></div>
-${isDuplicate ? `<div class="row"><span>Réimprimée le</span><span class="value">${printedLabel}</span></div>` : ""}''',
-    'order ticket dates',
+    '''  ${isReturn ? `<div class="bold big" style="margin-top:2mm;border:2px solid #000;padding:1mm 2mm;">RETOUR / AVOIR</div>` : ""}
+</div>
+<div class="sep-solid"></div>
+<div class="row"><span class="label">N°</span><span class="value">${inv.id}</span></div>
+<div class="row"><span class="label">Date</span><span class="value">${inv.date}</span></div>
+<div class="row"><span class="label">Client</span><span class="value">${inv.client}${inv.clientTel ? " · " + inv.clientTel : ""}</span></div>
+<div class="row"><span class="label">Opérateur</span><span class="value">${operator}</span></div>''',
+    '''  ${isReturn ? `<div class="bold big" style="margin-top:2mm;border:2px solid #000;padding:1mm 2mm;">RETOUR / AVOIR</div>` : ""}
+  ${isDuplicate ? `<div class="bold" style="margin-top:2mm;border:2px solid #000;padding:1mm 2mm;letter-spacing:2px;">DUPLICATA</div>` : ""}
+</div>
+<div class="sep-solid"></div>
+<div class="row"><span class="label">N°</span><span class="value">${inv.id}</span></div>
+<div class="row"><span class="label">Commande</span><span class="value">${saleDateLabel}</span></div>
+${paidDateLabel ? `<div class="row"><span class="label">Encaissement</span><span class="value">${paidDateLabel}</span></div>` : ""}
+${isDuplicate ? `<div class="row"><span class="label">Réimpression</span><span class="value">${printedLabel}</span></div>` : ""}
+<div class="row"><span class="label">Client</span><span class="value">${inv.client}${inv.clientTel ? " · " + inv.clientTel : ""}</span></div>
+<div class="row"><span class="label">Vendeur</span><span class="value">${seller}</span></div>
+${!isReturn && inv.acompte > 0 ? `<div class="row"><span class="label">Caissier</span><span class="value">${cashier}</span></div>` : ""}''',
+    'receipt header metadata',
 )
 
 replace_once(
-    '''${lines.map(l=>`<div style="margin:1.5mm 0;"><div class="bold">${l.nom}</div><div class="row small" style="margin-top:0.5mm;"><span>${fnum(l.qty)}&nbsp;${l.unit}&nbsp;×&nbsp;${fnum(l.prixUnit)}&nbsp;F</span><span class="bold" style="color:#000;">${fnum(l.qty*l.prixUnit)}&nbsp;F</span></div></div>`).join("")}''',
-    '''${lines.map(l=>`<div style="margin:1.5mm 0;"><div class="bold">${l.nom}</div><div class="row small" style="margin-top:0.5mm;"><span>${fnum(lineDispQty(l))}&nbsp;${lineDispUnit(l)}&nbsp;×&nbsp;${fnum(l.prixUnit)}&nbsp;F</span><span class="bold" style="color:#000;">${fnum(lineTotal(l))}&nbsp;F</span></div></div>`).join("")}''',
-    'order ticket display unit and total',
-)
-
-replace_once(
-    '''<div class="alert">⚠ À RÉGLER EN CAISSE ⚠<br/>Ce bon n'est pas une preuve de paiement</div>''',
-    '''<div class="alert">⚠ NON PAYÉ — À RÉGLER EN CAISSE ⚠<br/>Ce bon n'est pas une preuve de paiement</div>''',
-    'order ticket unpaid warning',
+    '''  <div class="row">
+    <span class="label">Acompte versé</span>
+    <span class="value">${fnum(inv.acompte)}&nbsp;F</span>
+  </div>
+  <div class="row">
+    <span class="label">Reste à payer</span>
+    <span class="value">${fnum(reste)}&nbsp;F</span>
+  </div>''',
+    '''  <div class="row">
+    <span class="label">Total facture</span>
+    <span class="value">${fnum(inv.montant)}&nbsp;F</span>
+  </div>
+  <div class="row">
+    <span class="label">Total encaissé</span>
+    <span class="value">${fnum(inv.acompte)}&nbsp;F</span>
+  </div>
+  <div class="row">
+    <span class="label">Reste à payer</span>
+    <span class="value">${fnum(reste)}&nbsp;F</span>
+  </div>''',
+    'receipt totals labels',
 )
 
 path.write_text(text)
-print('Order ticket printing corrected successfully')
+print('Receipt payment metadata corrected successfully')
