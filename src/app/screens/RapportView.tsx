@@ -28,8 +28,6 @@ export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique:
   const panierMoyen  = nbVentes > 0 ? ca / nbVentes : 0;
   const impayé       = filtInv.filter(i=>invoiceSign(i)>0).reduce((s,i)=>s+invoiceRemainingAmount(i),0);
   const totalCharges = filtCh.reduce((s,c)=>s+c.montant,0);
-  const margeBrute   = ca - totalCharges;
-  const tauxMarge    = ca > 0 ? (margeBrute/ca*100).toFixed(1) : "0";
 
   // Product margin (sale price − FIFO cost of goods), returns counted negatively.
   // Only computed/shown for users with the "Voir les marges" right.
@@ -40,6 +38,7 @@ export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique:
   }, { marge:0, ca:0, cost:0, has:false });
   const margeVentes    = margeVentesData.marge;
   const tauxMargeVentes= margeVentesData.ca !== 0 ? Math.round(margeVentes/Math.abs(margeVentesData.ca)*100) : 0;
+  const resultatApresCharges = margeVentes - totalCharges;
 
   const byMethode = PAYMENT_METHODS.map(m => ({
     m, total: filtPayments.filter(payment=>payment.paymentMethod===m).reduce((sum,payment)=>sum + payment.signedAmount,0),
@@ -91,8 +90,7 @@ h1{font-size:22px;font-weight:900;margin:0 0 2px}
   <div class="kpi"><div class="label">Panier moyen</div><div class="value">${fmt(panierMoyen)}</div></div>
   <div class="kpi"><div class="label">CA facturé (date de facture)</div><div class="value muted">${fmt(caTotal)}</div></div>
   <div class="kpi"><div class="label">Impayé</div><div class="value orange">${fmt(impayé)}</div></div>
-  <div class="kpi"><div class="label">Marge brute</div><div class="value ${margeBrute>=0?"green":"red"}">${fmt(margeBrute)}</div></div>
-  ${canSeeMargin && margeVentesData.has ? `<div class="kpi"><div class="label">Marge sur ventes (${tauxMargeVentes}%)</div><div class="value ${margeVentes>=0?"green":"red"}">${fmt(margeVentes)}</div></div>` : ""}
+  ${canSeeMargin && margeVentesData.has ? `<div class="kpi"><div class="label">Marge commerciale (${tauxMargeVentes}%)</div><div class="value ${margeVentes>=0?"green":"red"}">${fmt(margeVentes)}</div></div><div class="kpi"><div class="label">Résultat après charges</div><div class="value ${resultatApresCharges>=0?"green":"red"}">${fmt(resultatApresCharges)}</div></div>` : ""}
 </div>
 ${byMethode.length>0?`<div class="section-title">Répartition par mode de paiement</div>
 ${byMethode.map(r=>`<div class="row"><span class="label">${PM_ICON[r.m]} ${r.m} <span class="muted">(${r.count})</span></span><span class="value">${fmt(r.total)}</span></div>`).join("")}
@@ -101,7 +99,7 @@ ${filtCh.length>0?`<div class="section-title">Charges (${filtCh.length})</div>
 ${byCategorie.map(r=>`<div class="row"><span class="label">${r.cat}</span><span class="value red">${fmt(r.montant)}</span></div>`).join("")}
 ${filtCh.map(c=>`<div class="row"><span class="label" style="padding-left:12px;color:#888">· ${c.label}</span><span class="value muted">${fmt(c.montant)}</span></div>`).join("")}
 <div class="row total-row"><span class="label">Total charges</span><span class="value red">${fmt(totalCharges)}</span></div>
-<div class="row total-row" style="border-top:2px solid #1E9B1E"><span class="label" style="color:#1E9B1E">Marge brute</span><span class="value" style="color:#1E9B1E">${fmt(margeBrute)}</span></div>`:""}
+${canSeeMargin && margeVentesData.has ? `<div class="row total-row" style="border-top:2px solid ${resultatApresCharges>=0?"#1E9B1E":"#ef4444"}"><span class="label" style="color:${resultatApresCharges>=0?"#1E9B1E":"#ef4444"}">Résultat après charges</span><span class="value" style="color:${resultatApresCharges>=0?"#1E9B1E":"#ef4444"}">${fmt(resultatApresCharges)}</span></div>` : ""}`:""}
 </body></html>`;
   }
 
@@ -142,8 +140,7 @@ th{font-weight:700;color:#666;font-size:10px;text-transform:uppercase}
   <div class="kpi"><div class="label">Panier moyen</div><div class="value">${fmt(panierMoyen)}</div></div>
   <div class="kpi"><div class="label">CA facturé (date de facture)</div><div class="value">${fmt(caTotal)}</div></div>
   <div class="kpi"><div class="label">Impayé</div><div class="value muted">${fmt(impayé)}</div></div>
-  <div class="kpi"><div class="label">Marge brute</div><div class="value ${margeBrute>=0?"green":"red"}">${fmt(margeBrute)}</div></div>
-  ${canSeeMargin && margeVentesData.has ? `<div class="kpi"><div class="label">Marge sur ventes (${tauxMargeVentes}%)</div><div class="value ${margeVentes>=0?"green":"red"}">${fmt(margeVentes)}</div></div>` : ""}
+  ${canSeeMargin && margeVentesData.has ? `<div class="kpi"><div class="label">Marge commerciale (${tauxMargeVentes}%)</div><div class="value ${margeVentes>=0?"green":"red"}">${fmt(margeVentes)}</div></div><div class="kpi"><div class="label">Résultat après charges</div><div class="value ${resultatApresCharges>=0?"green":"red"}">${fmt(resultatApresCharges)}</div></div>` : ""}
 </div>
 ${chargesBlock}
 <div id="transactions" class="section-title">Transactions (${filtInv.length})</div>
@@ -212,11 +209,10 @@ ${invLines}
     { label:"Impayé",        value:impayé,        color:SEM.warning.accent                        },
     { label:"Charges",       value:totalCharges,  color:"#ef4444"                        },
     ...(canSeeMargin && margeVentesData.has ? [
-      { label:"Marge sur ventes", value:margeVentes, color:margeVentes>=0?SEM.success.accent:SEM.danger.accent, bold:true },
-      { label:"Taux marge/ventes", value:-1, color:"#a855f7", txt:`${tauxMargeVentes}%` },
+      { label:"Marge commerciale", value:margeVentes, color:margeVentes>=0?SEM.success.accent:SEM.danger.accent, bold:true },
+      { label:"Taux de marge commerciale", value:-1, color:"#a855f7", txt:`${tauxMargeVentes}%` },
+      { label:"Résultat après charges", value:resultatApresCharges, color:resultatApresCharges>=0?SEM.success.accent:SEM.danger.accent, bold:true },
     ] : []),
-    { label:"Marge brute",   value:margeBrute,    color:margeBrute>=0?SEM.success.accent:SEM.danger.accent, bold:true },
-    { label:"Taux de marge", value:-1,            color:"#a855f7", txt:`${tauxMarge}%`   },
   ];
 
   return (
@@ -242,9 +238,9 @@ ${invLines}
           { label:"CA encaissé (paiements)", value:fmt(ca), color:RC },
           { label:"Ventes", value:`${nbVentes}`, color:"#6b7280" },
           { label:"Panier moyen", value:fmt(panierMoyen), color:"#a855f7" },
-          { label:"Marge brute (CA − charges)", value:fmt(margeBrute), color:margeBrute>=0?SEM.success.accent:SEM.danger.accent },
           ...(canSeeMargin && margeVentesData.has ? [
-            { label:`Marge sur ventes (${tauxMargeVentes}%)`, value:fmt(margeVentes), color:margeVentes>=0?SEM.success.accent:SEM.danger.accent },
+            { label:`Marge commerciale (${tauxMargeVentes}%)`, value:fmt(margeVentes), color:margeVentes>=0?SEM.success.accent:SEM.danger.accent },
+            { label:"Résultat après charges", value:fmt(resultatApresCharges), color:resultatApresCharges>=0?SEM.success.accent:SEM.danger.accent },
           ] : []),
         ].map((k,i)=>(
           <div key={i} className="bg-card rounded-2xl border border-border p-4">

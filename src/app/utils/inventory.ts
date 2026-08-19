@@ -77,6 +77,9 @@ export function fifoUnitCost(pid: number, qty: number, entries: StockEntry[]): n
 // back to the product's recorded purchase price. Returns null when no cost is
 // known (so the UI can hide margin instead of showing a misleading 100%).
 export function lineUnitCost(line: InvoiceLine, entries: StockEntry[], products: Product[]): number | null {
+  // Once the first payment freezes the FIFO unit cost on the invoice line,
+  // historical margins must never be recomputed from future stock movements.
+  if (line.prixAchat != null && line.prixAchat > 0) return line.prixAchat;
   if (line.productId > 0) {
     const fifo = fifoUnitCost(line.productId, line.qty, entries);
     if (fifo > 0) return fifo;
