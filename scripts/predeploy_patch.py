@@ -1,126 +1,120 @@
 from pathlib import Path
 
-# ── Dashboard: signed return-aware CA and cash charge totals ──────────────────
-dash_path = Path('src/app/screens/DashboardView.tsx')
-dash = dash_path.read_text()
-dash = dash.replace(
-    '''import { productQty, invBadge, filterByPeriod } from "../utils/inventory";''',
-    '''import { productQty, invBadge, filterByPeriod } from "../utils/inventory";\nimport { filterPaymentEventsByPeriod, invoiceRemainingAmount } from "../utils/payments";''',
-    1,
-)
-old = '''  const filtInv = filterByPeriod(invoices, period, customFrom, customTo);
-  const filtCh  = filterByPeriod(charges, period, customFrom, customTo);
+# ── Inventory supplier balance: separate purchase debt from payments ──────────
+inv_path = Path('src/app/utils/inventory.ts')
+inv = inv_path.read_text()
+old = '''export function supplierBalance(nom: string, entries: StockEntry[], charges?: Charge[]) {
+  const dû = entries.filter(e => e.fournisseur === nom && e.qty > 0).reduce((s, e) => s + e.montantDu, 0);
+  const payé = (charges ?? []).filter(c => c.fournisseur === nom).reduce((s, c) => s + c.montant, 0);
+  return Math.max(0, dû - payé);
+}'''
+new = '''export function supplierBalance(nom: string, entries: StockEntry[], charges?: Charge[]) {
+  const linkedCharges = (charges ?? []).filter(c => c.fournisseur === nom);
+  const regularPurchases = entries
+    .filter(e => e.fournisseur === nom && e.qty > 0)
+    .reduce((s, e) => s + e.montantDu, 0);
+  const transferPurchases = linkedCharges
+    .filter(c => c.source === "transfer")
+    .reduce((s, c) => s + c.montant, 0);
+  const regularPayments = linkedCharges
+    .filter(c => c.source !== "transfer")
+    .reduce((s, c) => s + c.montant, 0);
+  const transferPayments = linkedCharges
+    .filter(c => c.source === "transfer")
+    .reduce((s, c) => s + Number(c.paidAmount ?? 0), 0);
+  return Math.max(0, regularPurchases + transferPurchases - regularPayments - transferPayments);
+}'''
+if old not in inv:
+    raise SystemExit('supplierBalance anchor not found')
+inv = inv.replace(old, new, 1)
+inv_path.write_text(inv)
 
-  const ca          = filtInv.reduce((s,i) => s + i.acompte, 0);
-  const caTotal     = filtInv.reduce((s,i) => s + i.montant, 0);
-  const totalCharges= filtCh.reduce((s,c) => s + c.montant, 0);
-  const margeBrute  = ca - totalCharges;
-  const tauxMarge   = ca > 0 ? Math.round((margeBrute/ca)*100) : 0;
-  const impayées    = filtInv.filter(i=>i.status!=="payé");
-  const totalImpayé = impayées.reduce((s,i)=>s+(i.montant-i.acompte),0);'''
-new = '''  const filtInv = filterByPeriod(invoices, period, customFrom, customTo);
-  const filtPayments = filterPaymentEventsByPeriod(invoices, period, customFrom, customTo);
-  const filtCh  = filterByPeriod(charges, period, customFrom, customTo);
-  const invoiceSign = (invoice: typeof invoices[number]) => invoice.type.toLowerCase() === "retour" ? -1 : 1;
-  const chargeCashAmount = (charge: typeof charges[number]) => charge.source === "transfer" ? Number(charge.paidAmount ?? 0) : charge.montant;
+# ── API: persist selected supplier on manual charges ─────────────────────────
+api_path = Path('src/lib/api.ts')
+api = api_path.read_text()
+old = '''export async function createCharge(params:{ boutiqueId:string; label:string; amount:number; category:string; note?:string }) {
+  return dataRequest<{ charge_id:number }>("rpc/create_charge", { method:"POST", headers:{ Prefer:"return=representation" }, body:JSON.stringify({ p_boutique_id:params.boutiqueId,p_idempotency_key:crypto.randomUUID(),p_label:params.label,p_montant:params.amount,p_categorie:params.category,p_note:params.note ?? null }) });
+}'''
+new = '''export async function createCharge(params:{ boutiqueId:string; label:string; amount:number; category:string; note?:string; supplier?:string }) {
+  return dataRequest<{ charge_id:number }>("rpc/create_charge", { method:"POST", headers:{ Prefer:"return=representation" }, body:JSON.stringify({ p_boutique_id:params.boutiqueId,p_idempotency_key:crypto.randomUUID(),p_label:params.label,p_montant:params.amount,p_categorie:params.category,p_note:params.note ?? null,p_fournisseur:params.supplier ?? null }) });
+}'''
+if old not in api:
+    raise SystemExit('createCharge anchor not found')
+api = api.replace(old, new, 1)
+api_path.write_text(api)
 
-  const ca          = filtPayments.reduce((s,p) => s + p.signedAmount, 0);
-  const caTotal     = filtInv.reduce((s,i) => s + invoiceSign(i) * i.montant, 0);
-  const totalCharges= filtCh.reduce((s,c) => s + chargeCashAmount(c), 0);
-  const margeBrute  = ca - totalCharges;
-  const tauxMarge   = ca !== 0 ? Math.round((margeBrute/Math.abs(ca))*100) : 0;
-  const impayées    = filtInv.filter(i=>invoiceSign(i)>0 && invoiceRemainingAmount(i)>0);
-  const totalImpayé = impayées.reduce((s,i)=>s+invoiceRemainingAmount(i),0);'''
-if old not in dash:
-    raise SystemExit('Dashboard accounting anchor not found')
-dash = dash.replace(old, new, 1)
-old = '''    if (period === "semaine") {
-      const days = ["Lun","Mar","Mer","Jeu","Ven","Sam","Dim"];
-      return days.map((d,i) => {
-        const v = filtInv.filter(inv => {
-          const raw = inv.date ?? "";
-          const parsed = (() => { try { const parts = raw.toLowerCase().split(" "); const months: Record<string,number> = {jan:0,fév:1,mar:2,avr:3,mai:4,jun:5,jul:6,aoû:7,sep:8,oct:9,nov:10,déc:11}; return new Date(new Date().getFullYear(), months[parts[1]?.slice(0,3)]??0, parseInt(parts[0])); } catch { return new Date(); }})();
-          return (parsed.getDay()+6)%7 === i;
-        }).reduce((s,inv)=>s+inv.acompte,0);
-        return { m: d, v: Math.round(v/1000) };
-      });
-    }
-    const map = new Map<string,number>();
-    filtInv.forEach(inv => { const k = inv.date.split(" · ")[0]; map.set(k,(map.get(k)??0)+inv.acompte); });
-    return Array.from(map.entries()).slice(-10).map(([m,v])=>({ m, v:Math.round(v/1000) }));'''
-new = '''    if (period === "semaine") {
-      const days = ["Lun","Mar","Mer","Jeu","Ven","Sam","Dim"];
-      return days.map((d,i) => {
-        const v = filtPayments.filter(payment => (new Date(payment.paidAt).getDay()+6)%7 === i)
-          .reduce((s,payment)=>s+payment.signedAmount,0);
-        return { m:d, v:Math.round(v/1000) };
-      });
-    }
-    const map = new Map<string,number>();
-    filtPayments.forEach(payment => {
-      const date = new Date(payment.paidAt);
-      const k = Number.isNaN(date.getTime()) ? payment.paidAt.slice(0,10) : date.toLocaleDateString("fr-FR",{day:"2-digit",month:"short"});
-      map.set(k,(map.get(k)??0)+payment.signedAmount);
-    });
-    return Array.from(map.entries()).slice(-10).map(([m,v])=>({ m, v:Math.round(v/1000) }));'''
-if old not in dash:
-    raise SystemExit('Dashboard chart anchor not found')
-dash = dash.replace(old, new, 1)
-dash = dash.replace('{label:"Marge nette", value:margeBrute, color:margeBrute>=0?SEM.success.accent:SEM.danger.accent}', '{label:"Solde net", value:margeBrute, color:margeBrute>=0?SEM.success.accent:SEM.danger.accent}', 1)
-dash_path.write_text(dash)
+# ── Charges screen: send supplier to backend and clarify cash totals ──────────
+charges_path = Path('src/app/screens/ChargesView.tsx')
+charges = charges_path.read_text()
+old = '''    try { persisted = await createCharge({ boutiqueId:boutique.id, label:label.trim(), amount:Number(montant), category:cat, note:note.trim() || undefined }); }'''
+new = '''    try { persisted = await createCharge({ boutiqueId:boutique.id, label:label.trim(), amount:Number(montant), category:cat, note:note.trim() || undefined, supplier:linkedFourn }); }'''
+if old not in charges:
+    raise SystemExit('Charges createCharge call anchor not found')
+charges = charges.replace(old, new, 1)
+charges = charges.replace('''<span className="text-xs font-bold text-muted-foreground">TOTAL CHARGES</span>''', '''<span className="text-xs font-bold text-muted-foreground">SORTIES / CHARGES PAYÉES</span>''', 1)
+charges_path.write_text(charges)
 
-# ── Clients: returns reduce CA but never create debt ──────────────────────────
-clients_path = Path('src/app/screens/ClientsView.tsx')
-clients = clients_path.read_text()
-old = '''    const totalFacturé  = clientInvoices.reduce((s,i)=>s+i.montant,0);
-    const totalEncaissé = clientInvoices.reduce((s,i)=>s+invoicePaidAmount(i),0);
-    const totalImpayé   = clientInvoices.reduce((s,i)=>s+invoiceRemainingAmount(i),0);
-    const nbVentes = clientInvoices.filter(i=>invoicePaidAmount(i)>0).length;
-    const panierMoyen = nbVentes>0?totalEncaissé/nbVentes:0;
-    const retours = clientInvoices.filter(i=>i.type==="Retour");
-    const totalRetours = retours.reduce((s,i)=>s+i.montant,0);'''
-new = '''    const isReturn = (invoice: Invoice) => invoice.type.toLowerCase() === "retour";
-    const ventes = clientInvoices.filter(i=>!isReturn(i));
-    const retours = clientInvoices.filter(i=>isReturn(i));
-    const totalVentesFacturées = ventes.reduce((s,i)=>s+i.montant,0);
-    const totalRetours = retours.reduce((s,i)=>s+i.montant,0);
-    const totalFacturé  = totalVentesFacturées-totalRetours;
-    const totalEncaissé = ventes.reduce((s,i)=>s+invoicePaidAmount(i),0)-retours.reduce((s,i)=>s+invoicePaidAmount(i),0);
-    const totalImpayé   = ventes.reduce((s,i)=>s+invoiceRemainingAmount(i),0);
-    const nbVentes = ventes.filter(i=>invoicePaidAmount(i)>0).length;
-    const panierMoyen = nbVentes>0?ventes.reduce((s,i)=>s+invoicePaidAmount(i),0)/nbVentes:0;'''
-if old not in clients:
-    raise SystemExit('Client KPI anchor not found')
-clients = clients.replace(old, new, 1)
-old = '''      byMonth[m].facturé += inv.montant;
-      byMonth[m].encaissé += invoicePaidAmount(inv);'''
-new = '''      const sign = isReturn(inv) ? -1 : 1;
-      byMonth[m].facturé += sign * inv.montant;
-      byMonth[m].encaissé += sign * invoicePaidAmount(inv);'''
-if old not in clients:
-    raise SystemExit('Client monthly anchor not found')
-clients = clients.replace(old, new, 1)
-clients = clients.replace('{label:"CA Facturé",val:fmt(totalFacturé)', '{label:"CA facturé net",val:fmt(totalFacturé)', 1)
-clients_path.write_text(clients)
+# ── Supplier screen: transfer purchase is debt, not an immediate payment ─────
+sup_path = Path('src/app/screens/FournisseursView.tsx')
+sup = sup_path.read_text()
+old = '''        const isOpen=expanded===s.id; const balance=supplierBalance(s.nom,entries,boutique.charges); const se=entries.filter(e=>e.fournisseur===s.nom&&e.qty>0).sort((a,b)=>b.id-a.id);'''
+new = '''        const isOpen=expanded===s.id;
+        const balance=supplierBalance(s.nom,entries,boutique.charges);
+        const se=entries.filter(e=>e.fournisseur===s.nom&&e.qty>0).sort((a,b)=>b.id-a.id);
+        const transferPurchases=(boutique.charges??[]).filter(c=>c.source==="transfer"&&c.fournisseur===s.nom).sort((a,b)=>b.id-a.id);'''
+if old not in sup:
+    raise SystemExit('Supplier card data anchor not found')
+sup = sup.replace(old, new, 1)
+sup = sup.replace('''<p className="text-xs text-muted-foreground">{se.length} livraisons</p>''', '''<p className="text-xs text-muted-foreground">{se.length+transferPurchases.length} achats/livraisons</p>''', 1)
+old = '''              {(() => { const pays = (boutique.charges??[]).filter(c=>c.fournisseur===s.nom).sort((a,b)=>b.id-a.id); return pays.length>0?(
+                <div className="px-4 pb-3 border-t border-border">
+                  <p className="text-xs font-black tracking-wider mb-3 mt-3" style={{ color:SEM.success.text }}>PAIEMENTS EFFECTUÉS</p>
+                  <div className="space-y-2">
+                    {pays.map(c=>(
+                      <div key={c.id} className="flex items-center gap-3 rounded-xl px-3 py-2.5" style={{ background:SEM.success.bg }}>
+                        <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background:SEM.success.accent }}/>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-bold">{c.label}</p>
+                          <p className="text-xs text-muted-foreground">{c.date}</p>
+                        </div>
+                        <p className="text-sm font-black" style={{ color:SEM.success.text, fontFamily:"'Nunito',sans-serif" }}>−{fmt(c.montant)}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ):null; })()}'''
+new = '''              {transferPurchases.length>0&&<div className="px-4 pb-3 border-t border-border">
+                <p className="text-xs font-black tracking-wider mb-3 mt-3" style={{color:"#ea580c"}}>ACHATS PAR TRANSFERT</p>
+                <div className="space-y-2">{transferPurchases.map(c=>{
+                  const paid=Number(c.paidAmount??0); const due=Math.max(0,c.montant-paid);
+                  return <div key={c.id} className="rounded-xl px-3 py-2.5" style={{background:"#fff7ed"}}>
+                    <div className="flex items-center justify-between"><p className="text-sm font-bold">{c.label}</p><p className="text-sm font-black" style={{color:"#ea580c"}}>{fmt(c.montant)}</p></div>
+                    <div className="flex items-center justify-between mt-1 text-xs text-muted-foreground"><span>{c.date}</span><span>Réglé {fmt(paid)} · Reste {fmt(due)}</span></div>
+                  </div>;
+                })}</div>
+              </div>}
+              {(() => {
+                const manualPays=(boutique.charges??[]).filter(c=>c.fournisseur===s.nom&&c.source!=="transfer");
+                const transferPays=transferPurchases.filter(c=>Number(c.paidAmount??0)>0);
+                const pays=[...manualPays,...transferPays].sort((a,b)=>b.id-a.id);
+                return pays.length>0?(
+                <div className="px-4 pb-3 border-t border-border">
+                  <p className="text-xs font-black tracking-wider mb-3 mt-3" style={{ color:SEM.success.text }}>PAIEMENTS EFFECTUÉS</p>
+                  <div className="space-y-2">
+                    {pays.map(c=>{
+                      const paid=c.source==="transfer"?Number(c.paidAmount??0):c.montant;
+                      return <div key={`${c.id}-${c.source}`} className="flex items-center gap-3 rounded-xl px-3 py-2.5" style={{ background:SEM.success.bg }}>
+                        <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background:SEM.success.accent }}/>
+                        <div className="flex-1 min-w-0"><p className="text-sm font-bold">{c.label}</p><p className="text-xs text-muted-foreground">{c.date}</p></div>
+                        <p className="text-sm font-black" style={{ color:SEM.success.text, fontFamily:"'Nunito',sans-serif" }}>−{fmt(paid)}</p>
+                      </div>;
+                    })}
+                  </div>
+                </div>
+              ):null; })()}'''
+if old not in sup:
+    raise SystemExit('Supplier payments block anchor not found')
+sup = sup.replace(old, new, 1)
+sup_path.write_text(sup)
 
-# ── Rapport: transfer charges by paid amount; stock purchases excluded from P&L ──
-report_path = Path('src/app/screens/RapportView.tsx')
-report = report_path.read_text()
-old = '''  const totalCharges = filtCh.reduce((s,c)=>s+c.montant,0);'''
-new = '''  const chargeCashAmount = (charge: typeof charges[number]) => charge.source === "transfer" ? Number(charge.paidAmount ?? 0) : charge.montant;
-  const totalCharges = filtCh.reduce((s,c)=>s+chargeCashAmount(c),0);
-  const chargesExploitation = filtCh.filter(c=>c.categorie!=="Achat stock").reduce((s,c)=>s+chargeCashAmount(c),0);'''
-if old not in report:
-    raise SystemExit('Report total charges anchor not found')
-report = report.replace(old, new, 1)
-report = report.replace('''  const resultatApresCharges = margeVentes - totalCharges;''', '''  const resultatApresCharges = margeVentes - chargesExploitation;''', 1)
-old = '''    cat, montant: filtCh.filter(c=>c.categorie===cat).reduce((s,c)=>s+c.montant,0)'''
-new = '''    cat, montant: filtCh.filter(c=>c.categorie===cat).reduce((s,c)=>s+chargeCashAmount(c),0)'''
-if old not in report:
-    raise SystemExit('Report category charges anchor not found')
-report = report.replace(old, new, 1)
-report = report.replace('${fmt(c.montant)}</span></div>`).join("")}', '${fmt(chargeCashAmount(c))}</span></div>`).join("")}', 1)
-report = report.replace('${fmt(c.montant)}</td></tr>`).join("")}', '${fmt(chargeCashAmount(c))}</td></tr>`).join("")}', 1)
-report_path.write_text(report)
-
-print('CA, returns and debt reporting corrected successfully')
+print('Supplier debts and charge persistence corrected successfully')
