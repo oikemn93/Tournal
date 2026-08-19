@@ -10,6 +10,7 @@ import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
 import { formatPreciseDateTime, invoicePaidAmount, invoiceRemainingAmount, invoicePaymentEvents } from "../utils/payments";
+import { getDefaultSaleUnit, getLastSalePrice, getSaleUnitOptions, toBaseSaleQty } from "../utils/sales";
 
 // ─── SHARE INVOICE MODAL ──────────────────────────────────────────────────────
 
@@ -241,7 +242,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
   const [returnInv, setReturnInv] = useState<Invoice|null>(null);
   const [returnQtys, setReturnQtys] = useState<Record<number,number>>({});
   const [returnDone, setReturnDone] = useState(false);
-  const [client,setClient] = useState(clients[0]?.nom??"");
+  const [clientRef,setClientRef] = useState(clients[0] ? `client:${clients[0].id}` : siblings[0] ? `boutique:${siblings[0].id}` : "");
   const [lines, setLines]  = useState<InvoiceLine[]>([]);
   const [acompte,setAcompte]=useState("");
   const [status,setStatus] = useState<InvoiceStatus>("en attente");
@@ -323,52 +324,47 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
     if (initialClientId != null) {
       const selectedClient = clients.find(item => item.id === initialClientId);
       if (selectedClient) {
-        setClient(selectedClient.nom);
+        setClientRef(`client:${selectedClient.id}`);
         setLines([]);
         setAcompte("");
+        const firstProduct = products[0];
+        if (firstProduct) {
+          const unit = getDefaultSaleUnit(firstProduct, boutique);
+          setLPid(firstProduct.id);
+          setLSellUnit(unit);
+          setLQty("");
+          const last = getLastSalePrice(firstProduct.id, invoices, unit);
+          setLPrix(last != null ? String(last) : "");
+        }
         setModal(true);
       }
     }
   }, [initialClientId, initialInvoiceId]);
 
-  // Sell options for the invoice line form — mirrors getSellOptions in POS
+  // Sale defaults are shared with POS so quantity/unit/price behave identically everywhere.
   function getInvSellOptions(pid: number): string[] {
     const prod = products.find(p=>p.id===pid);
-    if (!prod) return [];
-    const cat = (boutique.categories??[]).find(c=>c.nom===prod.categorie);
-    if (!cat || cat.nbPiecesParLot<=0) return [prod.unit];
-    const opts: string[] = ["Lot"];
-    if (cat.unitVente !== "pièces") opts.push("Pièce");
-    opts.push(cat.unitVente);
-    return opts;
+    return prod ? getSaleUnitOptions(prod, boutique) : [];
   }
   function invToBaseQty(sellQty: number, sellUnit: string, pid: number): number {
     const prod = products.find(p=>p.id===pid);
-    if (!prod) return sellQty;
-    const cat = (boutique.categories??[]).find(c=>c.nom===prod.categorie);
-    if (!cat || cat.nbPiecesParLot<=0) return sellQty;
-    if (sellUnit==="Lot") return cat.unitVente==="pièces"
-      ? sellQty*cat.nbPiecesParLot
-      : sellQty*cat.nbPiecesParLot*(cat.longueurParPiece||1);
-    if (sellUnit==="Pièce") return cat.unitVente==="pièces" ? sellQty : sellQty*(cat.longueurParPiece||1);
-    return sellQty; // direct unit (yards/mètres)
+    return prod ? toBaseSaleQty(sellQty, sellUnit, prod, boutique) : sellQty;
   }
   function invDefaultUnit(pid: number): string {
-    const opts = getInvSellOptions(pid);
-    if (opts.length===0) return "";
     const prod = products.find(p=>p.id===pid);
-    const cat = (boutique.categories??[]).find(c=>c.nom===prod?.categorie);
-    const base = cat?.unitVente ?? prod?.unit ?? "";
-    const isFabric = base==="yards"||base==="mètres"||base==="metres";
-    if (isFabric && opts.includes(base)) return base;
-    if (opts.includes("Pièce")) return "Pièce";
-    return opts[0];
+    return prod ? getDefaultSaleUnit(prod, boutique) : "";
   }
 
   const montant = lines.reduce((s,l)=>s+lineTotal(l),0);
   const aNum = canCollectPayment ? (Number(acompte)||0) : 0;
   const pct  = montant>0?Math.min(100,Math.round(aNum/montant*100)):0;
-  const siblingClient = siblings.find(s=>s.nom===client);
+  const selectedClient = clientRef.startsWith("client:")
+    ? clients.find(c => c.id === Number(clientRef.slice("client:".length)))
+    : undefined;
+  const siblingClient = clientRef.startsWith("boutique:")
+    ? siblings.find(s => s.id === clientRef.slice("boutique:".length))
+    : undefined;
+  const selectedClientName = siblingClient?.nom ?? selectedClient?.nom ?? "";
 
   function addLine() {
     const prod = products.find(p=>p.id===lPid); if (!prod||!lQty) return;
@@ -483,7 +479,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
     const refundTotal = returnLines.reduce((s, l) => s + l.qty * l.prixUnit, 0);
     const retId = persisted.return_invoice_id;
     const retInv: Invoice = {
-      id: retId, client: returnInv.client, clientTel: returnInv.clientTel,
+      id: retId, clientId:returnInv.clientId, client: returnInv.client, clientTel: returnInv.clientTel,
       lines: returnLines, montant: refundTotal, acompte: refundTotal,
       date: today(), dateRaw: new Date().toISOString(), status: "payé", type: "Retour",
       operatorNom: currentUser.nom, operatorColor: currentUser.color,
@@ -500,14 +496,14 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
   }
 
   async function submit() {
-    if (!client||lines.length===0 || submittingInvoice) return;
+    if (!clientRef || !selectedClientName || lines.length===0 || submittingInvoice) return;
     setSubmittingInvoice(true);
     const isSiblingTransfer = !!siblingClient;
-    const ct  = isSiblingTransfer ? "Inter-tenant" : (clients.find(c=>c.nom===client)?.type??"B2C");
-    const cTel = clients.find(c=>c.nom===client)?.tel;
+    const ct  = isSiblingTransfer ? "Inter-tenant" : (selectedClient?.type??"B2C");
+    const cTel = selectedClient?.tel;
     let persisted;
     try {
-      persisted = await createSale({ boutiqueId:boutique.id, client, clientTel:cTel, lines });
+      persisted = await createSale({ boutiqueId:boutique.id, clientId:selectedClient?.id, client:selectedClientName, clientTel:cTel, lines });
     } catch (error) {
       setSubmittingInvoice(false);
       alert(error instanceof Error ? error.message : "Création de facture impossible");
@@ -538,9 +534,8 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
           invoiceId:id,
         }))
       : [];
-    const selectedClient = clients.find(c=>c.nom===client);
     const newInv: Invoice = {
-      id, clientId:selectedClient?.id, client, clientTel:cTel, clientType:selectedClient?.type,
+      id, clientId:selectedClient?.id, client:selectedClientName, clientTel:cTel, clientType:selectedClient?.type,
       lines, montant, acompte:paidAtCreation, date:today(), dateRaw:new Date().toISOString(), status:s, type:ct,
       operatorNom:currentUser.nom, operatorColor:currentUser.color,
       paymentMethod:initialPayment ? "Espèces" : undefined,
@@ -570,7 +565,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
       });
       onUpdateOtherBoutique(siblingClient.id, { products:sbProducts, entries:sbEntries });
     }
-    logAction(isSiblingTransfer?"Transfert inter-tenant":"Nouvelle facture", `${id} · ${client} · ${fmt(montant)}`, isSiblingTransfer?"🔄":"🧾");
+    logAction(isSiblingTransfer?"Transfert inter-tenant":"Nouvelle facture", `${id} · ${selectedClientName} · ${fmt(montant)}`, isSiblingTransfer?"🔄":"🧾");
     setLines([]); setAcompte(""); setModal(false); setSubmittingInvoice(false);
   }
 
@@ -809,15 +804,15 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
         )}
       </Modal>}
 
-      <button onClick={()=>{ setLines([]); setAcompte(""); setLQty(""); setLPrix(""); setModal(true); }} className="fixed bottom-20 right-4 w-14 h-14 rounded-full shadow-2xl flex items-center justify-center z-20 active:scale-95" style={{ background:"#a855f7", boxShadow:"0 0 24px #a855f760" }}>
+      <button onClick={()=>{ setLines([]); setAcompte(""); const first=products[0]; if(first){ const unit=getDefaultSaleUnit(first,boutique); setLPid(first.id); setLSellUnit(unit); setLQty(""); const last=getLastSalePrice(first.id,invoices,unit); setLPrix(last!=null?String(last):""); } setModal(true); }} className="fixed bottom-20 right-4 w-14 h-14 rounded-full shadow-2xl flex items-center justify-center z-20 active:scale-95" style={{ background:"#a855f7", boxShadow:"0 0 24px #a855f760" }}>
         <Plus size={28} color="white" strokeWidth={2.5}/>
       </button>
 
       {modal&&<Modal title="Nouvelle facture" color="#374151" onClose={()=>setModal(false)}>
         <Field label="CLIENT">
-          <select value={client} onChange={e=>setClient(e.target.value)} className={inputCls} style={{ appearance:"none" }}>
-            {siblings.length>0&&<optgroup label="🏪 Mes autres boutiques">{siblings.map(sb=><option key={sb.id} value={sb.nom}>{sb.nom} — {sb.ville} (inter-tenant)</option>)}</optgroup>}
-            <optgroup label="Clients">{clients.map(c=><option key={c.id} value={c.nom}>{c.nom} ({c.type})</option>)}</optgroup>
+          <select value={clientRef} onChange={e=>setClientRef(e.target.value)} className={inputCls} style={{ appearance:"none" }}>
+            {siblings.length>0&&<optgroup label="🏪 Mes autres boutiques">{siblings.map(sb=><option key={sb.id} value={`boutique:${sb.id}`}>{sb.nom} — {sb.ville} (inter-tenant)</option>)}</optgroup>}
+            <optgroup label="Clients">{clients.map(c=><option key={c.id} value={`client:${c.id}`}>{c.nom} ({c.type})</option>)}</optgroup>
           </select>
           {siblingClient&&<div className="mt-2 flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background:"#a855f715" }}>
             <Store size={14} style={{ color:"#a855f7" }}/>
@@ -835,7 +830,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
             </div>
           ))}</div>}
           <div className="bg-muted rounded-2xl p-3 space-y-3">
-            <select value={lPid} onChange={e=>{ const newPid=Number(e.target.value); setLPid(newPid); setLSellUnit(invDefaultUnit(newPid)); }} className="w-full bg-card border border-border rounded-xl px-3 py-2.5 text-sm focus:outline-none" style={{ appearance:"none" }}>
+            <select value={lPid} onChange={e=>{ const newPid=Number(e.target.value); const prod=products.find(p=>p.id===newPid); setLPid(newPid); setLQty(""); if(prod){ const unit=getDefaultSaleUnit(prod,boutique); setLSellUnit(unit); const last=getLastSalePrice(prod.id,invoices,unit); setLPrix(last!=null?String(last):""); } else { setLSellUnit(""); setLPrix(""); } }} className="w-full bg-card border border-border rounded-xl px-3 py-2.5 text-sm focus:outline-none" style={{ appearance:"none" }}>
               {products.map(p=><option key={p.id} value={p.id}>{p.nom} (stock: {productQty(p.id,entries)} {p.unit})</option>)}
             </select>
             {getInvSellOptions(lPid).length>1&&(()=>{
@@ -843,7 +838,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
               const effUnit=lSellUnit||invDefaultUnit(lPid);
               return(<div className="flex gap-2 flex-wrap">{getInvSellOptions(lPid).map(u=>{
                 const lbl=u==="Lot"?(cat2?'Lot ('+cat2.nbPiecesParLot+'p)':'Lot'):u==="Pièce"?"Pièce":u;
-                return(<button key={u} onClick={()=>setLSellUnit(u)} className="flex-1 py-2 rounded-xl text-xs font-bold whitespace-nowrap"
+                return(<button key={u} onClick={()=>{ setLSellUnit(u); setLQty(""); const last=getLastSalePrice(lPid,invoices,u); setLPrix(last!=null?String(last):""); }} className="flex-1 py-2 rounded-xl text-xs font-bold whitespace-nowrap"
                   style={{ background:effUnit===u?"#1f2937":"#EEE9D8", color:effUnit===u?"#fff":"#374151" }}>{lbl}</button>);
               })}</div>);
             })()}
@@ -875,7 +870,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
             <AlertCircle size={16}/> La facture sera créée en attente d'encaissement.
           </div>
         )}
-        <SubmitBtn color={boutique.color} label={submittingInvoice ? "Création…" : "Créer la facture"} onClick={submit} disabled={submittingInvoice || !client||lines.length===0}/>
+        <SubmitBtn color={boutique.color} label={submittingInvoice ? "Création…" : "Créer la facture"} onClick={submit} disabled={submittingInvoice || !clientRef||lines.length===0}/>
       </Modal>}
 
       {shareInv&&<ShareInvoiceModal inv={shareInv} boutique={boutique} clients={clients} onClose={()=>setShareInv(null)}/>}
