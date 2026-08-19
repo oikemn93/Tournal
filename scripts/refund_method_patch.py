@@ -1,4 +1,3 @@
-# trigger 2
 from pathlib import Path
 
 api_path = Path('src/lib/api.ts')
@@ -24,38 +23,45 @@ new = '''export async function returnSale(params: { boutiqueId:string; invoiceId
     }),
   });
 }'''
-if old not in api: raise SystemExit('returnSale api anchor missing')
-api = api.replace(old, new, 1)
+if new not in api:
+    if old not in api: raise SystemExit('returnSale api anchor missing')
+    api = api.replace(old,new,1)
 api_path.write_text(api)
 
-p = Path('src/app/screens/FacturesView.tsx')
-s = p.read_text()
-old = '''  const [returnQtys, setReturnQtys] = useState<Record<number,number>>({});
+p=Path('src/app/screens/FacturesView.tsx')
+s=p.read_text()
+old='''  const [returnQtys, setReturnQtys] = useState<Record<number,number>>({});
   const [returnDone, setReturnDone] = useState(false);'''
-new = '''  const [returnQtys, setReturnQtys] = useState<Record<number,number>>({});
+new='''  const [returnQtys, setReturnQtys] = useState<Record<number,number>>({});
   const [returnMethod, setReturnMethod] = useState<PaymentMethod>("Espèces");
   const [returnDone, setReturnDone] = useState(false);'''
-if old not in s: raise SystemExit('return state anchor missing')
-s = s.replace(old,new,1)
-old = '''    setReturnQtys(initQtys);
+if new not in s:
+    if old not in s: raise SystemExit('return state anchor missing')
+    s=s.replace(old,new,1)
+
+old='''    setReturnQtys(initQtys);
     setReturnDone(false);
     setReturnInv(inv);'''
-new = '''    setReturnQtys(initQtys);
+new='''    setReturnQtys(initQtys);
     setReturnMethod("Espèces");
     setReturnDone(false);
     setReturnInv(inv);'''
-if old not in s: raise SystemExit('open return anchor missing')
-s = s.replace(old,new,1)
-old = '''      persisted = await returnSale({ boutiqueId:boutique.id, invoiceId:returnInv.id, lines:returnLines.map(l=>({ productId:l.productId, qty:l.qty })) });'''
-new = '''      persisted = await returnSale({ boutiqueId:boutique.id, invoiceId:returnInv.id, refundMethod:returnMethod, lines:returnLines.map(l=>({ productId:l.productId, qty:l.qty })) });'''
-if old not in s: raise SystemExit('return call anchor missing')
-s = s.replace(old,new,1)
-old = '''      date: today(), dateRaw:persisted.returned_at, status: "payé", type: "Retour", returnOfInvoiceId:returnInv.id,
-      operatorNom: currentUser.nom, operatorColor: currentUser.color,'''
-new = '''      date: today(), dateRaw:persisted.returned_at, status: "payé", type: "Retour", returnOfInvoiceId:returnInv.id,
-      operatorNom: currentUser.nom, operatorColor: currentUser.color,
+if new not in s:
+    if old not in s: raise SystemExit('open return anchor missing')
+    s=s.replace(old,new,1)
+
+old='''persisted = await returnSale({ boutiqueId:boutique.id, invoiceId:returnInv.id, lines:returnLines.map(l=>({ productId:l.productId, qty:l.qty })) });'''
+new='''persisted = await returnSale({ boutiqueId:boutique.id, invoiceId:returnInv.id, refundMethod:returnMethod, lines:returnLines.map(l=>({ productId:l.productId, qty:l.qty })) });'''
+if new not in s:
+    if old not in s: raise SystemExit('return call anchor missing')
+    s=s.replace(old,new,1)
+
+# Persist the method immediately on the local return invoice object when the
+# existing object literal is built. This keeps UI, print and reports consistent.
+needle='''      operatorNom: currentUser.nom, operatorColor: currentUser.color,'''
+replacement='''      operatorNom: currentUser.nom, operatorColor: currentUser.color,
       paymentMethod: persisted.refund_method as PaymentMethod,
-      payments: [{
+      payments: persisted.payment ? [{
         id:persisted.payment.id,
         amount:persisted.payment.amount,
         paymentMethod:persisted.payment.payment_method as PaymentMethod,
@@ -64,17 +70,15 @@ new = '''      date: today(), dateRaw:persisted.returned_at, status: "payé", ty
         operatorName:persisted.payment.operator_name,
         batchId:persisted.payment.batch_id,
         source:persisted.payment.source,
-      }],'''
-if old not in s: raise SystemExit('return invoice payment anchor missing')
-s = s.replace(old,new,1)
-old = '''    logAction("Retour articles", `${retId} ← ${returnInv.id} · ${returnLines.length} article(s) · ${fmt(refundTotal)}`, "↩️");'''
-new = '''    logAction("Retour articles", `${retId} ← ${returnInv.id} · ${returnLines.length} article(s) · ${fmt(refundTotal)} · remboursement ${persisted.refund_method}`, "↩️");'''
-if old not in s: raise SystemExit('return log anchor missing')
-s = s.replace(old,new,1)
-old = '''          })()}
-          {returnDone ? ('''
-new = '''          })()}
-          {!returnDone && (
+      }] : [],'''
+if replacement not in s:
+    pos=s.find(needle, s.find('const retInv'))
+    if pos<0: raise SystemExit('return invoice operator anchor missing')
+    s=s[:pos]+s[pos:].replace(needle,replacement,1)
+
+# Insert selector directly before the return completion branch.
+ui_anchor='''          {returnDone ? ('''
+ui='''          {!returnDone && (
             <div className="space-y-2">
               <p className="text-xs font-black tracking-wider text-muted-foreground">MODE DE REMBOURSEMENT</p>
               <div className="grid grid-cols-2 gap-2">
@@ -87,31 +91,9 @@ new = '''          })()}
               <p className="text-xs text-muted-foreground">Le mode choisi sera enregistré sur l'avoir et dans l'écriture de remboursement.</p>
             </div>
           )}
-          {returnDone ? ('''
-if old not in s: raise SystemExit('return method UI anchor missing')
-s = s.replace(old,new,1)
+'''
+if 'MODE DE REMBOURSEMENT' not in s:
+    if ui_anchor not in s: raise SystemExit('return UI anchor missing')
+    s=s.replace(ui_anchor,ui+ui_anchor,1)
 p.write_text(s)
-
-ip = Path('src/app/utils/invoice.ts')
-i = ip.read_text()
-old = '''      `\\n↩️ Montant remboursé: ${fmt(inv.montant)}\\n` +
-      `📅 ${inv.date}\\nCe document atteste d'un retour de marchandise.`;'''
-new = '''      `\\n↩️ Montant remboursé: ${fmt(inv.montant)}\\n` +
-      (inv.paymentMethod ? `💳 Mode de remboursement: ${inv.paymentMethod}\\n` : "") +
-      `📅 ${inv.date}\\nCe document atteste d'un retour de marchandise.`;'''
-if old not in i: raise SystemExit('return message anchor missing')
-i = i.replace(old,new,1)
-old = '''  const paymentRows = [...paymentByMethod.entries()].map(([method, amount]) => ({ method, amount }));'''
-new = '''  const paymentRows = [...paymentByMethod.entries()].map(([method, amount]) => ({ method, amount }));
-  const paymentBlockTitle = isReturn ? "Mode de remboursement" : "Modes de paiement";'''
-if old not in i: raise SystemExit('payment rows anchor missing')
-i = i.replace(old,new,1)
-old = '''<div class="payment-title">MODES DE PAIEMENT</div>'''
-if old in i:
-    i = i.replace(old, '''<div class="payment-title">${paymentBlockTitle}</div>''', 1)
-else:
-    old2 = '''<div class="payment-title">Modes de paiement</div>'''
-    if old2 not in i: raise SystemExit('payment title anchor missing')
-    i = i.replace(old2, '''<div class="payment-title">${paymentBlockTitle}</div>''', 1)
-ip.write_text(i)
-print('refund method patch applied')
+print('refund method functional patch applied')
