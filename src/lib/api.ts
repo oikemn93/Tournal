@@ -12,8 +12,6 @@ type AuthSession = { access_token: string; refresh_token: string; user: AuthUser
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL ?? "https://cnxtylngddwmhugxkzju.supabase.co";
 const PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? "sb_publishable_Jeo4Bx2IsTPCkzsQMYTuFQ_VKPQc9Aq";
-// Edge functions require the standard anon JWT, not the publishable key format.
-const ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNueHR5bG5nZGR3bWh1Z3hremp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY1Nzc3MzcsImV4cCI6MjEwMjE1MzczN30.wWYfLBbrP_yTZCeqfywkT0_TFFS8YlHDn_8ta4esDLw";
 const SESSION_STORAGE_KEY = "tournal.supabase.session";
 
 // Singleton stored on globalThis so HMR re-evaluations reuse the same instance.
@@ -33,7 +31,7 @@ function phoneToEmail(phone: string) {
 
 function readSession(): AuthSession | null {
   try {
-    const raw = localStorage.getItem(SESSION_STORAGE_KEY);
+    const raw = sessionStorage.getItem(SESSION_STORAGE_KEY);
     return raw ? JSON.parse(raw) as AuthSession : null;
   } catch {
     return null;
@@ -42,8 +40,8 @@ function readSession(): AuthSession | null {
 
 function storeSession(session: AuthSession | null) {
   try {
-    if (session) localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
-    else localStorage.removeItem(SESSION_STORAGE_KEY);
+    if (session) sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+    else sessionStorage.removeItem(SESSION_STORAGE_KEY);
   } catch {
     // Private browsing can reject storage. The in-memory request still succeeds.
   }
@@ -86,7 +84,7 @@ async function adminProvision<T>(action: string, payload: Record<string, unknown
   const response = await fetch(`${SUPABASE_URL}/functions/v1/admin-provision`, {
     method: "POST",
     headers: {
-      apikey: ANON_KEY,
+      apikey: PUBLISHABLE_KEY,
       Authorization: `Bearer ${session.access_token}`,
       "Content-Type": "application/json",
     },
@@ -107,7 +105,7 @@ export async function createInvoiceShare(params: { boutiqueId:string; invoiceId:
   const response = await fetch(`${SUPABASE_URL}/functions/v1/create-invoice-share`, {
     method: "POST",
     headers: {
-      apikey: ANON_KEY,
+      apikey: PUBLISHABLE_KEY,
       Authorization: `Bearer ${session.access_token}`,
     },
     body: form,
