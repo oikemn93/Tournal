@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowRightLeft, ArrowUpRight, ArrowDownLeft, Check, FileText, Loader2, Plus, Trash2, X, PackageCheck, PackageX, Clock } from "lucide-react";
+import { ArrowRightLeft, ArrowUpRight, ArrowDownLeft, Check, FileText, Loader2, Plus, Trash2, X, PackageCheck, PackageX, Clock, Search } from "lucide-react";
 import { toast } from "sonner";
 import type { Boutique, PlatformUser } from "../types";
 import { acceptStockTransfer, createStockTransfer, getStockTransfers, rejectStockTransfer, type RelationalTransfer } from "../../lib/api";
 import { productQty } from "../utils/inventory";
+import { getLastSalePrice } from "../utils/sales";
 import { fmt } from "../utils/formatting";
 import { SEM, inputCls } from "../constants";
 import { Modal } from "../components/Modal";
@@ -46,6 +47,7 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
 
   // Draft state
   const [destination, setDestination] = useState("");
+  const [destinationSearch, setDestinationSearch] = useState("");
   const [note, setNote] = useState("");
   const [draftLines, setDraftLines] = useState<DraftLine[]>([]);
   const [dLineProductId, setDLineProductId] = useState("");
@@ -56,6 +58,29 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
   const availableProducts = boutique.products.filter(p => productQty(p.id, boutique.entries) > 0);
   const destinationBoutique = destinations.find(b => b.id === destination);
   const isSameOwner = destination ? sameOwnerIds.has(destination) : null;
+  const destinationFrequency = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const transfer of transfers) {
+      const otherId = transfer.from_boutique_id === boutique.id ? transfer.to_boutique_id : transfer.from_boutique_id;
+      if (otherId !== boutique.id) counts.set(otherId, (counts.get(otherId) ?? 0) + 1);
+    }
+    return counts;
+  }, [transfers, boutique.id]);
+  const filteredDestinations = useMemo(() => {
+    const q = destinationSearch.trim().toLowerCase().replace(/\s+/g, "");
+    return [...destinations]
+      .filter(b => {
+        if (!q) return true;
+        const haystack = `${b.nom} ${b.ville ?? ""} ${b.tel ?? ""}`.toLowerCase().replace(/\s+/g, "");
+        return haystack.includes(q);
+      })
+      .sort((a, b) => {
+        const sameOwnerDelta = Number(sameOwnerIds.has(b.id)) - Number(sameOwnerIds.has(a.id));
+        if (sameOwnerDelta) return sameOwnerDelta;
+        const freqDelta = (destinationFrequency.get(b.id) ?? 0) - (destinationFrequency.get(a.id) ?? 0);
+        return freqDelta || a.nom.localeCompare(b.nom);
+      });
+  }, [destinations, destinationSearch, destinationFrequency]);
 
   const draftTotal = useMemo(
     () => draftLines.reduce((s, l) => s + l.qty * l.unitPrice * (1 - l.discountPercent / 100), 0),
@@ -73,8 +98,15 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
 
   function selectProduct(pid: string) {
     setDLineProductId(pid);
+    setDLineQty("");
     const p = availableProducts.find(p => p.id === Number(pid));
-    setDLinePrice(p?.prixVente ? String(p.prixVente) : "");
+    if (!p) { setDLinePrice(""); return; }
+    const lastSale = getLastSalePrice(p.id, boutique.invoices, p.unit);
+    const receipts = boutique.entries.filter(e => e.productId === p.id && e.qty > 0 && e.montantDu > 0);
+    const receivedQty = receipts.reduce((sum, e) => sum + e.qty, 0);
+    const weightedCost = receivedQty > 0 ? receipts.reduce((sum, e) => sum + e.montantDu, 0) / receivedQty : null;
+    const suggested = lastSale ?? weightedCost ?? p.prixVente ?? null;
+    setDLinePrice(suggested != null && suggested > 0 ? String(Math.round(suggested)) : "");
   }
 
   function addDraftLine() {
@@ -90,7 +122,7 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
   }
 
   function resetDraft() {
-    setDestination(""); setNote(""); setDraftLines([]);
+    setDestination(""); setDestinationSearch(""); setNote(""); setDraftLines([]);
     setDLineProductId(""); setDLineQty(""); setDLinePrice(""); setDLineDiscount("0");
     setNewModal(false);
   }
@@ -260,19 +292,23 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
         <Modal title="Nouveau transfert" color={TRANSFER_COLOR} onClose={resetDraft}>
           {/* Destination */}
           <Field label="BOUTIQUE DESTINATAIRE">
-            <select value={destination} onChange={e => setDestination(e.target.value)} className={inputCls}>
-              <option value="">Choisir une boutique…</option>
-              {sameOwnerIds.size > 0 && (
-                <optgroup label="Même propriétaire (interne)">
-                  {destinations.filter(b => sameOwnerIds.has(b.id)).map(b => <option key={b.id} value={b.id}>{b.nom}</option>)}
-                </optgroup>
+            <div className="space-y-2">
+              <div className="relative">
+                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"/>
+                <input value={destinationSearch} onChange={e=>setDestinationSearch(e.target.value)} placeholder="Rechercher nom, téléphone ou ville…" className={inputCls+" pl-9"}/>
+              </div>
+              <select value={destination} onChange={e => setDestination(e.target.value)} className={inputCls}>
+                <option value="">Choisir une boutique…</option>
+                {filteredDestinations.map(b => {
+                  const count = destinationFrequency.get(b.id) ?? 0;
+                  const relation = sameOwnerIds.has(b.id) ? "interne" : "commercial";
+                  return <option key={b.id} value={b.id}>{b.nom}{b.ville ? ` — ${b.ville}` : ""}{b.tel ? ` · ${b.tel}` : ""} · {relation}{count > 0 ? ` · ${count} transfert${count>1?"s":""}` : ""}</option>;
+                })}
+              </select>
+              {destinationBoutique && (
+                <p className="text-xs text-muted-foreground px-1">{destinationBoutique.tel ? `Tél. ${destinationBoutique.tel}` : "Téléphone non renseigné"}{destinationBoutique.ville ? ` · ${destinationBoutique.ville}` : ""}</p>
               )}
-              {destinations.filter(b => !sameOwnerIds.has(b.id)).length > 0 && (
-                <optgroup label="Autre propriétaire (commercial)">
-                  {destinations.filter(b => !sameOwnerIds.has(b.id)).map(b => <option key={b.id} value={b.id}>{b.nom}</option>)}
-                </optgroup>
-              )}
-            </select>
+            </div>
           </Field>
 
           {/* Relation indicator */}
@@ -294,7 +330,7 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
               </select>
               <div className="grid grid-cols-3 gap-2">
                 <input type="number" min="0.01" step="any" value={dLineQty} onChange={e => setDLineQty(e.target.value)} placeholder="Quantité" className={inputCls}/>
-                <input type="number" min="0" step="any" value={dLinePrice} onChange={e => setDLinePrice(e.target.value)} placeholder="Prix cession" className={inputCls}/>
+                <div><input type="number" min="0" step="any" value={dLinePrice} onChange={e => setDLinePrice(e.target.value)} placeholder="Prix cession" className={inputCls}/><p className="text-[10px] text-muted-foreground mt-1 px-1">Dernier prix vendu, sinon coût moyen stock</p></div>
                 <input type="number" min="0" max="100" step="any" value={dLineDiscount} onChange={e => setDLineDiscount(e.target.value)} placeholder="Remise %" className={inputCls}/>
               </div>
               <button onClick={addDraftLine} className="w-full py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5"
