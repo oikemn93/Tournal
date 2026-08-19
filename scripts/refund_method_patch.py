@@ -1,4 +1,4 @@
-# trigger
+# trigger 2
 from pathlib import Path
 
 api_path = Path('src/lib/api.ts')
@@ -37,7 +37,6 @@ new = '''  const [returnQtys, setReturnQtys] = useState<Record<number,number>>({
   const [returnDone, setReturnDone] = useState(false);'''
 if old not in s: raise SystemExit('return state anchor missing')
 s = s.replace(old,new,1)
-
 old = '''    setReturnQtys(initQtys);
     setReturnDone(false);
     setReturnInv(inv);'''
@@ -47,12 +46,10 @@ new = '''    setReturnQtys(initQtys);
     setReturnInv(inv);'''
 if old not in s: raise SystemExit('open return anchor missing')
 s = s.replace(old,new,1)
-
 old = '''      persisted = await returnSale({ boutiqueId:boutique.id, invoiceId:returnInv.id, lines:returnLines.map(l=>({ productId:l.productId, qty:l.qty })) });'''
 new = '''      persisted = await returnSale({ boutiqueId:boutique.id, invoiceId:returnInv.id, refundMethod:returnMethod, lines:returnLines.map(l=>({ productId:l.productId, qty:l.qty })) });'''
 if old not in s: raise SystemExit('return call anchor missing')
 s = s.replace(old,new,1)
-
 old = '''      date: today(), dateRaw:persisted.returned_at, status: "payé", type: "Retour", returnOfInvoiceId:returnInv.id,
       operatorNom: currentUser.nom, operatorColor: currentUser.color,'''
 new = '''      date: today(), dateRaw:persisted.returned_at, status: "payé", type: "Retour", returnOfInvoiceId:returnInv.id,
@@ -70,12 +67,10 @@ new = '''      date: today(), dateRaw:persisted.returned_at, status: "payé", ty
       }],'''
 if old not in s: raise SystemExit('return invoice payment anchor missing')
 s = s.replace(old,new,1)
-
 old = '''    logAction("Retour articles", `${retId} ← ${returnInv.id} · ${returnLines.length} article(s) · ${fmt(refundTotal)}`, "↩️");'''
 new = '''    logAction("Retour articles", `${retId} ← ${returnInv.id} · ${returnLines.length} article(s) · ${fmt(refundTotal)} · remboursement ${persisted.refund_method}`, "↩️");'''
 if old not in s: raise SystemExit('return log anchor missing')
 s = s.replace(old,new,1)
-
 old = '''          })()}
           {returnDone ? ('''
 new = '''          })()}
