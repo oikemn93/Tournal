@@ -119,8 +119,14 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
   useEffect(() => { void load(); }, [load]);
 
   async function runDirectorySearch(query = directoryQuery) {
+    const digits = query.replace(/\D/g, "");
+    if (digits.length < 9) {
+      setDirectoryResults([]);
+      toast.error("Saisissez au moins les 9 derniers chiffres du téléphone de la boutique");
+      return;
+    }
     setDirectoryLoading(true);
-    try { setDirectoryResults(await searchBoutiqueDirectory(boutique.id, query)); }
+    try { setDirectoryResults(await searchBoutiqueDirectory(boutique.id, digits)); }
     catch (e) { toast.error(e instanceof Error ? e.message : "Annuaire indisponible"); }
     finally { setDirectoryLoading(false); }
   }
@@ -305,7 +311,7 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
           </div>
         </div>
         <div className="flex gap-2">
-          <button onClick={() => { setDirectoryOpen(true); void runDirectorySearch(""); }}
+          <button onClick={() => { setDirectoryQuery(""); setDirectoryResults([]); setDirectoryOpen(true); }}
             className="flex items-center gap-1.5 px-3 py-2.5 rounded-2xl font-black text-sm active:scale-95 border border-border bg-card"
             style={{ color:TRANSFER_COLOR }}>
             <Building2 size={15}/> Annuaire
@@ -354,14 +360,14 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
         <Modal title="Annuaire des boutiques" color={TRANSFER_COLOR} onClose={()=>setDirectoryOpen(false)}>
           <div className="space-y-4">
             <div className="rounded-2xl px-4 py-3 text-xs leading-relaxed" style={{background:"#fff7ed",color:"#9a3412"}}>
-              Recherchez une boutique Tournal d'une autre entité par nom, téléphone ou ville. Ajoutez-la à vos partenaires pour pouvoir lui envoyer un transfert commercial.
+              Pour retrouver une boutique d'une autre entité, saisissez son numéro de téléphone. Tournal compare uniquement les 9 derniers chiffres afin d'éviter les erreurs liées aux indicatifs, espaces ou tirets. Aucune autre boutique n'est affichée sans recherche.
             </div>
             <div className="flex gap-2">
               <div className="relative flex-1">
                 <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"/>
-                <input value={directoryQuery} onChange={e=>setDirectoryQuery(e.target.value)} onKeyDown={e=>e.key==="Enter"&&void runDirectorySearch()} placeholder="Nom, téléphone ou ville…" className={inputCls+" pl-9"}/>
+                <input type="tel" inputMode="tel" value={directoryQuery} onChange={e=>{setDirectoryQuery(e.target.value);setDirectoryResults([]);}} onKeyDown={e=>e.key==="Enter"&&void runDirectorySearch()} placeholder="Téléphone de la boutique…" className={inputCls+" pl-9"}/>
               </div>
-              <button onClick={()=>void runDirectorySearch()} disabled={directoryLoading} className="px-4 rounded-xl font-black text-sm text-white disabled:opacity-40" style={{background:TRANSFER_COLOR}}>
+              <button onClick={()=>void runDirectorySearch()} disabled={directoryLoading || directoryQuery.replace(/\D/g, "").length < 9} className="px-4 rounded-xl font-black text-sm text-white disabled:opacity-40" style={{background:TRANSFER_COLOR}}>
                 {directoryLoading ? <Loader2 size={16} className="animate-spin"/> : "Rechercher"}
               </button>
             </div>
@@ -385,7 +391,8 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
             <div>
               <p className="text-xs font-black tracking-wider text-muted-foreground mb-2">ANNUAIRE</p>
               {directoryLoading && <p className="text-sm text-muted-foreground text-center py-4">Recherche…</p>}
-              {!directoryLoading && directoryResults.length===0 && <p className="text-sm text-muted-foreground text-center py-4">Aucune boutique trouvée</p>}
+              {!directoryLoading && directoryResults.length===0 && directoryQuery.replace(/\D/g, "").length < 9 && <p className="text-sm text-muted-foreground text-center py-4">Saisissez au moins les 9 derniers chiffres du numéro de téléphone.</p>}
+              {!directoryLoading && directoryResults.length===0 && directoryQuery.replace(/\D/g, "").length >= 9 && <p className="text-sm text-muted-foreground text-center py-4">Aucune boutique ne correspond à ce numéro.</p>}
               <div className="space-y-2">
                 {directoryResults.map(entry=>(
                   <div key={entry.boutique_id} className="flex items-center gap-3 rounded-2xl border border-border px-3 py-3">
