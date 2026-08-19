@@ -6,6 +6,14 @@ import { PAYMENT_METHODS, PM_ICON } from "../constants";
 import { fmt } from "./formatting";
 import { invoicePaymentEvents } from "./payments";
 
+const GENERATED_DOC_CSP = "default-src 'none'; script-src 'none'; connect-src 'none'; img-src data: blob:; media-src 'none'; object-src 'none'; frame-src 'none'; child-src 'none'; base-uri 'none'; form-action 'none'; style-src 'unsafe-inline'; font-src data:";
+
+function hardenGeneratedHtml(html: string): string {
+  if (/http-equiv=[\"']Content-Security-Policy[\"']/i.test(html)) return html;
+  const meta = `<meta http-equiv="Content-Security-Policy" content="${GENERATED_DOC_CSP}"/><meta name="referrer" content="no-referrer"/>`;
+  return /<head>/i.test(html) ? html.replace(/<head>/i, `<head>${meta}`) : meta + html;
+}
+
 // ─── INVOICE MESSAGE ──────────────────────────────────────────────────────────
 
 export function buildInvoiceMessage(inv: Invoice, boutique: Boutique): string {
@@ -16,6 +24,7 @@ export function buildInvoiceMessage(inv: Invoice, boutique: Boutique): string {
     return `*RETOUR / AVOIR ${inv.id}* — ${boutique.nom}\n📋 Client: ${inv.client}\n` +
       (lines ? `\n${lines}\n` : "") +
       `\n↩️ Montant remboursé: ${fmt(inv.montant)}\n` +
+      (inv.paymentMethod ? `💳 Mode de remboursement: ${inv.paymentMethod}\n` : "") +
       `📅 ${inv.date}\nCe document atteste d'un retour de marchandise.`;
   }
   return `*Facture ${inv.id}* — ${boutique.nom}\n📋 Client: ${inv.client}\n` +
@@ -218,10 +227,10 @@ export function buildInvoicePDFHtml(inv: Invoice, boutique: Boutique, clients: C
       ${reste > 0 && inv.acompte === 0 ? `<div class="totals-reste"><span class="totals-reste-label">Montant impayé</span><span class="totals-reste-value">${fmtF(reste)}</span></div>` : ""}
     </div>
   </div>
-  ${!isReturn && (paymentRows.length > 0 || inv.operatorNom || cashier || paidAtFormatted) ? `
+  ${(paymentRows.length > 0 || inv.operatorNom || cashier || paidAtFormatted) ? `
   <div class="payment-block">
     ${paymentRows.length > 0 ? `
-      <div class="payment-title">${paymentRows.length > 1 ? "Modes de paiement" : "Mode de paiement"}</div>
+      <div class="payment-title">${isReturn ? "Mode de remboursement" : paymentRows.length > 1 ? "Modes de paiement" : "Mode de paiement"}</div>
       ${paymentRows.map(payment => `<div class="payment-row"><span>${payment.method}</span><strong>${fmtF(payment.amount)}</strong></div>`).join("")}
     ` : ""}
     <div class="payment-meta">
@@ -255,7 +264,7 @@ export async function generateInvoicePDFBlob(inv: Invoice, boutique: Boutique, c
     const doc = iframe.contentDocument ?? iframe.contentWindow?.document;
     if (!doc) throw new Error("Préparation PDF impossible");
     doc.open();
-    doc.write(buildInvoicePDFHtml(inv, boutique, clients));
+    doc.write(hardenGeneratedHtml(buildInvoicePDFHtml(inv, boutique, clients)));
     doc.close();
     await new Promise(resolve => setTimeout(resolve, 120));
     if (doc.fonts?.ready) await doc.fonts.ready;
@@ -296,7 +305,7 @@ export function openInvoicePDF(inv: Invoice, boutique: Boutique, clients: Client
   const w = window.open("", "_blank", "width=900,height=700");
   if (!w) return;
   w.document.open();
-  w.document.write(html);
+  w.document.write(hardenGeneratedHtml(html));
   w.document.close();
   w.focus();
   setTimeout(() => w.print(), 500);
@@ -310,7 +319,7 @@ export function silentPrint(html: string) {
   document.body.appendChild(iframe);
   const doc = iframe.contentDocument ?? iframe.contentWindow?.document;
   if (!doc) { document.body.removeChild(iframe); return; }
-  doc.open(); doc.write(html); doc.close();
+  doc.open(); doc.write(hardenGeneratedHtml(html)); doc.close();
   setTimeout(() => {
     iframe.contentWindow?.focus();
     iframe.contentWindow?.print();

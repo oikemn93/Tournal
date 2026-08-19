@@ -12,8 +12,6 @@ type AuthSession = { access_token: string; refresh_token: string; user: AuthUser
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL ?? "https://cnxtylngddwmhugxkzju.supabase.co";
 const PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? "sb_publishable_Jeo4Bx2IsTPCkzsQMYTuFQ_VKPQc9Aq";
-// Edge functions require the standard anon JWT, not the publishable key format.
-const ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNueHR5bG5nZGR3bWh1Z3hremp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY1Nzc3MzcsImV4cCI6MjEwMjE1MzczN30.wWYfLBbrP_yTZCeqfywkT0_TFFS8YlHDn_8ta4esDLw";
 const SESSION_STORAGE_KEY = "tournal.supabase.session";
 
 // Singleton stored on globalThis so HMR re-evaluations reuse the same instance.
@@ -33,7 +31,7 @@ function phoneToEmail(phone: string) {
 
 function readSession(): AuthSession | null {
   try {
-    const raw = localStorage.getItem(SESSION_STORAGE_KEY);
+    const raw = sessionStorage.getItem(SESSION_STORAGE_KEY);
     return raw ? JSON.parse(raw) as AuthSession : null;
   } catch {
     return null;
@@ -42,8 +40,8 @@ function readSession(): AuthSession | null {
 
 function storeSession(session: AuthSession | null) {
   try {
-    if (session) localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
-    else localStorage.removeItem(SESSION_STORAGE_KEY);
+    if (session) sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+    else sessionStorage.removeItem(SESSION_STORAGE_KEY);
   } catch {
     // Private browsing can reject storage. The in-memory request still succeeds.
   }
@@ -86,7 +84,7 @@ async function adminProvision<T>(action: string, payload: Record<string, unknown
   const response = await fetch(`${SUPABASE_URL}/functions/v1/admin-provision`, {
     method: "POST",
     headers: {
-      apikey: ANON_KEY,
+      apikey: PUBLISHABLE_KEY,
       Authorization: `Bearer ${session.access_token}`,
       "Content-Type": "application/json",
     },
@@ -107,7 +105,7 @@ export async function createInvoiceShare(params: { boutiqueId:string; invoiceId:
   const response = await fetch(`${SUPABASE_URL}/functions/v1/create-invoice-share`, {
     method: "POST",
     headers: {
-      apikey: ANON_KEY,
+      apikey: PUBLISHABLE_KEY,
       Authorization: `Bearer ${session.access_token}`,
     },
     body: form,
@@ -265,6 +263,26 @@ export async function createUser(phone: string, fullName: string, password: stri
 
 export async function resetUserPassword(userId: string, password: string) {
   return adminProvision<{ ok: true }>("reset_password", { userId, password });
+}
+
+export async function updateAdminUser(params:{userId:string;fullName:string;phone:string}) {
+  return adminProvision<{ok:true}>("update_user", params);
+}
+
+export async function setAdminUserSuspended(params:{userId:string;suspended:boolean;reason?:string}) {
+  return adminProvision<{ok:true;isSuspended:boolean}>("set_user_suspended", params);
+}
+
+export async function deleteAdminUser(userId:string) {
+  return adminProvision<{ok:true;transferredBoutiques:string[]}>("delete_user", {userId});
+}
+
+export async function getAdminUserDebug(userId:string) {
+  return adminProvision<{
+    user:{id:string;nom:string;phone:string;isSuspended:boolean;suspensionReason?:string|null};
+    auth:{createdAt?:string|null;lastSignInAt?:string|null;bannedUntil?:string|null;email?:string|null};
+    assignments:Array<{boutique_id:string;role:string;droits?:Record<string,boolean>;boutiques?:{nom?:string;ville?:string}|null}>;
+  }>("get_user_debug", {userId});
 }
 
 export async function assignUserToBoutique(
@@ -432,7 +450,7 @@ export async function getData<T>(key: string): Promise<T | null> {
   }
   if (key === "platform_users") {
     const [users, assignments] = await Promise.all([
-      dataRequest<Array<any>>("platform_users?select=id,phone,nom,initials,color,is_super_admin,group_id,is_compte_mere,must_change_password"),
+      dataRequest<Array<any>>("platform_users?select=id,phone,nom,initials,color,is_super_admin,is_suspended,suspension_reason,suspended_at,group_id,is_compte_mere,must_change_password"),
       dataRequest<Array<any>>("boutique_assignments?select=boutique_id,user_id,role,droits"),
     ]);
     const toRole = (role: string) => role === "owner" ? "Propriétaire" : role === "manager" ? "Manager" : "Vendeur";
@@ -443,6 +461,9 @@ export async function getData<T>(key: string): Promise<T | null> {
       initials: user.initials,
       color: user.color,
       isSuperAdmin: user.is_super_admin,
+      isSuspended: user.is_suspended === true,
+      suspensionReason: user.suspension_reason ?? undefined,
+      suspendedAt: user.suspended_at ?? undefined,
       groupeId: user.group_id ?? undefined,
       isCompteMere: user.is_compte_mere ?? undefined,
       mustChangePassword: user.must_change_password === true,
@@ -562,10 +583,19 @@ export async function cancelPendingInvoice(invoiceId: string) {
   await dataRequest(`invoices?id=eq.${encodeURIComponent(invoiceId)}&acompte=eq.0`, { method:"DELETE" });
 }
 
-export async function returnSale(params: { boutiqueId:string; invoiceId:string; lines:Array<{productId:number;qty:number}> }) {
-  return dataRequest<{ return_invoice_id:string; source_invoice_id:string; total:number; returned_at:string }>("rpc/return_sale", {
+export async function returnSale(params: { boutiqueId:string; invoiceId:string; lines:Array<{productId:number;qty:number}>; refundMethod:string }) {
+  return dataRequest<{
+    return_invoice_id:string; source_invoice_id:string; total:number; returned_at:string; refund_method:string;
+    payment:{ id:number; amount:number; payment_method:string; paid_at:string; operator_id:string; operator_name:string; batch_id:string; source:"invoice" };
+  }>("rpc/return_sale", {
     method:"POST", headers:{ Prefer:"return=representation" },
-    body:JSON.stringify({ p_boutique_id:params.boutiqueId, p_invoice_id:params.invoiceId, p_idempotency_key:crypto.randomUUID(), p_lines:params.lines }),
+    body:JSON.stringify({
+      p_boutique_id:params.boutiqueId,
+      p_invoice_id:params.invoiceId,
+      p_idempotency_key:crypto.randomUUID(),
+      p_lines:params.lines,
+      p_refund_method:params.refundMethod,
+    }),
   });
 }
 
