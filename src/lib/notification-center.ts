@@ -76,23 +76,24 @@ async function dataRequest<T>(path: string, init: RequestInit = {}): Promise<T> 
 }
 
 export async function getNotificationHistory(options: {
+  boutiqueId: string;
   limit?: number;
   offset?: number;
-  boutiqueId?: string;
   category?: NotificationCategory | "all";
   unreadOnly?: boolean;
   search?: string;
-} = {}) {
+}) {
+  if (!options.boutiqueId) throw new Error("Boutique active requise");
   const limit = Math.max(1, Math.min(options.limit ?? 50, 100));
   const offset = Math.max(0, options.offset ?? 0);
   const params = new URLSearchParams();
   params.set("select", "id,user_id,boutique_id,category,title,body,icon,action_tab,action_filter,created_at,read_at,dismissed_at,in_app_enabled,push_enabled");
+  params.set("boutique_id", `eq.${options.boutiqueId}`);
   params.set("dismissed_at", "is.null");
   params.set("in_app_enabled", "eq.true");
   params.set("order", "created_at.desc");
   params.set("limit", String(limit));
   params.set("offset", String(offset));
-  if (options.boutiqueId) params.set("boutique_id", `eq.${options.boutiqueId}`);
   if (options.category && options.category !== "all") params.set("category", `eq.${options.category}`);
   if (options.unreadOnly) params.set("read_at", "is.null");
   const search = options.search?.trim().replace(/[%(),]/g, " ").replace(/\s+/g, " ");

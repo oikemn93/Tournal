@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { getData, saveData, checkBackend, stripImages, mergeImages, signQZ, sendInvoiceEmail, storePDFForSMS, getCurrentAuthUser, hasAuthenticatedSession, validateServerSession, signInWithPhone, changeOwnPassword, getPinStatus, setQuickPin, verifyQuickPin, startAppSession, lockAppSession, signOut as signOutFromSupabase, createBoutique, createUser, resetUserPassword, subscribeToBoutiqueChanges, assignUserToBoutique, unassignUserFromBoutique, upsertAssignmentDirect, deleteAssignmentDirect, recordAuditLog } from "../lib/api";
-import { getNotifications, markNotificationRead, markAllNotificationsRead, dismissAllNotifications, subscribeToNotifications, getPushState, enableWebPush, disableWebPush, type PushState } from "../lib/notifications";
+import { getNotifications, markNotificationRead, markAllNotificationsRead, dismissAllNotifications, subscribeToNotifications, getPushState, enableWebPush, disableWebPush, syncWebPushBoutique, type PushState } from "../lib/notifications";
 import { toast, Toaster } from "sonner";
 import {
   LayoutDashboard, Package, Users, Truck, FileText, ShieldCheck,
@@ -8629,8 +8629,9 @@ export default function App() {
   }, []);
 
   const refreshServerNotifications = React.useCallback(async () => {
+    if (!activeBoutiqueId) { setNotifs([]); return; }
     try {
-      const rows = await getNotifications(80);
+      const rows = await getNotifications(activeBoutiqueId, 80);
       setNotifs(prev => {
         const server = rows.map(row => ({
           id: row.id,
@@ -8653,23 +8654,38 @@ export default function App() {
     } catch (error) {
       console.warn("Notifications serveur indisponibles", error);
     }
-  }, []);
+  }, [activeBoutiqueId]);
 
   useEffect(() => {
-    if (!currentUser || !hasAuthenticatedSession()) return;
-    void refreshServerNotifications();
+    if (screen !== "app" || !currentUser || !activeBoutiqueId || !hasAuthenticatedSession()) {
+      setNotifs([]);
+      return;
+    }
+    let cancelled = false;
+    let unsubscribe = () => undefined;
     const refreshPushState = () => { void getPushState().then(setPushState).catch(() => undefined); };
-    refreshPushState();
-    const unsubscribe = subscribeToNotifications(() => { void refreshServerNotifications(); });
+    const activate = async () => {
+      setNotifs([]);
+      try { await startAppSession(activeBoutiqueId); } catch {}
+      if (cancelled) return;
+      await syncWebPushBoutique().catch(() => undefined);
+      if (cancelled) return;
+      await refreshServerNotifications();
+      if (cancelled) return;
+      refreshPushState();
+      unsubscribe = subscribeToNotifications(activeBoutiqueId, () => { void refreshServerNotifications(); });
+    };
+    void activate();
     const onVisible = () => { if (document.visibilityState === "visible") refreshPushState(); };
     document.addEventListener("visibilitychange", onVisible);
     navigator.serviceWorker?.addEventListener("controllerchange", refreshPushState);
     return () => {
+      cancelled = true;
       unsubscribe();
       document.removeEventListener("visibilitychange", onVisible);
       navigator.serviceWorker?.removeEventListener("controllerchange", refreshPushState);
     };
-  }, [currentUser?.id, refreshServerNotifications]);
+  }, [screen, currentUser?.id, activeBoutiqueId, refreshServerNotifications]);
 
   const togglePushNotifications = React.useCallback(async () => {
     if (pushBusy) return;

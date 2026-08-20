@@ -33,38 +33,31 @@ Deno.serve(async (req) => {
 
     const provided = req.headers.get("x-tournal-push-secret") ?? "";
     const expected = String(config.dispatchSecret ?? "");
-    if (!provided || !expected || !constantTimeEqual(provided, expected)) {
-      return json({ error: "Unauthorized" }, 401);
-    }
+    if (!provided || !expected || !constantTimeEqual(provided, expected)) return json({ error: "Unauthorized" }, 401);
 
     const body = await req.json().catch(() => ({}));
     const notificationId = Number(body?.notificationId);
-    if (!Number.isSafeInteger(notificationId) || notificationId <= 0) {
-      return json({ error: "Invalid notification" }, 400);
-    }
+    if (!Number.isSafeInteger(notificationId) || notificationId <= 0) return json({ error: "Invalid notification" }, 400);
 
     const { data: notification, error: notificationError } = await admin
       .from("notifications")
       .select("id,user_id,boutique_id,category,title,body,icon,action_tab")
       .eq("id", notificationId)
       .maybeSingle();
-    if (notificationError || !notification) return json({ error: "Notification not found" }, 404);
+    if (notificationError || !notification || !notification.boutique_id) return json({ error: "Notification not found" }, 404);
 
     const { data: subscriptions, error: subscriptionsError } = await admin
       .from("push_subscriptions")
       .select("id,endpoint,p256dh,auth")
       .eq("user_id", notification.user_id)
+      .eq("boutique_id", notification.boutique_id)
       .eq("enabled", true);
     if (subscriptionsError) return json({ error: "Subscription lookup failed" }, 500);
 
-    webpush.setVapidDetails(
-      "https://tournal.vercel.app",
-      String(config.publicKey),
-      String(config.privateKey),
-    );
+    webpush.setVapidDetails("https://tournal.vercel.app", String(config.publicKey), String(config.privateKey));
 
     const tab = notification.action_tab ? `&tab=${encodeURIComponent(notification.action_tab)}` : "";
-    const boutique = notification.boutique_id ? `&boutique=${encodeURIComponent(notification.boutique_id)}` : "";
+    const boutique = `&boutique=${encodeURIComponent(notification.boutique_id)}`;
     const payload = JSON.stringify({
       title: notification.title,
       body: notification.body,
@@ -81,7 +74,6 @@ Deno.serve(async (req) => {
     let sent = 0;
     let removed = 0;
     let failed = 0;
-
     for (const sub of subscriptions ?? []) {
       try {
         await webpush.sendNotification(
