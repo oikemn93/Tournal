@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tournal-shell-v1';
+const CACHE_NAME = 'tournal-shell-v2';
 const APP_SHELL = ['/', '/manifest.webmanifest'];
 
 self.addEventListener('install', (event) => {
@@ -40,4 +40,41 @@ self.addEventListener('fetch', (event) => {
       return response;
     }))
   );
+});
+
+self.addEventListener('push', (event) => {
+  let payload = {};
+  try {
+    payload = event.data ? event.data.json() : {};
+  } catch {
+    payload = { title: 'Tournal', body: event.data ? event.data.text() : 'Nouvelle notification' };
+  }
+
+  const title = payload.title || 'Tournal';
+  const options = {
+    body: payload.body || 'Nouvelle notification',
+    icon: payload.icon || '/icon-192.png',
+    badge: payload.badge || '/icon-192.png',
+    tag: payload.tag || `tournal-${Date.now()}`,
+    data: payload.data || { url: '/' },
+    renotify: false,
+    requireInteraction: false,
+  };
+
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = new URL(event.notification.data?.url || '/', self.location.origin).href;
+  event.waitUntil((async () => {
+    const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const client of windows) {
+      if ('navigate' in client) {
+        try { await client.navigate(target); } catch {}
+      }
+      if ('focus' in client) return client.focus();
+    }
+    return self.clients.openWindow ? self.clients.openWindow(target) : undefined;
+  })());
 });
