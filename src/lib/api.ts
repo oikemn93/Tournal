@@ -125,7 +125,7 @@ export async function signInWithPhone(phone: string, password: string) {
 }
 
 export async function changeOwnPassword(password: string) {
-  if (!/^\d{6}$/.test(password)) throw new Error("Utilisez un code à 6 chiffres");
+  if (password.length < 12) throw new Error("Utilisez un mot de passe d’au moins 12 caractères");
   const session = readSession();
   if (!session?.access_token) throw new Error("Connexion requise");
   await authRequest("/user", {
@@ -140,7 +140,7 @@ export async function changeOwnPassword(password: string) {
 }
 
 export async function signUpWithPhone(phone: string, password: string, fullName: string) {
-  if (!/^\d{6}$/.test(password)) throw new Error("Utilisez un code à 6 chiffres");
+  if (password.length < 12) throw new Error("Utilisez un mot de passe d’au moins 12 caractères");
   const body = await authRequest("/signup", {
     method: "POST",
     body: JSON.stringify({
@@ -196,6 +196,32 @@ export async function startAppSession(boutiqueId: string) {
 
 export async function validateAppSession(boutiqueId: string) {
   return dataRequest<boolean>("rpc/validate_app_session", { method:"POST", body:JSON.stringify({ p_boutique_id:boutiqueId }) });
+}
+
+export async function getPinStatus() {
+  return dataRequest<{ configured:boolean; lockedUntil?:string|null }>(
+    "rpc/get_pin_status", { method:"POST", body:JSON.stringify({}) },
+  );
+}
+
+export async function setQuickPin(pin: string) {
+  if (!/^\d{6}$/.test(pin)) throw new Error("Le PIN doit contenir exactement 6 chiffres");
+  return dataRequest<void>(
+    "rpc/set_quick_pin", { method:"POST", body:JSON.stringify({ p_pin:pin }) },
+  );
+}
+
+export async function verifyQuickPin(pin: string) {
+  if (!/^\d{6}$/.test(pin)) return { ok:false, configured:true, attemptsRemaining:0 } as const;
+  return dataRequest<{ ok:boolean; configured:boolean; attemptsRemaining?:number; lockedUntil?:string|null }>(
+    "rpc/verify_quick_pin", { method:"POST", body:JSON.stringify({ p_pin:pin }) },
+  );
+}
+
+export async function resetUserQuickPin(userId: string) {
+  return dataRequest<void>(
+    "rpc/reset_user_quick_pin", { method:"POST", body:JSON.stringify({ p_user_id:userId }) },
+  );
 }
 
 /**

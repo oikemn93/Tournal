@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { getData, saveData, checkBackend, stripImages, mergeImages, signQZ, sendInvoiceEmail, storePDFForSMS, getCurrentAuthUser, hasAuthenticatedSession, validateServerSession, signInWithPhone, changeOwnPassword, signOut as signOutFromSupabase, createBoutique, createUser, resetUserPassword, subscribeToBoutiqueChanges, assignUserToBoutique, unassignUserFromBoutique, upsertAssignmentDirect, deleteAssignmentDirect, recordAuditLog } from "../lib/api";
+import { getData, saveData, checkBackend, stripImages, mergeImages, signQZ, sendInvoiceEmail, storePDFForSMS, getCurrentAuthUser, hasAuthenticatedSession, validateServerSession, signInWithPhone, changeOwnPassword, getPinStatus, setQuickPin, verifyQuickPin, signOut as signOutFromSupabase, createBoutique, createUser, resetUserPassword, subscribeToBoutiqueChanges, assignUserToBoutique, unassignUserFromBoutique, upsertAssignmentDirect, deleteAssignmentDirect, recordAuditLog } from "../lib/api";
 import { toast, Toaster } from "sonner";
 import {
   LayoutDashboard, Package, Users, Truck, FileText, ShieldCheck,
@@ -34,7 +34,7 @@ const useNotif = () => React.useContext(NotifCtx);
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 
-type Screen     = "login" | "password-change" | "superadmin" | "boutique-select" | "app";
+type Screen     = "login" | "password-change" | "pin-setup" | "superadmin" | "boutique-select" | "app";
 type Tab        = "dashboard" | "stock" | "fournisseurs" | "clients" | "factures" | "pos" | "charges" | "compta" | "admin" | "inventaire" | "transferts";
 type Notif      = { id: number; icon: string; title: string; body: string; dateRaw: string; read: boolean; tab?: Tab; filter?: Record<string,string> };
 type TransferStatus = "en_attente" | "accepté" | "refusé" | "annulé";
@@ -1104,9 +1104,11 @@ const LOGIN_LOCK_MS = 2 * 60_000;  // lockout duration (mirrors auth_settings.lo
 const LOGIN_LOCK_KEY = "tournal:login_lock";
 
 function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
-  const [phone, setPhone] = useState("+221 "); const [pwd, setPwd] = useState(""); const [show, setShow] = useState(false); const [err, setErr] = useState(""); const [loading, setLoading] = useState(false);
-  // Employees authenticate with a 6-digit code; the SuperAdmin toggles to a full password.
-  const [adminMode, setAdminMode] = useState(false);
+  const [phone, setPhone] = useState("+221 ");
+  const [pwd, setPwd] = useState("");
+  const [show, setShow] = useState(false);
+  const [err, setErr] = useState("");
+  const [loading, setLoading] = useState(false);
   const [attempts, setAttempts] = useState(0);
   const [lockedUntil, setLockedUntil] = useState<number>(() => {
     const raw = typeof localStorage !== "undefined" ? localStorage.getItem(LOGIN_LOCK_KEY) : null;
@@ -1114,19 +1116,17 @@ function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
     return ts > Date.now() ? ts : 0;
   });
   const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    if (!lockedUntil) return;
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, [lockedUntil]);
   const isLocked = lockedUntil > now;
-  const remainingSec = Math.max(0, Math.ceil((lockedUntil - now) / 1000));
-
-  const onlyDigits = (v: string) => v.replace(/\D/g, "").slice(0, 6);
+  const remainingSec = Math.max(0, Math.ceil((lockedUntil-now)/1000));
+  useEffect(()=>{
+    if (!isLocked) return;
+    const id = setInterval(()=>setNow(Date.now()), 1000);
+    return ()=>clearInterval(id);
+  },[isLocked]);
 
   async function login() {
     if (isLocked || loading) return;
-    if (!adminMode && !/^\d{6}$/.test(pwd)) { setErr("Entrez votre code à 6 chiffres."); return; }
+    if (!phone.trim() || !pwd) { setErr("Numéro de téléphone et mot de passe requis."); return; }
     setLoading(true);
     try {
       await signInWithPhone(phone, pwd);
@@ -1135,53 +1135,34 @@ function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
       onAuthenticated();
     } catch (error) {
       const next = attempts + 1;
-      setAttempts(next);
-      setPwd("");
+      setAttempts(next); setPwd("");
       if (next >= LOGIN_MAX_ATTEMPTS) {
         const until = Date.now() + LOGIN_LOCK_MS;
         setLockedUntil(until);
         if (typeof localStorage !== "undefined") localStorage.setItem(LOGIN_LOCK_KEY, String(until));
-        setErr(`Trop de tentatives. Compte bloqué pendant ${Math.round(LOGIN_LOCK_MS / 60000)} minutes.`);
+        setErr(`Trop de tentatives. Connexion bloquée pendant ${Math.round(LOGIN_LOCK_MS/60000)} minutes.`);
       } else {
-        const left = LOGIN_MAX_ATTEMPTS - next;
-        setErr((error instanceof Error ? error.message : "Identifiants incorrects") + ` · ${left} tentative${left > 1 ? "s" : ""} restante${left > 1 ? "s" : ""}`);
+        const left = LOGIN_MAX_ATTEMPTS-next;
+        setErr((error instanceof Error ? error.message : "Identifiants incorrects") + ` · ${left} tentative${left>1?"s":""} restante${left>1?"s":""}`);
       }
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   }
-  return (
-    <div className="bg-background text-foreground min-h-screen flex flex-col" style={{ fontFamily:"'Inter', sans-serif" }}>
-      <div className="px-6 pt-16 pb-8 text-center">
-        <div className="w-20 h-20 rounded-3xl mx-auto mb-5 flex items-center justify-center" style={{ background:"#C9A22722" }}><Store size={40} style={{ color:"#C9A227" }} /></div>
-        <h1 className="text-3xl font-black mb-1" style={{ fontFamily:"'Nunito', sans-serif", color:"#C9A227" }}>Tournal</h1>
-        <p className="text-sm text-muted-foreground">Gestion simplifiée pour les commerçants</p>
+
+  return <div className="bg-background text-foreground min-h-screen flex items-center justify-center px-6" style={{fontFamily:"'Inter', sans-serif"}}>
+    <div className="w-full max-w-md rounded-3xl border bg-card p-6 space-y-5 shadow-sm">
+      <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto" style={{background:"#C9A22722"}}><ShieldCheck size={32} style={{color:"#C9A227"}}/></div>
+      <div className="text-center"><h1 className="text-2xl font-black">Connexion Tournal</h1><p className="text-sm text-muted-foreground mt-2">Utilisez votre mot de passe. Le PIN sert uniquement au déverrouillage rapide d’une session déjà ouverte.</p></div>
+      <div><label className="text-xs font-black mb-2 block tracking-wider" style={{color:"#C9A227"}}>NUMÉRO DE TÉLÉPHONE</label>
+        <div className="relative"><Smartphone size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground"/><input value={phone} onChange={e=>{const v=e.target.value;setPhone(v.startsWith("+221 ")?v:"+221 ");setErr("");}} placeholder="+221 77 000 0000" type="tel" disabled={isLocked} className={inputCls+" pl-11"} onKeyDown={e=>e.key==="Enter"&&login()}/></div>
       </div>
-      <div className="flex-1 px-6 space-y-4">
-        <div>
-          <label className="text-xs font-black mb-2 block tracking-wider" style={{ color:"#C9A227" }}>NUMÉRO DE TÉLÉPHONE</label>
-          <div className="relative"><Smartphone size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input value={phone} onChange={e=>{const v=e.target.value;setPhone(v.startsWith("+221 ")?v:"+221 ");setErr("");}} placeholder="+221 77 000 0000" type="tel" disabled={isLocked} className={inputCls+" pl-11"} onKeyDown={e=>e.key==="Enter"&&login()} /></div>
-        </div>
-        <div>
-          <label className="text-xs font-black mb-2 block tracking-wider" style={{ color:"#C9A227" }}>{adminMode ? "MOT DE PASSE ADMINISTRATEUR" : "CODE D’ACCÈS (6 CHIFFRES)"}</label>
-          <div className="relative"><Lock size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            {adminMode ? (
-              <input value={pwd} onChange={e=>{setPwd(e.target.value);setErr("");}} placeholder="••••••••" type={show?"text":"password"} disabled={isLocked} className={inputCls+" pl-11 pr-12"} onKeyDown={e=>e.key==="Enter"&&login()} />
-            ) : (
-              <input value={pwd} onChange={e=>{setPwd(onlyDigits(e.target.value));setErr("");}} placeholder="••••••" type={show?"text":"password"} inputMode="numeric" maxLength={6} disabled={isLocked} className={inputCls+" pl-11 pr-12 text-center tracking-[0.5em] text-xl font-black"} onKeyDown={e=>e.key==="Enter"&&login()} />
-            )}
-            <button onClick={()=>setShow(v=>!v)} className="absolute right-3.5 top-1/2 -translate-y-1/2">{show?<EyeOff size={18} className="text-muted-foreground"/>:<Eye size={18} className="text-muted-foreground"/>}</button></div>
-        </div>
-        {err&&<div className="flex items-center gap-2 px-4 py-3 rounded-xl" style={{ background:"#ef444415" }}><X size={14} style={{ color:"#ef4444" }}/><p className="text-sm font-semibold" style={{ color:"#ef4444" }}>{err}</p></div>}
-        {isLocked&&<div className="flex items-center gap-2 px-4 py-3 rounded-xl" style={{ background:"#ef444415" }}><Lock size={14} style={{ color:"#ef4444" }}/><p className="text-sm font-semibold" style={{ color:"#ef4444" }}>Réessayez dans {Math.floor(remainingSec/60)}:{String(remainingSec%60).padStart(2,"0")}</p></div>}
-        <button onClick={login} disabled={loading||isLocked} className="w-full py-4 rounded-2xl text-base font-black active:scale-95 disabled:opacity-60" style={{ background:"#C9A227", color:"#fff", fontFamily:"'Nunito', sans-serif" }}>{loading ? "Veuillez patienter…" : isLocked ? "Compte bloqué" : "Se connecter →"}</button>
-        <button onClick={()=>{ setAdminMode(m=>!m); setPwd(""); setErr(""); }} className="w-full text-center text-xs font-semibold text-muted-foreground py-1">
-          {adminMode ? "← Connexion employé (code à 6 chiffres)" : "Connexion administrateur (mot de passe)"}
-        </button>
+      <div><label className="text-xs font-black mb-2 block tracking-wider" style={{color:"#C9A227"}}>MOT DE PASSE</label>
+        <div className="relative"><Lock size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground"/><input value={pwd} onChange={e=>{setPwd(e.target.value);setErr("");}} placeholder="••••••••••••" type={show?"text":"password"} disabled={isLocked} className={inputCls+" pl-11 pr-12"} onKeyDown={e=>e.key==="Enter"&&login()}/><button onClick={()=>setShow(v=>!v)} className="absolute right-3.5 top-1/2 -translate-y-1/2">{show?<EyeOff size={18} className="text-muted-foreground"/>:<Eye size={18} className="text-muted-foreground"/>}</button></div>
       </div>
+      {err&&<div className="flex items-center gap-2 px-4 py-3 rounded-xl" style={{background:"#ef444415"}}><X size={14} style={{color:"#ef4444"}}/><p className="text-sm font-semibold" style={{color:"#ef4444"}}>{err}</p></div>}
+      {isLocked&&<div className="flex items-center gap-2 px-4 py-3 rounded-xl" style={{background:"#ef444415"}}><Lock size={14} style={{color:"#ef4444"}}/><p className="text-sm font-semibold" style={{color:"#ef4444"}}>Réessayez dans {Math.floor(remainingSec/60)}:{String(remainingSec%60).padStart(2,"0")}</p></div>}
+      <button onClick={login} disabled={loading||isLocked} className="w-full py-4 rounded-2xl text-base font-black active:scale-95 disabled:opacity-60" style={{background:"#C9A227",color:"#fff",fontFamily:"'Nunito', sans-serif"}}>{loading?"Veuillez patienter…":isLocked?"Connexion bloquée":"Se connecter →"}</button>
     </div>
-  );
+  </div>;
 }
 
 function RequiredPasswordChangeScreen({ onComplete }: { onComplete: () => void }) {
@@ -1192,30 +1173,49 @@ function RequiredPasswordChangeScreen({ onComplete }: { onComplete: () => void }
   const [loading, setLoading] = useState(false);
 
   async function submit() {
-    if (!/^\d{6}$/.test(password)) { setError("Le code doit comporter exactement 6 chiffres."); return; }
-    if (password !== confirm) { setError("Les deux codes ne correspondent pas."); return; }
+    if (password.length < 12) { setError("Le mot de passe doit comporter au moins 12 caractères."); return; }
+    if (password !== confirm) { setError("Les deux mots de passe ne correspondent pas."); return; }
     setLoading(true);
-    try {
-      await changeOwnPassword(password);
-      onComplete();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Le code n’a pas pu être modifié.");
-    } finally {
-      setLoading(false);
-    }
+    try { await changeOwnPassword(password); onComplete(); }
+    catch (e) { setError(e instanceof Error ? e.message : "Modification impossible"); }
+    finally { setLoading(false); }
   }
 
-  const onlyDigits = (v: string) => v.replace(/\D/g, "").slice(0, 6);
-
-  return <div className="bg-background text-foreground min-h-screen flex items-center justify-center px-6" style={{ fontFamily:"'Inter', sans-serif" }}>
+  return <div className="bg-background text-foreground min-h-screen flex items-center justify-center px-6" style={{fontFamily:"'Inter', sans-serif"}}>
     <div className="w-full max-w-md rounded-3xl border bg-card p-6 space-y-5 shadow-sm">
-      <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto" style={{ background:"#C9A22722" }}><ShieldCheck size={32} style={{ color:"#C9A227" }}/></div>
-      <div className="text-center"><h1 className="text-2xl font-black">Choisissez votre code d’accès</h1><p className="text-sm text-muted-foreground mt-2">Le code transmis est temporaire. Choisissez votre code personnel à 6 chiffres avant d’accéder à la boutique.</p></div>
-      <Field label="NOUVEAU CODE (6 CHIFFRES)" color="#C9A227"><input value={password} onChange={e=>{setPassword(onlyDigits(e.target.value));setError("");}} type={show?"text":"password"} inputMode="numeric" maxLength={6} className={inputCls+" text-center tracking-[0.5em] text-xl font-black"} autoFocus /></Field>
-      <Field label="CONFIRMER LE CODE" color="#C9A227"><input value={confirm} onChange={e=>{setConfirm(onlyDigits(e.target.value));setError("");}} type={show?"text":"password"} inputMode="numeric" maxLength={6} className={inputCls+" text-center tracking-[0.5em] text-xl font-black"} onKeyDown={e=>e.key==="Enter"&&submit()} /></Field>
-      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={show} onChange={e=>setShow(e.target.checked)} /> Afficher le code</label>
-      {error&&<div className="px-4 py-3 rounded-xl text-sm font-semibold" style={{ background:"#ef444415",color:"#ef4444" }}>{error}</div>}
-      <SubmitBtn label={loading?"Modification…":"Enregistrer mon code"} onClick={submit} disabled={loading} />
+      <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto" style={{background:"#C9A22722"}}><ShieldCheck size={32} style={{color:"#C9A227"}}/></div>
+      <div className="text-center"><h1 className="text-2xl font-black">Créez votre mot de passe</h1><p className="text-sm text-muted-foreground mt-2">Le mot de passe transmis lors de la création du compte est temporaire. Remplacez-le avant de configurer votre PIN rapide.</p></div>
+      <Field label="NOUVEAU MOT DE PASSE (12 CARACTÈRES MIN.)" color="#C9A227"><input value={password} onChange={e=>{setPassword(e.target.value);setError("");}} type={show?"text":"password"} className={inputCls} autoComplete="new-password" autoFocus/></Field>
+      <Field label="CONFIRMER LE MOT DE PASSE" color="#C9A227"><input value={confirm} onChange={e=>{setConfirm(e.target.value);setError("");}} type={show?"text":"password"} className={inputCls} autoComplete="new-password" onKeyDown={e=>e.key==="Enter"&&submit()}/></Field>
+      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={show} onChange={e=>setShow(e.target.checked)}/> Afficher le mot de passe</label>
+      {error&&<div className="px-4 py-3 rounded-xl text-sm font-semibold" style={{background:"#ef444415",color:"#ef4444"}}>{error}</div>}
+      <SubmitBtn label={loading?"Modification…":"Enregistrer le mot de passe"} onClick={submit} disabled={loading}/>
+    </div>
+  </div>;
+}
+
+function PinSetupScreen({ onComplete }: { onComplete: () => void }) {
+  const [pin, setPin] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const onlyDigits = (v:string)=>v.replace(/\D/g,"").slice(0,6);
+  async function submit() {
+    if (!/^\d{6}$/.test(pin)) { setError("Le PIN doit comporter exactement 6 chiffres."); return; }
+    if (pin !== confirm) { setError("Les deux PIN ne correspondent pas."); return; }
+    setLoading(true);
+    try { await setQuickPin(pin); onComplete(); }
+    catch(e) { setError(e instanceof Error ? e.message : "Configuration du PIN impossible"); }
+    finally { setLoading(false); }
+  }
+  return <div className="bg-background text-foreground min-h-screen flex items-center justify-center px-6" style={{fontFamily:"'Inter', sans-serif"}}>
+    <div className="w-full max-w-md rounded-3xl border bg-card p-6 space-y-5 shadow-sm">
+      <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto" style={{background:"#C9A22722"}}><Lock size={30} style={{color:"#C9A227"}}/></div>
+      <div className="text-center"><h1 className="text-2xl font-black">Créez votre PIN rapide</h1><p className="text-sm text-muted-foreground mt-2">Choisissez 6 chiffres faciles à retenir pour déverrouiller rapidement cette session. Ce PIN ne remplace pas votre mot de passe.</p></div>
+      <Field label="PIN (6 CHIFFRES)" color="#C9A227"><input value={pin} onChange={e=>{setPin(onlyDigits(e.target.value));setError("");}} type="password" inputMode="numeric" maxLength={6} className={inputCls+" text-center tracking-[0.5em] text-xl font-black"} autoFocus/></Field>
+      <Field label="CONFIRMER LE PIN" color="#C9A227"><input value={confirm} onChange={e=>{setConfirm(onlyDigits(e.target.value));setError("");}} type="password" inputMode="numeric" maxLength={6} className={inputCls+" text-center tracking-[0.5em] text-xl font-black"} onKeyDown={e=>e.key==="Enter"&&submit()}/></Field>
+      {error&&<div className="px-4 py-3 rounded-xl text-sm font-semibold" style={{background:"#ef444415",color:"#ef4444"}}>{error}</div>}
+      <SubmitBtn label={loading?"Configuration…":"Activer mon PIN"} onClick={submit} disabled={loading}/>
     </div>
   </div>;
 }
@@ -8820,6 +8820,8 @@ export default function App() {
               toast.error("Compte suspendu — contactez l’administrateur Tournal"); return;
             }
             if (u.mustChangePassword) { setScreen("password-change"); return; }
+            const pinState = await getPinStatus().catch(() => ({ configured:false }));
+            if (!pinState.configured) { setScreen("pin-setup"); return; }
             if (u.isSuperAdmin) { setScreen("superadmin"); return; }
             const assignments = u.assignments.filter(a => finalBoutiques.some(b => b.id === a.boutiqueId));
             if (assignments.length === 1) {
@@ -9122,6 +9124,7 @@ export default function App() {
 
   if (screen==="login") return <LoginScreen onAuthenticated={() => window.location.reload()}/>;
   if (screen==="password-change"&&currentUser) return <RequiredPasswordChangeScreen onComplete={() => window.location.reload()}/>;
+  if (screen==="pin-setup"&&currentUser) return <PinSetupScreen onComplete={() => window.location.reload()}/>;
   if (screen==="superadmin"&&currentUser) return (
     <SuperAdminScreen boutiques={boutiques} platformUsers={platformUsers} groupes={groupes}
       onEnterBoutique={handleEnterBoutiqueAsAdmin}
@@ -9150,12 +9153,20 @@ export default function App() {
 
   // Lock screen overlay
   if (locked && currentUser && screen === "app") {
-    const unlock = () => {
-      if (lockPin === currentUser.password) {
-        try { sessionStorage.removeItem(APP_LOCK_KEY); } catch {}
-        setLocked(false); setLockPin("");
-      }
-      else { toast.error("Code incorrect"); setLockPin(""); }
+    const unlock = async () => {
+      if (!/^\d{6}$/.test(lockPin)) { toast.error("Entrez votre PIN à 6 chiffres"); return; }
+      try {
+        const result = await verifyQuickPin(lockPin);
+        setLockPin("");
+        if (result.ok) {
+          try { sessionStorage.removeItem(APP_LOCK_KEY); } catch {}
+          setLocked(false);
+          return;
+        }
+        if (!result.configured) { setLocked(false); setScreen("pin-setup"); return; }
+        if (result.lockedUntil) { toast.error("PIN temporairement bloqué. Utilisez Changer de compte pour vous reconnecter avec votre mot de passe."); return; }
+        toast.error(`PIN incorrect${typeof result.attemptsRemaining === "number" ? ` · ${result.attemptsRemaining} essai(s) restant(s)` : ""}`);
+      } catch (e) { toast.error(e instanceof Error ? e.message : "Vérification du PIN impossible"); }
     };
     return createPortal(
       <div className="fixed inset-0 z-[500] flex flex-col items-center justify-center" style={{ background:"rgba(0,0,0,0.92)", backdropFilter:"blur(12px)" }}>

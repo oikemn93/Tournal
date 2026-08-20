@@ -16,6 +16,7 @@ function phoneToEmail(phone: string): string {
 function initialsOf(name: string): string {
   return String(name ?? "").trim().split(/\s+/).filter(Boolean).map(w=>w[0]).join("").slice(0,2).toUpperCase();
 }
+const passwordOk=(v:unknown)=>String(v??"").length>=12;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -71,7 +72,7 @@ Deno.serve(async (req) => {
       const { phone,fullName,password,boutiqueId } = body;
       const requestId = typeof body.requestId === "string" ? body.requestId : `${Date.now()}-${crypto.randomUUID()}`;
       if (boutiqueId && !(await isOwnerOf(boutiqueId))) return json({ error:"Accès refusé" },403);
-      if (!phone || !fullName || !password) return json({ error:"Champs requis manquants" },400);
+      if (!phone || !fullName || !passwordOk(password)) return json({ error:"Nom, téléphone et mot de passe temporaire d’au moins 12 caractères requis" },400);
       const email=phoneToEmail(phone);
       const { data:created,error } = await admin.auth.admin.createUser({ email,password,email_confirm:true,user_metadata:{ nom:fullName,phone } });
       if (error) return json({ error:error.message },400);
@@ -79,7 +80,7 @@ Deno.serve(async (req) => {
       const colors=["#C9A227","#2563eb","#16a34a","#dc2626","#9333ea","#0891b2","#ea580c"];
       const { count }=await admin.from("platform_users").select("*",{count:"exact",head:true});
       const color=colors[(count ?? 0)%colors.length];
-      const payload={ id:uid,phone,nom:fullName,initials:initialsOf(fullName),color,is_super_admin:false,is_suspended:false };
+      const payload={ id:uid,phone,nom:fullName,initials:initialsOf(fullName),color,is_super_admin:false,is_suspended:false,must_change_password:true };
       const { error:puErr }=await admin.from("platform_users").upsert(payload,{onConflict:"id",ignoreDuplicates:true});
       if (puErr) {
         const conflictText=`${puErr.message ?? ""} ${puErr.details ?? ""}`;
@@ -96,7 +97,7 @@ Deno.serve(async (req) => {
 
     if (action === "reset_password") {
       const { userId,password }=body;
-      if (!userId || !password) return json({error:"Champs requis manquants"},400);
+      if (!userId || !passwordOk(password)) return json({error:"Utilisateur et mot de passe temporaire d’au moins 12 caractères requis"},400);
       if (!isSuperAdmin) {
         const { data:assignments }=await admin.from("boutique_assignments").select("boutique_id").eq("user_id",userId);
         const checks=await Promise.all((assignments ?? []).map(a=>isOwnerOf(a.boutique_id)));
@@ -104,6 +105,8 @@ Deno.serve(async (req) => {
       }
       const { error }=await admin.auth.admin.updateUserById(userId,{password});
       if (error) return json({error:error.message},400);
+      const { error:profileResetError }=await admin.from("platform_users").update({must_change_password:true}).eq("id",userId);
+      if (profileResetError) return json({error:profileResetError.message},400);
       return json({ok:true});
     }
 
