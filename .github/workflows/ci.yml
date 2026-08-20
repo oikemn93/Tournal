@@ -53,6 +53,9 @@ jobs:
           ! grep -n 'localStorage.setItem(SESSION_STORAGE_KEY' src/lib/api.ts
           grep -n 'sessionStorage.getItem(SESSION_STORAGE_KEY)' src/lib/api.ts
 
+      - name: Prevent fixed-interval network polling
+        run: node scripts/check-no-network-polling.mjs
+
       - name: Verify temporary patchers are gone
         shell: bash
         run: |
