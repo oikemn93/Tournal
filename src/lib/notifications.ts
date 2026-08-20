@@ -66,9 +66,10 @@ async function dataRequest<T>(path: string, init: RequestInit = {}): Promise<T> 
   return body as T;
 }
 
-export async function getNotifications(limit = 80) {
+export async function getNotifications(boutiqueId: string, limit = 80) {
+  if (!boutiqueId) return [] as ServerNotification[];
   return dataRequest<ServerNotification[]>(
-    `notifications?select=id,user_id,boutique_id,category,title,body,icon,action_tab,action_filter,created_at,read_at,dismissed_at&dismissed_at=is.null&in_app_enabled=eq.true&order=created_at.desc&limit=${Math.max(1,Math.min(limit,100))}`,
+    `notifications?select=id,user_id,boutique_id,category,title,body,icon,action_tab,action_filter,created_at,read_at,dismissed_at&boutique_id=eq.${encodeURIComponent(boutiqueId)}&dismissed_at=is.null&in_app_enabled=eq.true&order=created_at.desc&limit=${Math.max(1,Math.min(limit,100))}`,
   );
 }
 
@@ -93,18 +94,18 @@ export async function dismissAllNotifications() {
   });
 }
 
-export function subscribeToNotifications(onChange: () => void) {
+export function subscribeToNotifications(boutiqueId: string, onChange: () => void) {
   const session = readSession();
-  if (!session?.access_token || !session.user?.id) return () => undefined;
+  if (!boutiqueId || !session?.access_token || !session.user?.id) return () => undefined;
   try {
     realtimeClient.realtime.setAuth(session.access_token);
     const channel = realtimeClient
-      .channel(`notifications:${session.user.id}`)
+      .channel(`notifications:${session.user.id}:${boutiqueId}`)
       .on("postgres_changes", {
         event: "*",
         schema: "public",
         table: "notifications",
-        filter: `user_id=eq.${session.user.id}`,
+        filter: `boutique_id=eq.${boutiqueId}`,
       }, onChange)
       .subscribe();
     return () => { void realtimeClient.removeChannel(channel); };
@@ -119,8 +120,6 @@ function urlBase64ToUint8Array(value: string) {
     normalized = normalized.slice(1, -1).trim();
   }
   normalized = normalized.replace(/\s+/g, "");
-  // Vault values may be stored as padded Base64URL or regular Base64. Both
-  // encode the same P-256 point, so normalize them before validating bytes.
   if (!normalized || !/^[A-Za-z0-9_+/-]+={0,2}$/.test(normalized)) {
     throw new Error("Clé Push publique invalide");
   }
@@ -163,14 +162,7 @@ export async function getPushState(): Promise<PushState> {
     && window.isSecureContext
     && "Notification" in window
     && "serviceWorker" in navigator;
-
-  // iOS only exposes Web Push to Home Screen web apps. In Safari itself the
-  // Notification/PushManager APIs can be absent, but the device is still
-  // eligible once the PWA is installed. Report that state separately so the UI
-  // can guide the user instead of rendering a permanently disabled button.
-  if (iosNeedsInstall) {
-    return { supported:true, permission:"default", subscribed:false, iosNeedsInstall:true };
-  }
+  if (iosNeedsInstall) return { supported:true, permission:"default", subscribed:false, iosNeedsInstall:true };
   if (!supported) return { supported:false, permission:"unsupported", subscribed:false, iosNeedsInstall:false };
 
   let subscribed = false;
@@ -184,58 +176,49 @@ export async function getPushState(): Promise<PushState> {
   return { supported:true, permission:Notification.permission, subscribed, iosNeedsInstall:false };
 }
 
+export async function syncWebPushBoutique() {
+  if (!("serviceWorker" in navigator)) return;
+  const registration = await navigator.serviceWorker.getRegistration("/");
+  const subscription = await registration?.pushManager.getSubscription();
+  if (!subscription?.endpoint) return;
+  await dataRequest<void>("rpc/sync_push_subscription_context", {
+    method: "POST",
+    body: JSON.stringify({ p_endpoint:subscription.endpoint }),
+  });
+}
+
 export async function enableWebPush() {
-  // On iPhone/iPad the install requirement must be checked before API feature
-  // detection because Safari may intentionally hide Notification/PushManager
-  // until the site is launched from the Home Screen.
   if (isIos() && !isStandalonePwa()) {
     throw new Error("Sur iPhone/iPad : Safari → Partager → Sur l’écran d’accueil. Ouvrez ensuite Tournal depuis l’icône installée et activez les notifications.");
   }
-  if (!window.isSecureContext) {
-    throw new Error("Les notifications Push nécessitent une connexion HTTPS sécurisée");
-  }
-  if (!("Notification" in window) || !("serviceWorker" in navigator)) {
-    throw new Error("Les notifications Push ne sont pas supportées sur ce navigateur");
-  }
+  if (!window.isSecureContext) throw new Error("Les notifications Push nécessitent une connexion HTTPS sécurisée");
+  if (!("Notification" in window) || !("serviceWorker" in navigator)) throw new Error("Les notifications Push ne sont pas supportées sur ce navigateur");
+  if (Notification.permission === "denied") throw new Error("Notifications bloquées : autorisez-les dans les réglages du navigateur, puis réessayez");
 
-  if (Notification.permission === "denied") {
-    throw new Error("Notifications bloquées : autorisez-les dans les réglages du navigateur, puis réessayez");
-  }
-
-  const permission = Notification.permission === "granted"
-    ? "granted"
-    : await Notification.requestPermission();
+  const permission = Notification.permission === "granted" ? "granted" : await Notification.requestPermission();
   if (permission !== "granted") throw new Error("Autorisation de notifications refusée");
 
   const registration = await getRegistration();
-  if (!("pushManager" in registration)) {
-    throw new Error("Les notifications Push ne sont pas supportées sur ce navigateur");
-  }
-  const publicKey = await dataRequest<string>("rpc/get_push_public_key", {
-    method: "POST",
-    body: JSON.stringify({}),
-  });
+  if (!("pushManager" in registration)) throw new Error("Les notifications Push ne sont pas supportées sur ce navigateur");
+  const publicKey = await dataRequest<string>("rpc/get_push_public_key", { method:"POST", body:JSON.stringify({}) });
   if (!publicKey || typeof publicKey !== "string") throw new Error("Clé Push indisponible");
 
   let subscription = await registration.pushManager.getSubscription();
   if (!subscription) {
-    subscription = await registration.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(publicKey),
-    });
+    subscription = await registration.pushManager.subscribe({ userVisibleOnly:true, applicationServerKey:urlBase64ToUint8Array(publicKey) });
   }
 
   const json = subscription.toJSON();
   if (!json.endpoint || !json.keys?.p256dh || !json.keys?.auth) throw new Error("Abonnement Push incomplet");
   const deviceLabel = `${navigator.platform || "Web"} · ${navigator.userAgent.includes("Mobile") ? "Mobile" : "PC"}`;
   await dataRequest<unknown>("rpc/claim_push_subscription", {
-    method: "POST",
-    body: JSON.stringify({
-      p_endpoint: json.endpoint,
-      p_p256dh: json.keys.p256dh,
-      p_auth: json.keys.auth,
-      p_user_agent: navigator.userAgent,
-      p_device_label: deviceLabel,
+    method:"POST",
+    body:JSON.stringify({
+      p_endpoint:json.endpoint,
+      p_p256dh:json.keys.p256dh,
+      p_auth:json.keys.auth,
+      p_user_agent:navigator.userAgent,
+      p_device_label:deviceLabel,
     }),
   });
   return getPushState();
@@ -247,10 +230,7 @@ export async function disableWebPush() {
   const subscription = await registration?.pushManager.getSubscription();
   if (subscription) {
     try {
-      await dataRequest<unknown>("rpc/remove_push_subscription", {
-        method: "POST",
-        body: JSON.stringify({ p_endpoint: subscription.endpoint }),
-      });
+      await dataRequest<unknown>("rpc/remove_push_subscription", { method:"POST", body:JSON.stringify({ p_endpoint:subscription.endpoint }) });
     } finally {
       await subscription.unsubscribe().catch(() => false);
     }
