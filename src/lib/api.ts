@@ -255,7 +255,7 @@ export function subscribeToBoutiqueChanges(boutiqueId: string, onChange: () => v
     let channel = realtimeClient.channel(`tournal:${boutiqueId}`);
     // Each subscription is scoped to one boutique and only to relational tables.
     // This deliberately avoids both the former global JSON blob and polling.
-    for (const table of ["products", "stock_entries", "invoices", "invoice_lines", "invoice_payments", "clients", "charges", "caisse_sessions"]) {
+    for (const table of ["products", "stock_entries", "invoices", "invoice_lines", "invoice_payments", "clients", "charges", "caisse_sessions", "suppliers", "categories", "boutique_partners", "boutique_assignments", "audit_log"]) {
       channel = channel.on("postgres_changes", { event: "*", schema: "public", table, filter }, onChange);
     }
     channel = channel.subscribe((status) => {
@@ -271,6 +271,45 @@ export function subscribeToBoutiqueChanges(boutiqueId: string, onChange: () => v
     // Realtime is an enhancement. A transient channel issue must never block
     // the relational data already loaded for the selected boutique.
     console.warn("Realtime indisponible pour cette boutique", error);
+    return () => undefined;
+  }
+}
+
+/**
+ * Watches transfer headers from both directions for one boutique, plus the
+ * transfer lines visible through RLS. stock_transfers has no single boutique_id,
+ * so from/to filters must stay distinct.
+ */
+export function subscribeToStockTransfers(boutiqueId: string, onChange: () => void) {
+  const session = readSession();
+  if (!session?.access_token || !boutiqueId) return () => undefined;
+
+  try {
+    realtimeClient.realtime.setAuth(session.access_token);
+    let channel = realtimeClient.channel(`stock-transfers:${boutiqueId}`);
+    channel = channel
+      .on("postgres_changes", {
+        event: "*", schema: "public", table: "stock_transfers",
+        filter: `from_boutique_id=eq.${boutiqueId}`,
+      }, onChange)
+      .on("postgres_changes", {
+        event: "*", schema: "public", table: "stock_transfers",
+        filter: `to_boutique_id=eq.${boutiqueId}`,
+      }, onChange)
+      // stock_transfer_lines has no boutique column. RLS on the parent transfer
+      // authorizes which line events this authenticated subscriber can receive.
+      .on("postgres_changes", {
+        event: "*", schema: "public", table: "stock_transfer_lines",
+      }, onChange)
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") onChange();
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          console.warn(`Realtime transferts ${status.toLowerCase()} pour ${boutiqueId}`);
+        }
+      });
+    return () => { void realtimeClient.removeChannel(channel); };
+  } catch (error) {
+    console.warn("Realtime transferts indisponible", error);
     return () => undefined;
   }
 }
