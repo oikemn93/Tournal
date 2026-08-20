@@ -402,21 +402,73 @@ export async function deleteAssignmentDirect(boutiqueId: string, userId: string)
   );
 }
 
+
+export async function getAuthBootstrap() {
+  const authUser = getCurrentAuthUser();
+  if (!authUser?.id) throw new Error("Connexion requise");
+  const uid = encodeURIComponent(authUser.id);
+  const [users, assignments, boutiques, groupes] = await Promise.all([
+    dataRequest<Array<any>>(`platform_users?select=id,phone,nom,initials,color,is_super_admin,is_suspended,suspension_reason,suspended_at,group_id,is_compte_mere,must_change_password&id=eq.${uid}&limit=1`),
+    dataRequest<Array<any>>(`boutique_assignments?select=boutique_id,user_id,role,droits&user_id=eq.${uid}`),
+    dataRequest<Array<any>>("boutiques?select=id,nom,ville,color,initials,logo_url,adresse,email,tel&order=nom.asc"),
+    dataRequest<Array<{ id:string; nom:string }>>("groupes?select=id,nom&order=nom.asc"),
+  ]);
+  const row = users[0];
+  if (!row) return null;
+  const toRole = (role: string) => role === "owner" ? "Propriétaire" : role === "manager" ? "Manager" : "Vendeur";
+  return {
+    user: {
+      id: row.id,
+      phone: row.phone,
+      password: "",
+      nom: row.nom,
+      initials: row.initials,
+      color: row.color,
+      isSuperAdmin: row.is_super_admin === true,
+      isSuspended: row.is_suspended === true,
+      suspensionReason: row.suspension_reason ?? undefined,
+      suspendedAt: row.suspended_at ?? undefined,
+      groupeId: row.group_id ?? undefined,
+      isCompteMere: row.is_compte_mere ?? undefined,
+      mustChangePassword: row.must_change_password === true,
+      assignments: assignments.map((a) => ({ boutiqueId:a.boutique_id, role:toRole(a.role), droits:a.droits ?? {} })),
+    },
+    boutiques: boutiques.map((b) => ({
+      id:b.id,
+      nom:b.nom,
+      ville:b.ville ?? "",
+      color:b.color ?? "#C9A227",
+      initials:b.initials ?? (b.nom ?? "?").split(/\s+/).map((x:string)=>x[0]).join("").slice(0,2).toUpperCase(),
+      logo:b.logo_url ?? undefined,
+      adresse:b.adresse ?? undefined,
+      email:b.email ?? undefined,
+      tel:b.tel ?? undefined,
+      products:[], entries:[], suppliers:[], clients:[], invoices:[], auditLog:[], charges:[], categories:[], productParams:[], caisseHistory:[],
+    })),
+    groupes,
+  };
+}
+
 /** Reads the compatibility state while the screens are progressively moved to relational tables. */
 export async function getData<T>(key: string): Promise<T | null> {
-  if (key === "boutiques") {
-    // Compatibility projection: legacy screens still consume a Boutique object,
-    // but its data now comes exclusively from the relational source of truth.
+  const targetedBoutiqueId = key.startsWith("boutique:") ? key.slice("boutique:".length) : null;
+  if (key === "boutiques" || targetedBoutiqueId) {
+    // Compatibility projection: callers can request all visible boutiques or one
+    // targeted boutique. Login and Realtime use the targeted path so business
+    // payloads never block the authentication shell.
+    const bid = targetedBoutiqueId ? encodeURIComponent(targetedBoutiqueId) : null;
+    const boutiqueFilter = bid ? `&id=eq.${bid}` : "";
+    const scoped = (column = "boutique_id") => bid ? `&${column}=eq.${bid}` : "";
     const [boutiques, categories, products, entries, clients, suppliers, invoices, payments, charges, sessions, users, auditLogs] = await Promise.all([
-      dataRequest<any[]>("boutiques?select=*&order=nom.asc"),
-      dataRequest<any[]>("categories?select=*"), dataRequest<any[]>("products?select=*"),
-      dataRequestAll<any>("stock_entries?select=*"), dataRequest<any[]>("clients?select=*"),
-      dataRequest<any[]>("suppliers?select=*"),
-      dataRequest<any[]>("invoices?select=*,invoice_lines(*)"),
-      dataRequest<any[]>("invoice_payments?select=*&order=paid_at.asc"), dataRequest<any[]>("charges?select=*"),
-      dataRequest<any[]>("caisse_sessions?select=*"),
+      dataRequest<any[]>(`boutiques?select=*${boutiqueFilter}&order=nom.asc`),
+      dataRequest<any[]>(`categories?select=*${scoped()}`), dataRequest<any[]>(`products?select=*${scoped()}`),
+      dataRequestAll<any>(`stock_entries?select=*${scoped()}`), dataRequest<any[]>(`clients?select=*${scoped()}`),
+      dataRequest<any[]>(`suppliers?select=*${scoped()}`),
+      dataRequest<any[]>(`invoices?select=*,invoice_lines(*)${scoped()}`),
+      dataRequest<any[]>(`invoice_payments?select=*${scoped()}&order=paid_at.asc`), dataRequest<any[]>(`charges?select=*${scoped()}`),
+      dataRequest<any[]>(`caisse_sessions?select=*${scoped()}`),
       dataRequest<any[]>("platform_users?select=id,nom,initials,color"),
-      dataRequest<any[]>("audit_log?select=*&order=created_at.desc"),
+      dataRequest<any[]>(`audit_log?select=*${scoped()}&order=created_at.desc`),
     ]);
     const userById = new Map(users.map((u: any) => [u.id, u]));
     const day = (value?: string | null) => value ? new Date(value).toLocaleDateString("fr-FR") : "";

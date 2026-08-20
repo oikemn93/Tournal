@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { getData, saveData, checkBackend, stripImages, mergeImages, signQZ, sendInvoiceEmail, storePDFForSMS, getCurrentAuthUser, hasAuthenticatedSession, validateServerSession, signInWithPhone, changeOwnPassword, getPinStatus, setQuickPin, verifyQuickPin, startAppSession, lockAppSession, signOut as signOutFromSupabase, createBoutique, createUser, resetUserPassword, subscribeToBoutiqueChanges, assignUserToBoutique, unassignUserFromBoutique, upsertAssignmentDirect, deleteAssignmentDirect, recordAuditLog } from "../lib/api";
+import { getData, saveData, checkBackend, stripImages, mergeImages, signQZ, sendInvoiceEmail, storePDFForSMS, getCurrentAuthUser, hasAuthenticatedSession, validateServerSession, getAuthBootstrap, signInWithPhone, changeOwnPassword, getPinStatus, setQuickPin, verifyQuickPin, startAppSession, lockAppSession, signOut as signOutFromSupabase, createBoutique, createUser, resetUserPassword, subscribeToBoutiqueChanges, assignUserToBoutique, unassignUserFromBoutique, upsertAssignmentDirect, deleteAssignmentDirect, recordAuditLog } from "../lib/api";
 import { getNotifications, markNotificationRead, markAllNotificationsRead, dismissAllNotifications, subscribeToNotifications, getPushState, enableWebPush, disableWebPush, syncWebPushBoutique, type PushState } from "../lib/notifications";
 import { toast, Toaster } from "sonner";
 import {
@@ -8584,6 +8584,7 @@ export default function App() {
   const [currentUser,      setCurrentUser]      = useState<PlatformUser|null>(null);
   const [activeBoutiqueId, setActiveBoutiqueId] = useState<string|null>(null);
   const [activeAssign,     setActiveAssign]     = useState<BoutiqueAssignment|null>(null);
+  const [businessLoading,  setBusinessLoading]  = useState(false);
   const [tab,              setTab]              = useState<Tab>("dashboard");
   const [navFilter,        setNavFilter]        = useState<Record<string,string>>({});
   const [synced,           setSynced]           = useState(false);
@@ -8835,8 +8836,9 @@ export default function App() {
     if (isSaving.current || Object.keys(pendingSaves.current).length > 0) return;
     isPulling.current = true;
     try {
+      const bid = activeBoutiqueIdRef.current;
       const [remoteB, remoteU, remoteG] = await Promise.all([
-        getData<Boutique[]>("boutiques"),
+        bid ? getData<Boutique[]>(`boutique:${bid}`) : Promise.resolve(null),
         getData<PlatformUser[]>("platform_users"),
         getData<Groupe[]>("groupes"),
       ]);
@@ -8847,7 +8849,13 @@ export default function App() {
           // Boutiques changed — fetch images too (a logo may have been updated)
           const remoteImgs = await getData<Record<string,string>>("boutique_images");
           const freshBoutiques = mergeImages(remoteB, remoteImgs ?? {}) as Boutique[];
-          setBoutiques(freshBoutiques);
+          if (bid && freshBoutiques[0]) {
+            setBoutiques(prev => prev.some(b=>b.id===bid)
+              ? prev.map(b=>b.id===bid?freshBoutiques[0]:b)
+              : [...prev, freshBoutiques[0]]);
+          } else {
+            setBoutiques(freshBoutiques);
+          }
           checkRecurringCharges(freshBoutiques);
         }
       }
@@ -8873,74 +8881,108 @@ export default function App() {
     }
   }, []);
 
-  const refreshAuthenticatedFlow = useCallback(async () => {
-      if (!hasAuthenticatedSession()) {
-        setSynced(true);
-        return;
+
+  const hydrateBoutique = useCallback(async (boutiqueId: string) => {
+    setBusinessLoading(true);
+    try {
+      const [remoteB, remoteU, remoteG] = await Promise.all([
+        getData<Boutique[]>(`boutique:${boutiqueId}`),
+        getData<PlatformUser[]>("platform_users"),
+        getData<Groupe[]>("groupes"),
+      ]);
+      if (remoteB?.[0]) {
+        const hydrated = remoteB[0];
+        lastRemoteB.current = JSON.stringify(remoteB);
+        setBoutiques(prev => prev.some(b=>b.id===boutiqueId)
+          ? prev.map(b=>b.id===boutiqueId?hydrated:b)
+          : [...prev, hydrated]);
+        checkRecurringCharges(remoteB);
       }
-      if (!await validateServerSession()) {
-        clearSession();
-        setSynced(true);
-        return;
+      if (remoteU?.length) {
+        lastRemoteU.current = JSON.stringify(remoteU);
+        setPlatformUsers(remoteU);
       }
-      let finalUsers = INIT_PLATFORM_USERS;
-      let finalBoutiques: Boutique[] = [];
-      try {
-        const ok = await checkBackend();
-        setBackendOk(ok);
-        const [remoteB, remoteU, remoteImgs, remoteG] = await Promise.all([
-          getData<Boutique[]>("boutiques"),
-          getData<PlatformUser[]>("platform_users"),
-          getData<Record<string,string>>("boutique_images"),
-          getData<Groupe[]>("groupes"),
-        ]);
-        if (remoteB && remoteB.length > 0) {
-          lastRemoteB.current = JSON.stringify(remoteB);
-          finalBoutiques = mergeImages(remoteB, remoteImgs ?? {}) as Boutique[];
-          setBoutiques(finalBoutiques);
-          checkRecurringCharges(finalBoutiques);
-        }
-        if (remoteU && remoteU.length > 0) {
-          lastRemoteU.current = JSON.stringify(remoteU);
-          finalUsers = remoteU;
-          setPlatformUsers(remoteU);
-        }
-        if (remoteG && remoteG.length > 0) setGroupes(remoteG);
-      } catch (e) {
-        setBackendOk(false);
-        toast.error("Backend inaccessible : " + String(e), { duration: 8000 });
-      } finally {
-        setSynced(true);
-        // Supabase owns the authenticated session. The browser storage below is
-        // used only to remember the last boutique, never as proof of identity.
-        const authUser = getCurrentAuthUser();
-        if (authUser?.id) {
-          const u = finalUsers.find(x => x.id === authUser.id);
-          if (u) {
-            setCurrentUser(u);
-            if (u.isSuspended) {
-              await signOutFromSupabase(); clearSession(); setCurrentUser(null); setScreen("login");
-              toast.error("Compte suspendu — contactez l’administrateur Tournal"); return;
-            }
-            if (u.mustChangePassword) { setScreen("password-change"); return; }
-            const pinState = await getPinStatus().catch(() => ({ configured:false }));
-            if (!pinState.configured) { setScreen("pin-setup"); return; }
-            if (u.isSuperAdmin) { setScreen("superadmin"); return; }
-            const assignments = u.assignments.filter(a => finalBoutiques.some(b => b.id === a.boutiqueId));
-            if (assignments.length === 1) {
-              const assign = assignments[0];
-              setActiveBoutiqueId(assign.boutiqueId);
-              setActiveAssign(assign);
-              loadAuthSettings(assign.boutiqueId);
-              setTab("dashboard");
-              setScreen("app");
-              return;
-            }
-            setScreen("boutique-select");
-          }
-        }
-      }
+      if (remoteG?.length) setGroupes(remoteG);
+      setLastSyncAt(Date.now());
+      void checkBackend().then(setBackendOk).catch(()=>setBackendOk(false));
+    } catch (error) {
+      setBackendOk(false);
+      toast.error("Données boutique indisponibles : " + (error instanceof Error ? error.message : String(error)), { duration:8000 });
+    } finally {
+      setBusinessLoading(false);
+    }
   }, []);
+
+  const refreshAuthenticatedFlow = useCallback(async () => {
+    if (!hasAuthenticatedSession()) {
+      setSynced(true);
+      setScreen("login");
+      return;
+    }
+    if (!await validateServerSession()) {
+      clearSession();
+      setCurrentUser(null);
+      setSynced(true);
+      setScreen("login");
+      return;
+    }
+    try {
+      const bootstrap = await getAuthBootstrap();
+      if (!bootstrap?.user) throw new Error("Profil utilisateur introuvable");
+      const user = bootstrap.user as PlatformUser;
+      const shellBoutiques = bootstrap.boutiques as Boutique[];
+      setCurrentUser(user);
+      setPlatformUsers([user]);
+      setBoutiques(shellBoutiques);
+      setGroupes((bootstrap.groupes ?? []) as Groupe[]);
+      setSynced(true);
+
+      if (user.isSuspended) {
+        await signOutFromSupabase(); clearSession(); setCurrentUser(null); setScreen("login");
+        toast.error("Compte suspendu — contactez l’administrateur Tournal");
+        return;
+      }
+      if (user.mustChangePassword) { setScreen("password-change"); return; }
+      const pinState = await getPinStatus().catch(() => ({ configured:false }));
+      if (!pinState.configured) { setScreen("pin-setup"); return; }
+
+      // The global admin shell needs account metadata, never all boutique business data.
+      if (user.isSuperAdmin) {
+        setScreen("superadmin");
+        setTimeout(() => { void Promise.all([
+          getData<PlatformUser[]>("platform_users"), getData<Groupe[]>("groupes"),
+        ]).then(([users, groups]) => {
+          if (users?.length) setPlatformUsers(users);
+          if (groups?.length) setGroupes(groups);
+          void checkBackend().then(setBackendOk).catch(()=>setBackendOk(false));
+        }).catch(()=>undefined); }, 0);
+        return;
+      }
+
+      const assignments = user.assignments.filter(a => shellBoutiques.some(b => b.id === a.boutiqueId));
+      const rememberedId = loadSession()?.boutiqueId ?? null;
+      const remembered = rememberedId ? assignments.find(a=>a.boutiqueId===rememberedId) : undefined;
+      const selected = remembered ?? (assignments.length === 1 ? assignments[0] : undefined);
+      if (selected) {
+        activeBoutiqueIdRef.current = selected.boutiqueId;
+        setActiveBoutiqueId(selected.boutiqueId);
+        setActiveAssign(selected);
+        setTab("dashboard");
+        saveSession(user.id, selected.boutiqueId, selected);
+        setBusinessLoading(true);
+        setScreen("app");
+        void loadAuthSettings(selected.boutiqueId);
+        setTimeout(() => { void hydrateBoutique(selected.boutiqueId); }, 0);
+        return;
+      }
+      saveSession(user.id, null, null);
+      setScreen("boutique-select");
+    } catch (error) {
+      setSynced(true);
+      setBackendOk(false);
+      toast.error("Connexion impossible : " + (error instanceof Error ? error.message : String(error)), { duration:8000 });
+    }
+  }, [hydrateBoutique]);
 
   useEffect(() => { void refreshAuthenticatedFlow(); }, [refreshAuthenticatedFlow]);
 
@@ -8958,7 +9000,7 @@ export default function App() {
   // Supabase Realtime pushes boutique changes to connected users.  A single
   // refresh follows each event; there is no periodic 2-second polling.
   useEffect(() => {
-    if (!synced || !hasAuthenticatedSession()) return;
+    if (!synced || businessLoading || !hasAuthenticatedSession()) return;
     const onVisible = () => {
       if (document.visibilityState !== "visible") return;
       void validateServerSession().then(valid => {
@@ -8969,7 +9011,7 @@ export default function App() {
     const unsubscribe = subscribeToBoutiqueChanges(activeBoutiqueId ?? "", pullRemote);
     document.addEventListener("visibilitychange", onVisible);
     return () => { unsubscribe(); document.removeEventListener("visibilitychange", onVisible); };
-  }, [synced, pullRemote, activeBoutiqueId]);
+  }, [synced, pullRemote, activeBoutiqueId, businessLoading]);
 
   // Boutique updates are persisted by domain-specific relational operations.
   // Never write a full JSON state blob from the client.
@@ -9091,7 +9133,9 @@ export default function App() {
     } else { saveSession(freshUser.id, null, null); setScreen("boutique-select"); }
   }
   function handleSelectBoutique(b: Boutique, assignment: BoutiqueAssignment) {
-    setActiveBoutiqueId(b.id); setActiveAssign(assignment); setTab("dashboard"); setScreen("app");
+    activeBoutiqueIdRef.current=b.id; setActiveBoutiqueId(b.id); setActiveAssign(assignment); setTab("dashboard"); setBusinessLoading(true); setScreen("app");
+    void loadAuthSettings(b.id);
+    setTimeout(()=>{ void hydrateBoutique(b.id); },0);
     if (currentUser) {
       saveSession(currentUser.id, b.id, assignment);
       logTech(b.id, { level:"info", cat:"session", msg:`Connexion : ${currentUser.nom}`, detail: assignment.role });
@@ -9099,7 +9143,9 @@ export default function App() {
   }
   function handleEnterBoutiqueAsAdmin(b: Boutique) {
     const assign: BoutiqueAssignment = { boutiqueId:b.id, role:"Propriétaire", droits:{ dashboard:true, stock:true, fournisseurs:true, clients:true, factures:true, remboursement:true, charges:true, compta:true, vente:true, inventaire:true, marges:true } };
-    setActiveBoutiqueId(b.id); setActiveAssign(assign); setTab("dashboard"); setScreen("app");
+    activeBoutiqueIdRef.current=b.id; setActiveBoutiqueId(b.id); setActiveAssign(assign); setTab("dashboard"); setBusinessLoading(true); setScreen("app");
+    void loadAuthSettings(b.id);
+    setTimeout(()=>{ void hydrateBoutique(b.id); },0);
     if (currentUser) saveSession(currentUser.id, b.id, assign);
   }
   function handleLogout() {
@@ -9360,6 +9406,12 @@ export default function App() {
           </button>
         </div>
       </header>
+      {businessLoading && <div className="fixed inset-x-0 top-[72px] bottom-[64px] z-40 bg-background/90 backdrop-blur-[2px] flex items-center justify-center px-6">
+        <div className="flex flex-col items-center gap-3 text-center">
+          <div className="w-8 h-8 rounded-full border-2 border-border border-t-foreground animate-spin"/>
+          <div><p className="text-sm font-black">Ouverture de la boutique…</p><p className="text-xs text-muted-foreground mt-1">Les données métier se chargent en arrière-plan.</p></div>
+        </div>
+      </div>}
       {isReadOnly && <div className="flex items-center gap-2 px-4 py-2 text-xs font-bold text-amber-800 bg-amber-50 border-b border-amber-200"><Lock size={12}/> Mode lecture seule — aucune modification possible</div>}
       <main className="flex-1 overflow-y-auto px-4 py-4 pb-20" style={{ scrollbarWidth:"none" }}>
         {safeTab==="dashboard"    && canAccess("dashboard") && <DashboardView boutique={boutique} onNavigate={(t,f)=>{setNavFilter(f??{});setTab(t);}}/>}
