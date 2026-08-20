@@ -68,7 +68,7 @@ async function dataRequest<T>(path: string, init: RequestInit = {}): Promise<T> 
 
 export async function getNotifications(limit = 80) {
   return dataRequest<ServerNotification[]>(
-    `notifications?select=id,user_id,boutique_id,category,title,body,icon,action_tab,action_filter,created_at,read_at,dismissed_at&dismissed_at=is.null&order=created_at.desc&limit=${Math.max(1,Math.min(limit,100))}`,
+    `notifications?select=id,user_id,boutique_id,category,title,body,icon,action_tab,action_filter,created_at,read_at,dismissed_at&dismissed_at=is.null&in_app_enabled=eq.true&order=created_at.desc&limit=${Math.max(1,Math.min(limit,100))}`,
   );
 }
 
