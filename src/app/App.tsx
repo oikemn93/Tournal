@@ -1104,7 +1104,7 @@ const LOGIN_MAX_ATTEMPTS = 5;      // failed tries before the device locks
 const LOGIN_LOCK_MS = 2 * 60_000;  // lockout duration (mirrors auth_settings.lock_minutes default)
 const LOGIN_LOCK_KEY = "tournal:login_lock";
 
-function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
+function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void | Promise<void> }) {
   const [phone, setPhone] = useState("+221 ");
   const [pwd, setPwd] = useState("");
   const [show, setShow] = useState(false);
@@ -1134,7 +1134,7 @@ function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
       await signInWithPhone(phone, pwd);
       setErr(""); setAttempts(0); setLockedUntil(0);
       if (typeof localStorage !== "undefined") localStorage.removeItem(LOGIN_LOCK_KEY);
-      onAuthenticated();
+      await onAuthenticated();
     } catch (error) {
       const next = attempts + 1;
       setAttempts(next); setPwd("");
@@ -1167,7 +1167,7 @@ function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
   </div>;
 }
 
-function RequiredPasswordChangeScreen({ onComplete }: { onComplete: () => void }) {
+function RequiredPasswordChangeScreen({ onComplete }: { onComplete: () => void | Promise<void> }) {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [show, setShow] = useState(false);
@@ -1178,7 +1178,7 @@ function RequiredPasswordChangeScreen({ onComplete }: { onComplete: () => void }
     if (password.length < 12) { setError("Le mot de passe doit comporter au moins 12 caractères."); return; }
     if (password !== confirm) { setError("Les deux mots de passe ne correspondent pas."); return; }
     setLoading(true);
-    try { await changeOwnPassword(password); onComplete(); }
+    try { await changeOwnPassword(password); await onComplete(); }
     catch (e) { setError(e instanceof Error ? e.message : "Modification impossible"); }
     finally { setLoading(false); }
   }
@@ -1196,7 +1196,7 @@ function RequiredPasswordChangeScreen({ onComplete }: { onComplete: () => void }
   </div>;
 }
 
-function PinSetupScreen({ onComplete }: { onComplete: () => void }) {
+function PinSetupScreen({ onComplete }: { onComplete: () => void | Promise<void> }) {
   const [pin, setPin] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState("");
@@ -1206,7 +1206,7 @@ function PinSetupScreen({ onComplete }: { onComplete: () => void }) {
     if (!/^\d{6}$/.test(pin)) { setError("Le PIN doit comporter exactement 6 chiffres."); return; }
     if (pin !== confirm) { setError("Les deux PIN ne correspondent pas."); return; }
     setLoading(true);
-    try { await setQuickPin(pin); onComplete(); }
+    try { await setQuickPin(pin); await onComplete(); }
     catch(e) { setError(e instanceof Error ? e.message : "Configuration du PIN impossible"); }
     finally { setLoading(false); }
   }
@@ -9197,9 +9197,9 @@ export default function App() {
   const headLabel: Record<Tab,string> = { dashboard:"Accueil", stock:"Stock", fournisseurs:"Fournisseurs", clients:"Clients", factures:"Factures", pos:"Vente", charges:"Charges", compta:"Rapport", admin:"Admin", inventaire:"Inventaire physique", transferts:"Transferts B2B" };
 
 
-  if (screen==="login") return <LoginScreen onAuthenticated={() => void refreshAuthenticatedFlow()}/>;
-  if (screen==="password-change"&&currentUser) return <RequiredPasswordChangeScreen onComplete={() => void refreshAuthenticatedFlow()}/>;
-  if (screen==="pin-setup"&&currentUser) return <PinSetupScreen onComplete={() => void refreshAuthenticatedFlow()}/>;
+  if (screen==="login") return <LoginScreen onAuthenticated={refreshAuthenticatedFlow}/>;
+  if (screen==="password-change"&&currentUser) return <RequiredPasswordChangeScreen onComplete={refreshAuthenticatedFlow}/>;
+  if (screen==="pin-setup"&&currentUser) return <PinSetupScreen onComplete={refreshAuthenticatedFlow}/>;
   if (screen==="superadmin"&&currentUser) return (
     <SuperAdminScreen boutiques={boutiques} platformUsers={platformUsers} groupes={groupes}
       onEnterBoutique={handleEnterBoutiqueAsAdmin}
