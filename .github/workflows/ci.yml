@@ -7,9 +7,39 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
+  apply-password-pin-patch:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'feature/separate-password-pin-20260820'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/separate-password-pin-20260820
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply patch once
+        run: |
+          if grep -q 'function PinSetupScreen' src/app/App.tsx; then
+            echo 'Password/PIN source already patched'
+          else
+            python scripts/separate_password_pin_patch.py
+          fi
+      - name: Commit patched source
+        run: |
+          if git diff --quiet; then
+            echo 'No patch changes to commit'
+            exit 0
+          fi
+          git config user.name 'Tournal activation bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add src/app/App.tsx src/lib/api.ts supabase/functions/admin-provision/index.ts
+          git commit -m 'feat: separate auth password from quick PIN'
+          git push origin HEAD:feature/separate-password-pin-20260820
+
   build-and-security:
     runs-on: ubuntu-latest
     timeout-minutes: 15
