@@ -22,7 +22,7 @@ jobs:
       - name: Apply guarded notification isolation patch
         if: github.event_name == 'pull_request' && github.head_ref == 'fix/notification-boutique-isolation-current-20260820'
         run: |
-          python scripts/notification_boutique_isolation_patch.py
+          python scripts/notification_boutique_isolation_patch2.py
           if ! git diff --quiet; then
             git config user.name github-actions[bot]
             git config user.email 41898282+github-actions[bot]@users.noreply.github.com
