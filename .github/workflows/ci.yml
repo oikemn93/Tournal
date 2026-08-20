@@ -53,14 +53,19 @@ jobs:
           ! grep -n 'localStorage.setItem(SESSION_STORAGE_KEY' src/lib/api.ts
           grep -n 'sessionStorage.getItem(SESSION_STORAGE_KEY)' src/lib/api.ts
 
+      - name: Prevent fixed-interval network polling
+        run: node scripts/check-no-network-polling.mjs
+
       - name: Verify temporary patchers are gone
         shell: bash
         run: |
           set -euo pipefail
           test ! -e scripts/refund_method_patch.py
           test ! -e scripts/security_hardening_patch.py
+          test ! -e scripts/realtime_coverage_patch.py
           test ! -e .github/workflows/refund-method-patcher.yml
           test ! -e .github/workflows/security-hardening-patcher.yml
+          test ! -e .github/workflows/realtime-coverage-patcher.yml
 
       - name: Production build
         run: pnpm build

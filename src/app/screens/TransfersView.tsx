@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowRightLeft, ArrowUpRight, ArrowDownLeft, Check, FileText, Loader2, Plus, Trash2, X, PackageCheck, PackageX, Clock, Search, Building2, UserPlus, UserMinus } from "lucide-react";
 import { toast } from "sonner";
 import type { Boutique, PlatformUser } from "../types";
-import { acceptStockTransfer, createStockTransfer, getStockTransfers, rejectStockTransfer, searchBoutiqueDirectory, getBoutiquePartners, addBoutiquePartner, removeBoutiquePartner, type RelationalTransfer, type BoutiqueDirectoryEntry } from "../../lib/api";
+import { acceptStockTransfer, createStockTransfer, getStockTransfers, rejectStockTransfer, searchBoutiqueDirectory, getBoutiquePartners, addBoutiquePartner, removeBoutiquePartner, subscribeToStockTransfers, type RelationalTransfer, type BoutiqueDirectoryEntry } from "../../lib/api";
 import { productQty } from "../utils/inventory";
 import { getLastSalePrice } from "../utils/sales";
 import { fmt } from "../utils/formatting";
@@ -117,6 +117,7 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
   }, [boutique.id]);
 
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => subscribeToStockTransfers(boutique.id, () => { void load(); }), [boutique.id, load]);
 
   async function runDirectorySearch(query = directoryQuery) {
     const digits = query.replace(/\D/g, "");
