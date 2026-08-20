@@ -167,15 +167,11 @@ export async function enableWebPush() {
   if (permission !== "granted") throw new Error("Autorisation de notifications refusée");
 
   const registration = await getRegistration();
-  const [publicKey] = await dataRequest<string[]>("rpc/get_push_public_key", {
+  const publicKey = await dataRequest<string>("rpc/get_push_public_key", {
     method: "POST",
-    headers: { Prefer: "return=representation" },
     body: JSON.stringify({}),
-  }).catch(async () => {
-    const value = await dataRequest<string>("rpc/get_push_public_key", { method:"POST", body:JSON.stringify({}) });
-    return [value];
   });
-  if (!publicKey) throw new Error("Clé Push indisponible");
+  if (!publicKey || typeof publicKey !== "string") throw new Error("Clé Push indisponible");
 
   let subscription = await registration.pushManager.getSubscription();
   if (!subscription) {
