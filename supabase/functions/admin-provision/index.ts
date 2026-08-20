@@ -32,9 +32,10 @@ Deno.serve(async (req) => {
     if (authError || !caller) return json({ error:"Token invalide" },401);
 
     const { data:callerPlatform, error:platformErr } = await admin.from("platform_users")
-      .select("id,is_super_admin,is_suspended").eq("id",caller.id).single();
+      .select("id,is_super_admin,is_suspended,must_change_password").eq("id",caller.id).single();
     if (platformErr || !callerPlatform) return json({ error:"Impossible de vérifier les privilèges" },403);
     if (callerPlatform.is_suspended) return json({ error:"Compte suspendu" },403);
+    if (callerPlatform.must_change_password) return json({ error:"Changement de mot de passe requis" },403);
     const isSuperAdmin = callerPlatform.is_super_admin === true;
 
     async function isOwnerOf(boutiqueId:string):Promise<boolean> {
@@ -81,7 +82,7 @@ Deno.serve(async (req) => {
       const { count }=await admin.from("platform_users").select("*",{count:"exact",head:true});
       const color=colors[(count ?? 0)%colors.length];
       const payload={ id:uid,phone,nom:fullName,initials:initialsOf(fullName),color,is_super_admin:false,is_suspended:false,must_change_password:true };
-      const { error:puErr }=await admin.from("platform_users").upsert(payload,{onConflict:"id",ignoreDuplicates:true});
+      const { error:puErr }=await admin.from("platform_users").upsert(payload,{onConflict:"id"});
       if (puErr) {
         const conflictText=`${puErr.message ?? ""} ${puErr.details ?? ""}`;
         const phoneConflict=puErr.code==="23505" && /phone|platform_users_phone_key/i.test(conflictText);
