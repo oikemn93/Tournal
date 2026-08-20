@@ -48,12 +48,13 @@ Deno.serve(async (req) => {
       .select("id,user_id,boutique_id,category,title,body,icon,action_tab")
       .eq("id", notificationId)
       .maybeSingle();
-    if (notificationError || !notification) return json({ error: "Notification not found" }, 404);
+    if (notificationError || !notification || !notification.boutique_id) return json({ error: "Notification not found" }, 404);
 
     const { data: subscriptions, error: subscriptionsError } = await admin
       .from("push_subscriptions")
       .select("id,endpoint,p256dh,auth")
       .eq("user_id", notification.user_id)
+      .eq("boutique_id", notification.boutique_id)
       .eq("enabled", true);
     if (subscriptionsError) return json({ error: "Subscription lookup failed" }, 500);
 
@@ -64,7 +65,7 @@ Deno.serve(async (req) => {
     );
 
     const tab = notification.action_tab ? `&tab=${encodeURIComponent(notification.action_tab)}` : "";
-    const boutique = notification.boutique_id ? `&boutique=${encodeURIComponent(notification.boutique_id)}` : "";
+    const boutique = `&boutique=${encodeURIComponent(notification.boutique_id)}`;
     const payload = JSON.stringify({
       title: notification.title,
       body: notification.body,
