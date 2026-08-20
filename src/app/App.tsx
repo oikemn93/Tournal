@@ -24,6 +24,7 @@ import { ChargesView as RelationalChargesView } from "./screens/ChargesView";
 import { ComptabiliteView as RelationalComptabiliteView } from "./screens/RapportView";
 import { TransfersView as RelationalTransfersView } from "./screens/TransfersView";
 import { SuperAdminUserActions } from "./components/SuperAdminUserActions";
+import { NotificationCenter } from "./components/NotificationCenter";
 import { filterPaymentEventsByPeriod, invoicePaymentEvents, invoiceRemainingAmount } from "./utils/payments";
 
 const ReadOnlyCtx = React.createContext(false);
@@ -8598,6 +8599,7 @@ export default function App() {
   const [moreOpen,         setMoreOpen]         = useState(false);
   const [notifs,           setNotifs]           = useState<Notif[]>([]);
   const [notifOpen,        setNotifOpen]        = useState(false);
+  const [notificationCenterOpen,setNotificationCenterOpen] = useState(false);
   const [pushState,        setPushState]        = useState<PushState>({ supported:false, permission:"unsupported", subscribed:false, iosNeedsInstall:false });
   const [pushBusy,         setPushBusy]         = useState(false);
   const notifiedLowStock = useRef(new Set<number>());
@@ -9400,7 +9402,10 @@ export default function App() {
         <div className="fixed inset-0 z-[80]" onClick={()=>setNotifOpen(false)}>
           <div className="absolute top-16 right-4 w-[340px] max-w-[calc(100vw-2rem)] bg-card rounded-2xl border border-border shadow-2xl overflow-hidden" onClick={e=>e.stopPropagation()}>
             <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-              <p className="font-black text-sm">Notifications</p>
+              <div className="flex items-center gap-2">
+                <p className="font-black text-sm">Notifications</p>
+                <button onClick={()=>{setNotifOpen(false);setNotificationCenterOpen(true);}} className="text-xs font-black px-2.5 py-1.5 rounded-lg" style={{background:"#111827",color:"#fff"}}>Tout voir</button>
+              </div>
               <div className="flex items-center gap-3">
                 <button onClick={togglePushNotifications} disabled={pushBusy} title={pushState.iosNeedsInstall?"Sur iPhone/iPad, installez Tournal sur l’écran d’accueil":pushState.permission==="denied"?"Notifications bloquées dans les réglages du navigateur":pushState.supported?"Activer les notifications système sur cet appareil":"Vérifier la compatibilité Push de cet appareil"} className="text-xs font-black px-3 py-2 rounded-xl disabled:opacity-50 transition-all active:scale-95" style={{background:pushState.subscribed?"#dcfce7":pushState.iosNeedsInstall?"#ffedd5":pushState.permission==="denied"?"#fee2e2":pushState.supported?"#C9A227":"#fef3c7",color:pushState.subscribed?"#166534":pushState.iosNeedsInstall?"#c2410c":pushState.permission==="denied"?"#b91c1c":pushState.supported?"#ffffff":"#92400e",border:`1px solid ${pushState.subscribed?"#86efac":pushState.iosNeedsInstall?"#fdba74":pushState.permission==="denied"?"#fca5a5":pushState.supported?"#C9A227":"#fcd34d"}`}}>{pushBusy?"Vérification…":pushState.subscribed?"Push actif ✓":pushState.iosNeedsInstall?"Installer PWA":pushState.permission==="denied"?"Push bloqué":pushState.supported?"Activer Push":"Tester Push"}</button>
                 {notifs.some(n=>!n.read) && (
@@ -9440,6 +9445,17 @@ export default function App() {
         </div>,
         document.body
       )}
+      <NotificationCenter
+        open={notificationCenterOpen}
+        onClose={()=>setNotificationCenterOpen(false)}
+        boutiques={boutiques.map(b=>({id:b.id,nom:b.nom}))}
+        activeBoutiqueId={activeBoutiqueId!}
+        canManageSettings={currentUser.isSuperAdmin || isOwner}
+        onNavigate={(targetTab,filter)=>{
+          const found=ALL_NAV.find(n=>n.id===targetTab);
+          if(found){ setTab(found.id); if(filter) setNavFilter(filter); }
+        }}
+      />
       <nav className="fixed bottom-0 left-0 right-0 z-50 bg-card" style={{ borderTop:"1px solid rgba(0,0,0,0.08)" }}>
         <div className="flex">
           {navPrimary.map(({ id,label,Icon })=>{const active=safeTab===id;return(
