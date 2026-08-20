@@ -211,11 +211,15 @@ export async function setQuickPin(pin: string) {
   );
 }
 
-export async function verifyQuickPin(pin: string) {
+export async function verifyQuickPin(pin: string, boutiqueId: string) {
   if (!/^\d{6}$/.test(pin)) return { ok:false, configured:true, attemptsRemaining:0 } as const;
   return dataRequest<{ ok:boolean; configured:boolean; attemptsRemaining?:number; lockedUntil?:string|null }>(
-    "rpc/verify_quick_pin", { method:"POST", body:JSON.stringify({ p_pin:pin }) },
+    "rpc/verify_quick_pin", { method:"POST", body:JSON.stringify({ p_pin:pin, p_boutique_id:boutiqueId }) },
   );
+}
+
+export async function lockAppSession(boutiqueId: string) {
+  return dataRequest<void>("rpc/lock_app_session", { method:"POST", body:JSON.stringify({ p_boutique_id:boutiqueId }) });
 }
 
 export async function resetUserQuickPin(userId: string) {

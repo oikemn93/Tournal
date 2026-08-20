@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { getData, saveData, checkBackend, stripImages, mergeImages, signQZ, sendInvoiceEmail, storePDFForSMS, getCurrentAuthUser, hasAuthenticatedSession, validateServerSession, signInWithPhone, changeOwnPassword, getPinStatus, setQuickPin, verifyQuickPin, signOut as signOutFromSupabase, createBoutique, createUser, resetUserPassword, subscribeToBoutiqueChanges, assignUserToBoutique, unassignUserFromBoutique, upsertAssignmentDirect, deleteAssignmentDirect, recordAuditLog } from "../lib/api";
+import { getData, saveData, checkBackend, stripImages, mergeImages, signQZ, sendInvoiceEmail, storePDFForSMS, getCurrentAuthUser, hasAuthenticatedSession, validateServerSession, signInWithPhone, changeOwnPassword, getPinStatus, setQuickPin, verifyQuickPin, startAppSession, lockAppSession, signOut as signOutFromSupabase, createBoutique, createUser, resetUserPassword, subscribeToBoutiqueChanges, assignUserToBoutique, unassignUserFromBoutique, upsertAssignmentDirect, deleteAssignmentDirect, recordAuditLog } from "../lib/api";
 import { toast, Toaster } from "sonner";
 import {
   LayoutDashboard, Package, Users, Truck, FileText, ShieldCheck,
@@ -8875,11 +8875,20 @@ export default function App() {
 
   // Auto-lock + auto-logout on inactivity (only when on "app" screen)
   useEffect(() => {
+    if (screen !== "app" || !activeBoutiqueId) return;
+    void startAppSession(activeBoutiqueId).catch((error) => {
+      console.warn("Impossible d’ouvrir la session applicative", error);
+    });
+  }, [screen, activeBoutiqueId]);
+
+  useEffect(() => {
     if (screen !== "app") return;
     function resetTimers() {
       if (lockTimer.current)   clearTimeout(lockTimer.current);
       if (logoutTimer.current) clearTimeout(logoutTimer.current);
       lockTimer.current   = setTimeout(() => {
+        const bid = activeBoutiqueIdRef.current;
+        if (bid) void lockAppSession(bid).catch(() => undefined);
         try { sessionStorage.setItem(APP_LOCK_KEY, "1"); } catch {}
         setLocked(true);
       }, LOCK_TIMEOUT_MS);
@@ -9156,7 +9165,7 @@ export default function App() {
     const unlock = async () => {
       if (!/^\d{6}$/.test(lockPin)) { toast.error("Entrez votre PIN à 6 chiffres"); return; }
       try {
-        const result = await verifyQuickPin(lockPin);
+        const result = await verifyQuickPin(lockPin, activeBoutiqueId);
         setLockPin("");
         if (result.ok) {
           try { sessionStorage.removeItem(APP_LOCK_KEY); } catch {}
