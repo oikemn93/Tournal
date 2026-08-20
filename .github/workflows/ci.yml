@@ -26,6 +26,7 @@ jobs:
           if grep -q 'function PinSetupScreen' src/app/App.tsx; then
             echo 'Password/PIN source already patched'
           else
+            python scripts/prepare_edge_password_pin.py
             python scripts/separate_password_pin_patch.py
           fi
       - name: Commit patched source
