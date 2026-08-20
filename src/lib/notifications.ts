@@ -150,26 +150,38 @@ async function getRegistration() {
 }
 
 export async function getPushState(): Promise<PushState> {
+  const iosNeedsInstall = typeof window !== "undefined" && isIos() && !isStandalonePwa();
   const supported = typeof window !== "undefined"
     && "Notification" in window
     && "serviceWorker" in navigator
     && "PushManager" in window;
+
+  // iOS only exposes Web Push to Home Screen web apps. In Safari itself the
+  // Notification/PushManager APIs can be absent, but the device is still
+  // eligible once the PWA is installed. Report that state separately so the UI
+  // can guide the user instead of rendering a permanently disabled button.
+  if (iosNeedsInstall) {
+    return { supported:true, permission:"default", subscribed:false, iosNeedsInstall:true };
+  }
   if (!supported) return { supported:false, permission:"unsupported", subscribed:false, iosNeedsInstall:false };
-  const iosNeedsInstall = isIos() && !isStandalonePwa();
+
   let subscribed = false;
   try {
     const registration = await navigator.serviceWorker.getRegistration("/");
     subscribed = Boolean(await registration?.pushManager.getSubscription());
   } catch {}
-  return { supported:true, permission:Notification.permission, subscribed, iosNeedsInstall };
+  return { supported:true, permission:Notification.permission, subscribed, iosNeedsInstall:false };
 }
 
 export async function enableWebPush() {
+  // On iPhone/iPad the install requirement must be checked before API feature
+  // detection because Safari may intentionally hide Notification/PushManager
+  // until the site is launched from the Home Screen.
+  if (isIos() && !isStandalonePwa()) {
+    throw new Error("Sur iPhone/iPad : Safari → Partager → Sur l’écran d’accueil. Ouvrez ensuite Tournal depuis l’icône installée et activez les notifications.");
+  }
   if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) {
     throw new Error("Les notifications Push ne sont pas supportées sur ce navigateur");
-  }
-  if (isIos() && !isStandalonePwa()) {
-    throw new Error("Sur iPhone/iPad, installez d’abord Tournal sur l’écran d’accueil, puis activez les notifications depuis l’app installée");
   }
 
   const permission = Notification.permission === "granted"
