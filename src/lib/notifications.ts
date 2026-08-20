@@ -113,11 +113,25 @@ export function subscribeToNotifications(onChange: () => void) {
   }
 }
 
-function urlBase64ToUint8Array(base64String: string) {
-  const padding = "=".repeat((4 - base64String.length % 4) % 4);
-  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
-  const raw = atob(base64);
-  return Uint8Array.from([...raw].map(ch => ch.charCodeAt(0)));
+function urlBase64ToUint8Array(value: string) {
+  let normalized = String(value ?? "").trim();
+  if ((normalized.startsWith('"') && normalized.endsWith('"')) || (normalized.startsWith("'") && normalized.endsWith("'"))) {
+    normalized = normalized.slice(1, -1).trim();
+  }
+  normalized = normalized.replace(/\s+/g, "");
+  if (!normalized || !/^[A-Za-z0-9_-]+$/.test(normalized)) {
+    throw new Error("Clé Push publique invalide");
+  }
+  const base64 = normalized.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = base64 + "=".repeat((4 - base64.length % 4) % 4);
+  try {
+    const raw = window.atob(padded);
+    const bytes = Uint8Array.from(raw, ch => ch.charCodeAt(0));
+    if (bytes.length !== 65 || bytes[0] !== 4) throw new Error("invalid P-256 key");
+    return bytes;
+  } catch {
+    throw new Error("Clé Push publique mal encodée");
+  }
 }
 
 function isIos() {
