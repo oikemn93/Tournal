@@ -36,7 +36,6 @@ export function NotificationCenter({ open, onClose, boutiques, activeBoutiqueId,
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [search, setSearch] = useState("");
-  const [boutiqueFilter, setBoutiqueFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState<NotificationCategory|"all">("all");
   const [unreadOnly, setUnreadOnly] = useState(false);
   const [prefs, setPrefs] = useState<Record<string,NotificationPreference>>({});
@@ -55,7 +54,7 @@ export function NotificationCenter({ open, onClose, boutiques, activeBoutiqueId,
       const rows = await getNotificationHistory({
         limit: PAGE_SIZE,
         offset,
-        boutiqueId: boutiqueFilter === "all" ? undefined : boutiqueFilter,
+        boutiqueId: activeBoutiqueId,
         category: categoryFilter,
         unreadOnly,
         search,
@@ -93,20 +92,20 @@ export function NotificationCenter({ open, onClose, boutiques, activeBoutiqueId,
   useEffect(() => {
     if (!open) return;
     setSection("history");
-    setBoutiqueFilter("all");
+    setItems([]);
     setCategoryFilter("all");
     setUnreadOnly(false);
     setSearch("");
     void loadHistory(false);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, activeBoutiqueId]);
 
   useEffect(() => {
     if (!open || section !== "history") return;
     const id = window.setTimeout(() => { void loadHistory(false); }, 220);
     return () => window.clearTimeout(id);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [boutiqueFilter, categoryFilter, unreadOnly, search, section]);
+  }, [categoryFilter, unreadOnly, search, section, activeBoutiqueId]);
 
   useEffect(() => {
     if (open && section === "settings") void loadPrefs();
@@ -180,8 +179,11 @@ export function NotificationCenter({ open, onClose, boutiques, activeBoutiqueId,
         <>
           <div className="p-3 border-b border-border bg-card space-y-2 flex-shrink-0">
             <div className="relative"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Rechercher une notification…" className="w-full rounded-xl border border-border bg-muted pl-9 pr-3 py-2.5 text-sm outline-none"/></div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-              <select value={boutiqueFilter} onChange={e=>setBoutiqueFilter(e.target.value)} className="rounded-xl border border-border bg-card px-3 py-2.5 text-xs font-bold"><option value="all">Toutes les boutiques</option>{boutiques.map(b=><option key={b.id} value={b.id}>{b.nom}</option>)}</select>
+            <div className="flex items-center justify-between rounded-xl bg-muted px-3 py-2">
+              <div><p className="text-[10px] font-black uppercase tracking-wide text-muted-foreground">Boutique</p><p className="text-sm font-bold">{activeBoutiqueName}</p></div>
+              <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-lg">Isolée</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <select value={categoryFilter} onChange={e=>setCategoryFilter(e.target.value as NotificationCategory|"all")} className="rounded-xl border border-border bg-card px-3 py-2.5 text-xs font-bold"><option value="all">Tous les types</option>{NOTIFICATION_CATEGORIES.map(c=><option key={c.id} value={c.id}>{c.label}</option>)}</select>
               <button onClick={()=>setUnreadOnly(v=>!v)} className="rounded-xl border px-3 py-2.5 text-xs font-bold" style={{borderColor:unreadOnly?"#2563eb":"var(--border)",background:unreadOnly?"#eff6ff":"transparent",color:unreadOnly?"#1d4ed8":"#6b7280"}}>Non lues seulement</button>
               <button onClick={()=>void markAllRead()} className="rounded-xl border border-border px-3 py-2.5 text-xs font-bold">Tout marquer lu</button>
