@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tournal-shell-v2';
+const CACHE_NAME = 'tournal-shell-v3';
 const APP_SHELL = ['/', '/manifest.webmanifest'];
 
 self.addEventListener('install', (event) => {
@@ -69,12 +69,19 @@ self.addEventListener('notificationclick', (event) => {
   const target = new URL(event.notification.data?.url || '/', self.location.origin).href;
   event.waitUntil((async () => {
     const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+
+    // Important on iOS/iPadOS: do not navigate an already-open PWA window.
+    // Navigating first can recreate/reload the standalone context and lose the
+    // tab-scoped authenticated state. Focus the existing Tournal client instead.
     for (const client of windows) {
-      if ('navigate' in client) {
-        try { await client.navigate(target); } catch {}
-      }
+      try {
+        client.postMessage({ type: 'TOURNAL_NOTIFICATION_CLICK', url: target });
+      } catch {}
       if ('focus' in client) return client.focus();
     }
+
+    // If iOS has fully terminated the PWA there is no live authenticated window
+    // to reuse. Opening a new window is then the only standards-based option.
     return self.clients.openWindow ? self.clients.openWindow(target) : undefined;
   })());
 });
