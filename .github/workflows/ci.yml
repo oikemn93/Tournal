@@ -29,6 +29,7 @@ jobs:
             python scripts/prepare_edge_password_pin.py
             python scripts/separate_password_pin_patch.py
           fi
+          python scripts/finalize_password_pin_edge.py
       - name: Commit patched source
         run: |
           if git diff --quiet; then
@@ -38,7 +39,7 @@ jobs:
           git config user.name 'Tournal activation bot'
           git config user.email 'actions@users.noreply.github.com'
           git add src/app/App.tsx src/lib/api.ts supabase/functions/admin-provision/index.ts
-          git commit -m 'feat: separate auth password from quick PIN'
+          git commit -m 'security: harden password PIN activation flow'
           git push origin HEAD:feature/separate-password-pin-20260820
 
   build-and-security:
