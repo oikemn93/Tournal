@@ -1110,6 +1110,7 @@ function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
   const [show, setShow] = useState(false);
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
+  const passwordRef = useRef<HTMLInputElement>(null);
   const [attempts, setAttempts] = useState(0);
   const [lockedUntil, setLockedUntil] = useState<number>(() => {
     const raw = typeof localStorage !== "undefined" ? localStorage.getItem(LOGIN_LOCK_KEY) : null;
@@ -1154,14 +1155,14 @@ function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
       <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto" style={{background:"#C9A22722"}}><ShieldCheck size={32} style={{color:"#C9A227"}}/></div>
       <div className="text-center"><h1 className="text-2xl font-black">Connexion Tournal</h1><p className="text-sm text-muted-foreground mt-2">Utilisez votre mot de passe. Le PIN sert uniquement au déverrouillage rapide d’une session déjà ouverte.</p></div>
       <div><label className="text-xs font-black mb-2 block tracking-wider" style={{color:"#C9A227"}}>NUMÉRO DE TÉLÉPHONE</label>
-        <div className="relative"><Smartphone size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground"/><input value={phone} onChange={e=>{const v=e.target.value;setPhone(v.startsWith("+221 ")?v:"+221 ");setErr("");}} placeholder="+221 77 000 0000" type="tel" disabled={isLocked} className={inputCls+" pl-11"} onKeyDown={e=>e.key==="Enter"&&login()}/></div>
+        <div className="relative"><Smartphone size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground"/><input value={phone} onChange={e=>{const v=e.target.value;setPhone(v.startsWith("+221 ")?v:"+221 ");setErr("");}} placeholder="+221 77 000 0000" type="tel" inputMode="tel" autoComplete="tel" enterKeyHint="next" disabled={isLocked||loading} className={inputCls+" pl-11"} onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();passwordRef.current?.focus();}}}/></div>
       </div>
       <div><label className="text-xs font-black mb-2 block tracking-wider" style={{color:"#C9A227"}}>MOT DE PASSE</label>
-        <div className="relative"><Lock size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground"/><input value={pwd} onChange={e=>{setPwd(e.target.value);setErr("");}} placeholder="••••••••••••" type={show?"text":"password"} disabled={isLocked} className={inputCls+" pl-11 pr-12"} onKeyDown={e=>e.key==="Enter"&&login()}/><button onClick={()=>setShow(v=>!v)} className="absolute right-3.5 top-1/2 -translate-y-1/2">{show?<EyeOff size={18} className="text-muted-foreground"/>:<Eye size={18} className="text-muted-foreground"/>}</button></div>
+        <div className="relative"><Lock size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground"/><input ref={passwordRef} value={pwd} onChange={e=>{setPwd(e.target.value);setErr("");}} placeholder="••••••••••••" type={show?"text":"password"} autoComplete="current-password" enterKeyHint="go" disabled={isLocked||loading} className={inputCls+" pl-11 pr-12"} onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();void login();}}}/><button type="button" aria-label={show?"Masquer le mot de passe":"Afficher le mot de passe"} onClick={()=>setShow(v=>!v)} className="absolute right-3.5 top-1/2 -translate-y-1/2">{show?<EyeOff size={18} className="text-muted-foreground"/>:<Eye size={18} className="text-muted-foreground"/>}</button></div>
       </div>
       {err&&<div className="flex items-center gap-2 px-4 py-3 rounded-xl" style={{background:"#ef444415"}}><X size={14} style={{color:"#ef4444"}}/><p className="text-sm font-semibold" style={{color:"#ef4444"}}>{err}</p></div>}
       {isLocked&&<div className="flex items-center gap-2 px-4 py-3 rounded-xl" style={{background:"#ef444415"}}><Lock size={14} style={{color:"#ef4444"}}/><p className="text-sm font-semibold" style={{color:"#ef4444"}}>Réessayez dans {Math.floor(remainingSec/60)}:{String(remainingSec%60).padStart(2,"0")}</p></div>}
-      <button onClick={login} disabled={loading||isLocked} className="w-full py-4 rounded-2xl text-base font-black active:scale-95 disabled:opacity-60" style={{background:"#C9A227",color:"#fff",fontFamily:"'Nunito', sans-serif"}}>{loading?"Veuillez patienter…":isLocked?"Connexion bloquée":"Se connecter →"}</button>
+      <button onClick={()=>void login()} disabled={loading||isLocked||!pwd} className="w-full py-4 rounded-2xl text-base font-black active:scale-95 disabled:opacity-60 transition-all" style={{background:"#C9A227",color:"#fff",fontFamily:"'Nunito', sans-serif"}}>{loading?"Vérification du compte…":isLocked?"Connexion bloquée":"Se connecter →"}</button>
     </div>
   </div>;
 }
@@ -8592,6 +8593,8 @@ export default function App() {
     try { return sessionStorage.getItem(APP_LOCK_KEY) === "1"; } catch { return false; }
   });
   const [lockPin,          setLockPin]          = useState("");
+  const [lockBusy,         setLockBusy]         = useState(false);
+  const [lockError,        setLockError]        = useState("");
   const [moreOpen,         setMoreOpen]         = useState(false);
   const [notifs,           setNotifs]           = useState<Notif[]>([]);
   const [notifOpen,        setNotifOpen]        = useState(false);
@@ -8833,8 +8836,7 @@ export default function App() {
     finally { isPulling.current = false; }
   }, []);
 
-  useEffect(() => {
-    async function load() {
+  const refreshAuthenticatedFlow = useCallback(async () => {
       if (!hasAuthenticatedSession()) {
         setSynced(true);
         return;
@@ -8901,9 +8903,9 @@ export default function App() {
           }
         }
       }
-    }
-    load();
   }, []);
+
+  useEffect(() => { void refreshAuthenticatedFlow(); }, [refreshAuthenticatedFlow]);
 
   // Prevent accidental value changes when scrolling over a focused number input.
   // Blurring on wheel lets the scroll event propagate normally to the page.
@@ -9195,9 +9197,9 @@ export default function App() {
   const headLabel: Record<Tab,string> = { dashboard:"Accueil", stock:"Stock", fournisseurs:"Fournisseurs", clients:"Clients", factures:"Factures", pos:"Vente", charges:"Charges", compta:"Rapport", admin:"Admin", inventaire:"Inventaire physique", transferts:"Transferts B2B" };
 
 
-  if (screen==="login") return <LoginScreen onAuthenticated={() => window.location.reload()}/>;
-  if (screen==="password-change"&&currentUser) return <RequiredPasswordChangeScreen onComplete={() => window.location.reload()}/>;
-  if (screen==="pin-setup"&&currentUser) return <PinSetupScreen onComplete={() => window.location.reload()}/>;
+  if (screen==="login") return <LoginScreen onAuthenticated={() => void refreshAuthenticatedFlow()}/>;
+  if (screen==="password-change"&&currentUser) return <RequiredPasswordChangeScreen onComplete={() => void refreshAuthenticatedFlow()}/>;
+  if (screen==="pin-setup"&&currentUser) return <PinSetupScreen onComplete={() => void refreshAuthenticatedFlow()}/>;
   if (screen==="superadmin"&&currentUser) return (
     <SuperAdminScreen boutiques={boutiques} platformUsers={platformUsers} groupes={groupes}
       onEnterBoutique={handleEnterBoutiqueAsAdmin}
@@ -9226,20 +9228,28 @@ export default function App() {
 
   // Lock screen overlay
   if (locked && currentUser && screen === "app") {
-    const unlock = async () => {
-      if (!/^\d{6}$/.test(lockPin)) { toast.error("Entrez votre PIN à 6 chiffres"); return; }
+    const unlock = async (pinValue = lockPin) => {
+      if (lockBusy) return;
+      if (!/^\d{6}$/.test(pinValue)) { setLockError("Entrez votre PIN à 6 chiffres."); return; }
+      setLockBusy(true);
+      setLockError("");
       try {
-        const result = await verifyQuickPin(lockPin, activeBoutiqueId);
-        setLockPin("");
+        const result = await verifyQuickPin(pinValue, activeBoutiqueId);
         if (result.ok) {
+          setLockPin("");
           try { sessionStorage.removeItem(APP_LOCK_KEY); } catch {}
           setLocked(false);
           return;
         }
-        if (!result.configured) { setLocked(false); setScreen("pin-setup"); return; }
-        if (result.lockedUntil) { toast.error("PIN temporairement bloqué. Utilisez Changer de compte pour vous reconnecter avec votre mot de passe."); return; }
-        toast.error(`PIN incorrect${typeof result.attemptsRemaining === "number" ? ` · ${result.attemptsRemaining} essai(s) restant(s)` : ""}`);
-      } catch (e) { toast.error(e instanceof Error ? e.message : "Vérification du PIN impossible"); }
+        if (!result.configured) { setLockPin(""); setLocked(false); setScreen("pin-setup"); return; }
+        setLockPin("");
+        if (result.lockedUntil) { setLockError("PIN temporairement bloqué. Reconnectez-vous avec votre mot de passe."); return; }
+        setLockError(`PIN incorrect${typeof result.attemptsRemaining === "number" ? ` · ${result.attemptsRemaining} essai(s) restant(s)` : ""}`);
+      } catch (e) {
+        setLockError(e instanceof Error ? e.message : "Vérification du PIN impossible");
+      } finally {
+        setLockBusy(false);
+      }
     };
     return createPortal(
       <div className="fixed inset-0 z-[500] flex flex-col items-center justify-center" style={{ background:"rgba(0,0,0,0.92)", backdropFilter:"blur(12px)" }}>
@@ -9247,21 +9257,31 @@ export default function App() {
           <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-2xl font-black" style={{ background:currentUser.color+"22", color:currentUser.color, fontFamily:"'Nunito', sans-serif" }}>{currentUser.initials}</div>
           <div className="text-center">
             <p className="text-white font-black text-xl" style={{ fontFamily:"'Nunito', sans-serif" }}>{currentUser.nom}</p>
-            <p className="text-sm mt-1" style={{ color:"rgba(255,255,255,0.5)" }}>Session verrouillée · Entrez votre mot de passe</p>
+            <p className="text-sm mt-1" style={{ color:"rgba(255,255,255,0.55)" }}>Session verrouillée · Saisissez votre PIN rapide</p>
+          </div>
+          <div className="flex items-center gap-2" aria-hidden="true">
+            {Array.from({length:6}).map((_,i)=><span key={i} className="w-2.5 h-2.5 rounded-full transition-all" style={{ background:i<lockPin.length?currentUser.color:"rgba(255,255,255,0.18)", transform:i<lockPin.length?"scale(1.08)":"scale(1)" }}/>) }
           </div>
           <div className="w-full relative">
             <Lock size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color:"rgba(255,255,255,0.4)" }}/>
-            <input type="password" value={lockPin} onChange={e=>setLockPin(e.target.value)}
-              onKeyDown={e=>e.key==="Enter"&&unlock()}
-              placeholder="Mot de passe" autoFocus
-              className="w-full pl-10 pr-4 py-3.5 rounded-2xl text-sm font-semibold outline-none"
-              style={{ background:"rgba(255,255,255,0.1)", border:"1px solid rgba(255,255,255,0.15)", color:"#fff", caretColor:"#fff" }}/>
+            <input type="password" value={lockPin}
+              onChange={e=>{
+                const next=e.target.value.replace(/\D/g,"").slice(0,6);
+                setLockPin(next); setLockError("");
+                if(next.length===6&&!lockBusy) setTimeout(()=>void unlock(next),0);
+              }}
+              onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();void unlock();}}}
+              placeholder="PIN à 6 chiffres" autoFocus inputMode="numeric" pattern="[0-9]*" maxLength={6} autoComplete="off" enterKeyHint="done"
+              disabled={lockBusy}
+              className="w-full pl-10 pr-4 py-3.5 rounded-2xl text-center text-lg font-black tracking-[0.3em] outline-none disabled:opacity-60"
+              style={{ background:"rgba(255,255,255,0.1)", border:`1px solid ${lockError?"rgba(239,68,68,0.65)":"rgba(255,255,255,0.15)"}`, color:"#fff", caretColor:"#fff" }}/>
           </div>
-          <button onClick={unlock} className="w-full py-3.5 rounded-2xl font-black text-sm" style={{ background:currentUser.color, color:"#fff" }}>
-            Déverrouiller
+          {lockError&&<div role="alert" className="w-full px-3 py-2.5 rounded-xl text-xs font-bold text-center" style={{background:"rgba(239,68,68,0.12)",color:"#fca5a5"}}>{lockError}</div>}
+          <button onClick={()=>void unlock()} disabled={lockBusy||lockPin.length!==6} className="w-full py-3.5 rounded-2xl font-black text-sm disabled:opacity-55 transition-all" style={{ background:currentUser.color, color:"#fff" }}>
+            {lockBusy?"Vérification…":"Déverrouiller"}
           </button>
-          <button onClick={()=>{setLocked(false);setLockPin("");handleLogout();}} className="text-xs" style={{ color:"rgba(255,255,255,0.35)" }}>
-            Changer de compte
+          <button onClick={()=>{setLocked(false);setLockPin("");setLockError("");handleLogout();}} disabled={lockBusy} className="text-xs font-bold" style={{ color:"rgba(255,255,255,0.48)" }}>
+            Utiliser mon mot de passe / Changer de compte
           </button>
         </div>
       </div>,
