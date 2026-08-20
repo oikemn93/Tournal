@@ -114,6 +114,7 @@ type Boutique   = {
 // ─── SESSION STORAGE ─────────────────────────────────────────────────────────
 
 const SESSION_KEY = "tournal_session";
+const APP_LOCK_KEY = "tournal_app_locked";
 type StoredSession = { userId: string; boutiqueId: string | null; assignJson: string | null; loginAt?: number };
 const SESSION_EXPIRY_MS = 60 * 60 * 1000; // 60 min idle session default
 function saveSession(userId: string, boutiqueId: string | null, assign: BoutiqueAssignment | null) {
@@ -126,7 +127,7 @@ function loadSession(): StoredSession | null {
     return JSON.parse(s) as StoredSession;
   } catch { return null; }
 }
-function clearSession() { try { sessionStorage.removeItem(SESSION_KEY); } catch {} }
+function clearSession() { try { sessionStorage.removeItem(SESSION_KEY); sessionStorage.removeItem(APP_LOCK_KEY); } catch {} }
 
 // ─── TECHNICAL LOGGING ───────────────────────────────────────────────────────
 type TechLogCat   = "sync"|"email"|"pdf"|"qz"|"session"|"backend";
@@ -8586,7 +8587,9 @@ export default function App() {
   const [backendOk,        setBackendOk]        = useState<boolean|null>(null);
   const [saveState,        setSaveState]        = useState<"idle"|"saving"|"saved"|"error">("idle");
   const [lastSyncAt,       setLastSyncAt]       = useState(0);
-  const [locked,           setLocked]           = useState(false);
+  const [locked,           setLocked]           = useState(() => {
+    try { return sessionStorage.getItem(APP_LOCK_KEY) === "1"; } catch { return false; }
+  });
   const [lockPin,          setLockPin]          = useState("");
   const [moreOpen,         setMoreOpen]         = useState(false);
   const [notifs,           setNotifs]           = useState<Notif[]>([]);
@@ -8874,7 +8877,10 @@ export default function App() {
     function resetTimers() {
       if (lockTimer.current)   clearTimeout(lockTimer.current);
       if (logoutTimer.current) clearTimeout(logoutTimer.current);
-      lockTimer.current   = setTimeout(() => setLocked(true), LOCK_TIMEOUT_MS);
+      lockTimer.current   = setTimeout(() => {
+        try { sessionStorage.setItem(APP_LOCK_KEY, "1"); } catch {}
+        setLocked(true);
+      }, LOCK_TIMEOUT_MS);
       logoutTimer.current = setTimeout(() => {
         const bid = activeBoutiqueIdRef.current;
         if (bid) void logTech(bid, { level:"info", cat:"session", msg:"Session expirée après inactivité" });
@@ -9145,7 +9151,10 @@ export default function App() {
   // Lock screen overlay
   if (locked && currentUser && screen === "app") {
     const unlock = () => {
-      if (lockPin === currentUser.password) { setLocked(false); setLockPin(""); }
+      if (lockPin === currentUser.password) {
+        try { sessionStorage.removeItem(APP_LOCK_KEY); } catch {}
+        setLocked(false); setLockPin("");
+      }
       else { toast.error("Code incorrect"); setLockPin(""); }
     };
     return createPortal(
