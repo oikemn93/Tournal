@@ -1221,7 +1221,7 @@ function RequiredPasswordChangeScreen({ onComplete }: { onComplete: () => void }
 
 // ─── SCREEN: SUPER ADMIN ──────────────────────────────────────────────────────
 
-function SuperAdminScreen({ boutiques, platformUsers, groupes, onEnterBoutique, onCreateBoutique, onUpdateBoutique, onDeleteBoutique, onCreateUser, onUpdateUser, onCreateGroupe, onUpdateGroupe, onDeleteGroupe, onResetPassword, onResetBackend, onLogout, backendOk, saveState }: {
+function SuperAdminScreen({ boutiques, platformUsers, groupes, onEnterBoutique, onCreateBoutique, onUpdateBoutique, onDeleteBoutique, onCreateUser, onUpdateUser, onCreateGroupe, onUpdateGroupe, onDeleteGroupe, onResetPassword, onLogout, backendOk, saveState }: {
   boutiques: Boutique[]; platformUsers: PlatformUser[]; groupes: Groupe[];
   onEnterBoutique: (b: Boutique) => void;
   onCreateBoutique: (nom: string, ville: string, ownerId: string, logo?: string) => void;
@@ -1233,7 +1233,6 @@ function SuperAdminScreen({ boutiques, platformUsers, groupes, onEnterBoutique, 
   onUpdateGroupe: (gid: string, nom: string) => void;
   onDeleteGroupe: (gid: string) => void;
   onResetPassword: (uid: string, pwd: string) => void;
-  onResetBackend: () => Promise<void>;
   onLogout: () => void;
   backendOk: boolean | null;
   saveState: "idle"|"saving"|"saved"|"error";
@@ -1303,11 +1302,6 @@ function SuperAdminScreen({ boutiques, platformUsers, groupes, onEnterBoutique, 
         <div><div className="flex items-center gap-2 mb-0.5"><Shield size={14} style={{ color:"#C9A227" }}/><span className="text-xs text-muted-foreground font-semibold">Super Admin</span></div>
           <h1 className="text-2xl font-black" style={{ fontFamily:"'Nunito', sans-serif", color:"#C9A227" }}>Tournal</h1></div>
         <div className="flex items-center gap-2">
-          <button onClick={onResetBackend}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold"
-            style={{ background: saveState==="saving"?"#fef9c3":saveState==="saved"?"#dcfce7":saveState==="error"||backendOk===false?"#fee2e2":"#f0fdf4", color: saveState==="saving"?"#854d0e":saveState==="saved"?"#166534":saveState==="error"||backendOk===false?"#991b1b":"#166534" }}>
-            {saveState==="saving"?"⟳ Sync…":saveState==="saved"?"✓ Synced":saveState==="error"?"✗ Réessayer":backendOk===false?"✗ Sync":"● Backend"}
-          </button>
           <button onClick={onLogout} className="flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background:"#EEE9D8" }}>
             <LogOut size={16} className="text-muted-foreground"/><span className="text-sm text-muted-foreground">Quitter</span></button>
         </div>
@@ -9134,7 +9128,6 @@ export default function App() {
       onUpdateGroupe={(gid,nom)=>setGroupes(prev=>prev.map(g=>g.id===gid?{...g,nom}:g))}
       onDeleteGroupe={gid=>{ setGroupes(prev=>prev.filter(g=>g.id!==gid)); setPlatformUsers(prev=>prev.map(u=>u.groupeId===gid?{...u,groupeId:undefined,isCompteMere:undefined}:u)); }}
       onResetPassword={handleResetPassword}
-      onResetBackend={handleResetBackend}
       onLogout={handleLogout}
       backendOk={backendOk}
       saveState={saveState}/>
