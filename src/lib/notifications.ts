@@ -73,26 +73,23 @@ export async function getNotifications(limit = 80) {
 }
 
 export async function markNotificationRead(id: number) {
-  return dataRequest<unknown>(`notifications?id=eq.${id}`, {
-    method: "PATCH",
-    headers: { Prefer: "return=minimal" },
-    body: JSON.stringify({ read_at: new Date().toISOString() }),
+  return dataRequest<void>("rpc/mark_notification_read", {
+    method: "POST",
+    body: JSON.stringify({ p_id:id }),
   });
 }
 
 export async function markAllNotificationsRead() {
-  return dataRequest<unknown>("notifications?read_at=is.null&dismissed_at=is.null", {
-    method: "PATCH",
-    headers: { Prefer: "return=minimal" },
-    body: JSON.stringify({ read_at: new Date().toISOString() }),
+  return dataRequest<void>("rpc/mark_all_notifications_read", {
+    method: "POST",
+    body: JSON.stringify({}),
   });
 }
 
 export async function dismissAllNotifications() {
-  return dataRequest<unknown>("notifications?dismissed_at=is.null", {
-    method: "PATCH",
-    headers: { Prefer: "return=minimal" },
-    body: JSON.stringify({ dismissed_at: new Date().toISOString() }),
+  return dataRequest<void>("rpc/dismiss_all_notifications", {
+    method: "POST",
+    body: JSON.stringify({}),
   });
 }
 
