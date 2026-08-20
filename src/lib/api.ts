@@ -78,6 +78,19 @@ async function dataRequest<T>(path: string, init: RequestInit = {}): Promise<T> 
   return body as T;
 }
 
+async function dataRequestAll<T>(path: string, orderColumn = "id"): Promise<T[]> {
+  const pageSize = 1000;
+  const separator = path.includes("?") ? "&" : "?";
+  const rows: T[] = [];
+  for (let offset = 0; ; offset += pageSize) {
+    const page = await dataRequest<T[]>(
+      `${path}${separator}order=${encodeURIComponent(orderColumn)}.asc&limit=${pageSize}&offset=${offset}`,
+    );
+    rows.push(...page);
+    if (page.length < pageSize) return rows;
+  }
+}
+
 async function adminProvision<T>(action: string, payload: Record<string, unknown>): Promise<T> {
   const session = readSession();
   if (!session?.access_token) throw new Error("Connexion requise");
@@ -245,7 +258,14 @@ export function subscribeToBoutiqueChanges(boutiqueId: string, onChange: () => v
     for (const table of ["products", "stock_entries", "invoices", "invoice_lines", "invoice_payments", "clients", "charges", "caisse_sessions"]) {
       channel = channel.on("postgres_changes", { event: "*", schema: "public", table, filter }, onChange);
     }
-    channel = channel.subscribe();
+    channel = channel.subscribe((status) => {
+      // Postgres Changes does not replay events missed while disconnected.
+      // Reload the canonical rows after every (re)subscription.
+      if (status === "SUBSCRIBED") onChange();
+      if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+        console.warn(`Realtime ${status.toLowerCase()} pour la boutique ${boutiqueId}`);
+      }
+    });
     return () => { void realtimeClient.removeChannel(channel); };
   } catch (error) {
     // Realtime is an enhancement. A transient channel issue must never block
@@ -351,7 +371,7 @@ export async function getData<T>(key: string): Promise<T | null> {
     const [boutiques, categories, products, entries, clients, suppliers, invoices, payments, charges, sessions, users, auditLogs] = await Promise.all([
       dataRequest<any[]>("boutiques?select=*&order=nom.asc"),
       dataRequest<any[]>("categories?select=*"), dataRequest<any[]>("products?select=*"),
-      dataRequest<any[]>("stock_entries?select=*"), dataRequest<any[]>("clients?select=*"),
+      dataRequestAll<any>("stock_entries?select=*"), dataRequest<any[]>("clients?select=*"),
       dataRequest<any[]>("suppliers?select=*"),
       dataRequest<any[]>("invoices?select=*,invoice_lines(*)"),
       dataRequest<any[]>("invoice_payments?select=*&order=paid_at.asc"), dataRequest<any[]>("charges?select=*"),
@@ -379,7 +399,7 @@ export async function getData<T>(key: string): Promise<T | null> {
         longueurParPiece: Number(p.length_per_piece ?? 0),
         unitVente: p.unit,
       })),
-      entries: entries.filter(e => e.boutique_id === b.id).map(e => ({ id:e.id, productId:e.product_id, qty:e.qty, unit:"unité", montantDu:Number(e.qty)*Number(e.prix_unit ?? 0), date:day(e.entry_date), fournisseur:e.note ?? "", invoiceId:undefined })),
+      entries: entries.filter(e => e.boutique_id === b.id).map(e => ({ id:e.id, productId:e.product_id, qty:Number(e.qty), unit:"unité", montantDu:Number(e.qty)*Number(e.prix_unit ?? 0), date:day(e.entry_date), fournisseur:e.note ?? "", invoiceId:undefined })),
       clients: clients.filter(c => c.boutique_id === b.id).map(c => {
         // A wholesale client is stored as B2B with a marker in `contact`.
         const isWholesale = typeof c.contact === "string" && c.contact.includes(WHOLESALE_MARKER);

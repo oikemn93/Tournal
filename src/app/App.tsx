@@ -8611,6 +8611,7 @@ export default function App() {
   const pendingSaves = useRef<Record<string, unknown>>({});
   const isSaving             = useRef(false); // true while a save is in-flight
   const isPulling            = useRef(false); // prevents setInterval + visibilitychange overlap
+  const pullQueued           = useRef(false); // guarantees a trailing refresh when an event arrives mid-pull
   const lastRemoteB          = useRef<string>(""); // JSON fingerprint to detect real changes
   const lastRemoteU          = useRef<string>("");
   const platformUsersRef     = useRef<PlatformUser[]>([]);
@@ -8655,9 +8656,17 @@ export default function App() {
   useEffect(() => {
     if (!currentUser || !hasAuthenticatedSession()) return;
     void refreshServerNotifications();
-    void getPushState().then(setPushState).catch(() => undefined);
+    const refreshPushState = () => { void getPushState().then(setPushState).catch(() => undefined); };
+    refreshPushState();
     const unsubscribe = subscribeToNotifications(() => { void refreshServerNotifications(); });
-    return unsubscribe;
+    const onVisible = () => { if (document.visibilityState === "visible") refreshPushState(); };
+    document.addEventListener("visibilitychange", onVisible);
+    navigator.serviceWorker?.addEventListener("controllerchange", refreshPushState);
+    return () => {
+      unsubscribe();
+      document.removeEventListener("visibilitychange", onVisible);
+      navigator.serviceWorker?.removeEventListener("controllerchange", refreshPushState);
+    };
   }, [currentUser?.id, refreshServerNotifications]);
 
   const togglePushNotifications = React.useCallback(async () => {
@@ -8801,7 +8810,11 @@ export default function App() {
   // boutique_images is only fetched when boutiques fingerprint changes — not every 2s tick —
   // which eliminates the slow 460ms poll that caused "connection closed" errors on navigation.
   const pullRemote = useCallback(async () => {
-    if (isSaving.current || Object.keys(pendingSaves.current).length > 0 || isPulling.current) return;
+    if (isPulling.current) {
+      pullQueued.current = true;
+      return;
+    }
+    if (isSaving.current || Object.keys(pendingSaves.current).length > 0) return;
     isPulling.current = true;
     try {
       const [remoteB, remoteU, remoteG] = await Promise.all([
@@ -8833,7 +8846,13 @@ export default function App() {
       const bid = activeBoutiqueIdRef.current;
       if (bid) logTech(bid, { level:"warn", cat:"backend", msg:"Échec de synchronisation", detail: String(e) });
     }
-    finally { isPulling.current = false; }
+    finally {
+      isPulling.current = false;
+      if (pullQueued.current) {
+        pullQueued.current = false;
+        setTimeout(() => { void pullRemote(); }, 0);
+      }
+    }
   }, []);
 
   const refreshAuthenticatedFlow = useCallback(async () => {
@@ -9383,7 +9402,7 @@ export default function App() {
             <div className="flex items-center justify-between px-4 py-3 border-b border-border">
               <p className="font-black text-sm">Notifications</p>
               <div className="flex items-center gap-3">
-                <button onClick={togglePushNotifications} disabled={pushBusy || !pushState.supported || pushState.permission==="denied"} title={pushState.iosNeedsInstall?"Sur iPhone/iPad, installez Tournal sur l’écran d’accueil":"Notifications système sur cet appareil"} className="text-xs font-black px-2.5 py-1.5 rounded-lg disabled:opacity-50" style={{background:pushState.subscribed?"#dcfce7":"#f3f4f6",color:pushState.subscribed?"#166534":"#374151"}}>{pushBusy?"…":pushState.subscribed?"Push ✓":pushState.iosNeedsInstall?"Installer PWA":pushState.permission==="denied"?"Push bloqué":"Activer Push"}</button>
+                <button onClick={togglePushNotifications} disabled={pushBusy} title={pushState.iosNeedsInstall?"Sur iPhone/iPad, installez Tournal sur l’écran d’accueil":pushState.supported?"Notifications système sur cet appareil":"Vérifier la compatibilité Push de cet appareil"} className="text-xs font-black px-2.5 py-1.5 rounded-lg disabled:opacity-50" style={{background:pushState.subscribed?"#dcfce7":"#f3f4f6",color:pushState.subscribed?"#166534":"#374151"}}>{pushBusy?"…":pushState.subscribed?"Push ✓":pushState.iosNeedsInstall?"Installer PWA":pushState.permission==="denied"?"Push bloqué":"Activer Push"}</button>
                 {notifs.some(n=>!n.read) && (
                   <button onClick={markAllNotifsRead} className="text-xs font-bold text-muted-foreground">Tout lire</button>
                 )}

@@ -119,10 +119,13 @@ function urlBase64ToUint8Array(value: string) {
     normalized = normalized.slice(1, -1).trim();
   }
   normalized = normalized.replace(/\s+/g, "");
-  if (!normalized || !/^[A-Za-z0-9_-]+$/.test(normalized)) {
+  // Vault values may be stored as padded Base64URL or regular Base64. Both
+  // encode the same P-256 point, so normalize them before validating bytes.
+  if (!normalized || !/^[A-Za-z0-9_+/-]+={0,2}$/.test(normalized)) {
     throw new Error("Clé Push publique invalide");
   }
-  const base64 = normalized.replace(/-/g, "+").replace(/_/g, "/");
+  const unpadded = normalized.replace(/=+$/, "");
+  const base64 = unpadded.replace(/-/g, "+").replace(/_/g, "/");
   const padded = base64 + "=".repeat((4 - base64.length % 4) % 4);
   try {
     const raw = window.atob(padded);
@@ -135,7 +138,8 @@ function urlBase64ToUint8Array(value: string) {
 }
 
 function isIos() {
-  return /iphone|ipad|ipod/i.test(navigator.userAgent);
+  return /iphone|ipad|ipod/i.test(navigator.userAgent)
+    || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 }
 
 function isStandalonePwa() {
@@ -145,16 +149,20 @@ function isStandalonePwa() {
 async function getRegistration() {
   if (!("serviceWorker" in navigator)) throw new Error("Service Worker indisponible");
   const existing = await navigator.serviceWorker.getRegistration("/");
-  if (existing) return existing;
-  return navigator.serviceWorker.register("/service-worker.js");
+  if (existing) {
+    await existing.update().catch(() => undefined);
+    return navigator.serviceWorker.ready;
+  }
+  await navigator.serviceWorker.register("/service-worker.js", { scope:"/" });
+  return navigator.serviceWorker.ready;
 }
 
 export async function getPushState(): Promise<PushState> {
   const iosNeedsInstall = typeof window !== "undefined" && isIos() && !isStandalonePwa();
   const supported = typeof window !== "undefined"
+    && window.isSecureContext
     && "Notification" in window
-    && "serviceWorker" in navigator
-    && "PushManager" in window;
+    && "serviceWorker" in navigator;
 
   // iOS only exposes Web Push to Home Screen web apps. In Safari itself the
   // Notification/PushManager APIs can be absent, but the device is still
@@ -168,6 +176,9 @@ export async function getPushState(): Promise<PushState> {
   let subscribed = false;
   try {
     const registration = await navigator.serviceWorker.getRegistration("/");
+    if (registration && !("pushManager" in registration)) {
+      return { supported:false, permission:"unsupported", subscribed:false, iosNeedsInstall:false };
+    }
     subscribed = Boolean(await registration?.pushManager.getSubscription());
   } catch {}
   return { supported:true, permission:Notification.permission, subscribed, iosNeedsInstall:false };
@@ -180,8 +191,15 @@ export async function enableWebPush() {
   if (isIos() && !isStandalonePwa()) {
     throw new Error("Sur iPhone/iPad : Safari → Partager → Sur l’écran d’accueil. Ouvrez ensuite Tournal depuis l’icône installée et activez les notifications.");
   }
-  if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) {
+  if (!window.isSecureContext) {
+    throw new Error("Les notifications Push nécessitent une connexion HTTPS sécurisée");
+  }
+  if (!("Notification" in window) || !("serviceWorker" in navigator)) {
     throw new Error("Les notifications Push ne sont pas supportées sur ce navigateur");
+  }
+
+  if (Notification.permission === "denied") {
+    throw new Error("Notifications bloquées : autorisez-les dans les réglages du navigateur, puis réessayez");
   }
 
   const permission = Notification.permission === "granted"
@@ -190,6 +208,9 @@ export async function enableWebPush() {
   if (permission !== "granted") throw new Error("Autorisation de notifications refusée");
 
   const registration = await getRegistration();
+  if (!("pushManager" in registration)) {
+    throw new Error("Les notifications Push ne sont pas supportées sur ce navigateur");
+  }
   const publicKey = await dataRequest<string>("rpc/get_push_public_key", {
     method: "POST",
     body: JSON.stringify({}),
