@@ -1,0 +1,10 @@
+from pathlib import Path
+
+p = Path('src/app/App.tsx')
+s = p.read_text()
+old = '''                <button onClick={togglePushNotifications} disabled={pushBusy} title={pushState.iosNeedsInstall?"Sur iPhone/iPad, installez Tournal sur l’écran d’accueil":pushState.supported?"Notifications système sur cet appareil":"Vérifier la compatibilité Push de cet appareil"} className="text-xs font-black px-2.5 py-1.5 rounded-lg disabled:opacity-50" style={{background:pushState.subscribed?"#dcfce7":"#f3f4f6",color:pushState.subscribed?"#166534":"#374151"}}>{pushBusy?"…":pushState.subscribed?"Push ✓":pushState.iosNeedsInstall?"Installer PWA":pushState.permission==="denied"?"Push bloqué":"Activer Push"}</button>\n'''
+new = '''                <button onClick={togglePushNotifications} disabled={pushBusy} title={pushState.iosNeedsInstall?"Sur iPhone/iPad, installez Tournal sur l’écran d’accueil":pushState.permission==="denied"?"Notifications bloquées dans les réglages du navigateur":pushState.supported?"Activer les notifications système sur cet appareil":"Vérifier la compatibilité Push de cet appareil"} className="text-xs font-black px-3 py-2 rounded-xl disabled:opacity-50 transition-all active:scale-95" style={{background:pushState.subscribed?"#dcfce7":pushState.iosNeedsInstall?"#ffedd5":pushState.permission==="denied"?"#fee2e2":pushState.supported?"#C9A227":"#fef3c7",color:pushState.subscribed?"#166534":pushState.iosNeedsInstall?"#c2410c":pushState.permission==="denied"?"#b91c1c":pushState.supported?"#ffffff":"#92400e",border:`1px solid ${pushState.subscribed?"#86efac":pushState.iosNeedsInstall?"#fdba74":pushState.permission==="denied"?"#fca5a5":pushState.supported?"#C9A227":"#fcd34d"}`}}>{pushBusy?"Vérification…":pushState.subscribed?"Push actif ✓":pushState.iosNeedsInstall?"Installer PWA":pushState.permission==="denied"?"Push bloqué":pushState.supported?"Activer Push":"Tester Push"}</button>\n'''
+if s.count(old) != 1:
+    raise SystemExit(f'expected exactly one push button match, got {s.count(old)}')
+p.write_text(s.replace(old,new,1))
+print('mobile push button UX patched')
