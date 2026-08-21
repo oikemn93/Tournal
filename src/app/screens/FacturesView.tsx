@@ -167,6 +167,18 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
 }) {
   const { invoices, clients, products, entries } = boutique;
   const siblings = getSiblings(boutique.id, allBoutiques, platformUsers);
+  // Registered retail and business customers keep their full history on their
+  // client record.  The general invoice desk is reserved for counter sales,
+  // wholesale flows and inter-boutique documents.
+  const registeredClientTypes = useMemo(
+    () => new Map(clients.map(client => [client.id, client.type])),
+    [clients],
+  );
+  const isClientRecordOnlyInvoice = (invoice: Invoice) => {
+    if (invoice.clientId == null) return false;
+    const clientType = registeredClientTypes.get(invoice.clientId) ?? invoice.clientType ?? invoice.clientTypeSnapshot;
+    return clientType === "B2C" || clientType === "B2B";
+  };
 
   // Quantities already returned, per source invoice and product. Every return
   // restores stock via an entry tagged "Retour <sourceInvoiceId>", mirroring the
@@ -562,7 +574,12 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
   const UNPAID: InvoiceStatus[] = ["en attente","acompte","en retard"];
   // The day filter is bypassed while searching so the search reaches every day.
   const dayActive = dayFilterActive && !invSearch.trim();
-  const filtered = [...invoices].sort((a,b)=>(b.dateRaw??b.date).localeCompare(a.dateRaw??a.date)).filter(i=>(statusFilter==="all"||statusFilter==="impayé"?statusFilter==="impayé"?UNPAID.includes(i.status):true:i.status===statusFilter)&&(i.client.toLowerCase().includes(invSearch.toLowerCase())||i.id.toLowerCase().includes(invSearch.toLowerCase()))&&(!dayActive||(i.dateRaw??"").slice(0,10)===selectedDay));
+  const filtered = [...invoices]
+    .sort((a,b)=>(b.dateRaw??b.date).localeCompare(a.dateRaw??a.date))
+    .filter(i => !isClientRecordOnlyInvoice(i))
+    .filter(i => (statusFilter==="all"||statusFilter==="impayé"?statusFilter==="impayé"?UNPAID.includes(i.status):true:i.status===statusFilter)
+      && (i.client.toLowerCase().includes(invSearch.toLowerCase())||i.id.toLowerCase().includes(invSearch.toLowerCase()))
+      && (!dayActive||(i.dateRaw??"").slice(0,10)===selectedDay));
   const pills: Array<{id:InvoiceStatus|"all"|"impayé";label:string;color:string}> = [
     {id:"all",      label:"Tout",     color:SEM.neutral.accent},
     {id:"impayé",   label:"Impayés",  color:SEM.danger.accent},
@@ -631,6 +648,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
       <div className="flex gap-2" style={{ overflowX:"auto", scrollbarWidth:"none" }}>
         {pills.map(s=><button key={s.id} onClick={()=>setStatusFilter(s.id as InvoiceStatus|"all"|"impayé")}className="px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap flex-shrink-0" style={{ background:statusFilter===s.id?s.color:s.color+"22", color:statusFilter===s.id?"#fff":s.color }}>{s.label}</button>)}
       </div>
+      <p className="text-xs text-muted-foreground px-1">Les factures des clients B2C et B2B enregistrés sont consultables depuis leur fiche client.</p>
       <div className="space-y-3">
         {filtered.map(inv=>{
           const [tc,bc]=invBadge(inv.status);
