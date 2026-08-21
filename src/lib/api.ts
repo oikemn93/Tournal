@@ -19,7 +19,10 @@ const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL ?? "https://cnxtylngddwmh
 const PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? "sb_publishable_Jeo4Bx2IsTPCkzsQMYTuFQ_VKPQc9Aq";
 const SESSION_STORAGE_KEY = "tournal.supabase.session";
 const SESSION_REFRESH_SKEW_MS = 2 * 60_000;
+const JWT_CLOCK_SKEW_MAX_RETRIES = 3;
+const JWT_CLOCK_SKEW_RETRY_DELAY_MS = 1_000;
 let refreshSessionInFlight: Promise<AuthSession> | null = null;
+let jwtClockSkewWaitInFlight: Promise<void> | null = null;
 type AppSessionRecoveryHandler = () => Promise<boolean>;
 let appSessionRecoveryHandler: AppSessionRecoveryHandler | null = null;
 
@@ -78,17 +81,67 @@ function accessTokenExpiryMs(accessToken: string): number | null {
   }
 }
 
+function apiErrorMessage(body: unknown): string {
+  if (typeof body === "string") return body;
+  if (!body || typeof body !== "object") return "";
+  const value = body as Record<string, unknown>;
+  return [value.message, value.msg, value.hint, value.details, value.error]
+    .filter((part): part is string => typeof part === "string")
+    .join(" ");
+}
+
+function isJwtIssuedAtFutureError(body: unknown) {
+  const message = apiErrorMessage(body).toLowerCase();
+  return message.includes("jwt") && message.includes("issued at future");
+}
+
+/**
+ * Auth can mint a token a fraction of a second before another Supabase service
+ * observes its clock. A 401/403 carrying this exact error is therefore safe to
+ * retry: authentication was rejected before the requested RPC or mutation ran.
+ * Requests share one short wait so the four bootstrap queries do not stampede.
+ */
+function waitForJwtClockSkew() {
+  if (!jwtClockSkewWaitInFlight) {
+    jwtClockSkewWaitInFlight = new Promise<void>((resolve) => {
+      window.setTimeout(resolve, JWT_CLOCK_SKEW_RETRY_DELAY_MS);
+    });
+    void jwtClockSkewWaitInFlight.finally(() => {
+      jwtClockSkewWaitInFlight = null;
+    });
+  }
+  return jwtClockSkewWaitInFlight;
+}
+
+async function fetchJsonWithJwtClockSkewRetry(request: () => Promise<Response>) {
+  for (let attempt = 0; attempt <= JWT_CLOCK_SKEW_MAX_RETRIES; attempt += 1) {
+    const response = await request();
+    const body = await response.json().catch(() => null);
+    if (
+      response.ok
+      || (response.status !== 401 && response.status !== 403)
+      || !isJwtIssuedAtFutureError(body)
+      || attempt === JWT_CLOCK_SKEW_MAX_RETRIES
+    ) {
+      return { response, body };
+    }
+    await waitForJwtClockSkew();
+  }
+  throw new Error("Réponse Supabase inattendue");
+}
+
 async function authRequest(path: string, init: RequestInit) {
-  const response = await fetch(`${SUPABASE_URL}/auth/v1${path}`, {
-    ...init,
-    headers: {
-      apikey: PUBLISHABLE_KEY,
-      "Content-Type": "application/json",
-      ...(init.headers ?? {}),
-    },
-  });
-  const body = await response.json().catch(() => null);
-  if (!response.ok) throw new Error(body?.msg ?? body?.message ?? "Authentification impossible");
+  const { response, body } = await fetchJsonWithJwtClockSkewRetry(() =>
+    fetch(`${SUPABASE_URL}/auth/v1${path}`, {
+      ...init,
+      headers: {
+        apikey: PUBLISHABLE_KEY,
+        "Content-Type": "application/json",
+        ...(init.headers ?? {}),
+      },
+    }),
+  );
+  if (!response.ok) throw new Error(apiErrorMessage(body) || "Authentification impossible");
   return body;
 }
 
@@ -125,16 +178,17 @@ export async function refreshSessionIfNeeded(force = false): Promise<AuthSession
 
 async function dataRequest<T>(path: string, init: RequestInit = {}, allowSessionRecovery = true): Promise<T> {
   const session = await refreshSessionIfNeeded();
-  const response = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
-    ...init,
-    headers: {
-      apikey: PUBLISHABLE_KEY,
-      Authorization: `Bearer ${session.access_token}`,
-      "Content-Type": "application/json",
-      ...(init.headers ?? {}),
-    },
-  });
-  const body = await response.json().catch(() => null);
+  const { response, body } = await fetchJsonWithJwtClockSkewRetry(() =>
+    fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+      ...init,
+      headers: {
+        apikey: PUBLISHABLE_KEY,
+        Authorization: `Bearer ${session.access_token}`,
+        "Content-Type": "application/json",
+        ...(init.headers ?? {}),
+      },
+    }),
+  );
   if (!response.ok) {
     // RLS uses the same HTTP status for a genuine missing permission and for
     // an expired application session. Ask the app to restore the latter once,
@@ -144,7 +198,7 @@ async function dataRequest<T>(path: string, init: RequestInit = {}, allowSession
       const restored = await appSessionRecoveryHandler().catch(() => false);
       if (restored) return dataRequest<T>(path, init, false);
     }
-    throw new Error(body?.message ?? body?.hint ?? "Accès aux données refusé");
+    throw new Error(apiErrorMessage(body) || "Accès aux données refusé");
   }
   return body as T;
 }
@@ -258,11 +312,19 @@ export async function validateServerSession(): Promise<boolean> {
   if (!readSession()?.access_token) return false;
   try {
     const session = await refreshSessionIfNeeded();
-    const response = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
-      headers: { apikey: PUBLISHABLE_KEY, Authorization: `Bearer ${session.access_token}` },
-    });
-    if (!response.ok) { storeSession(null); return false; }
-    const user = await response.json() as AuthUser;
+    const { response, body } = await fetchJsonWithJwtClockSkewRetry(() =>
+      fetch(`${SUPABASE_URL}/auth/v1/user`, {
+        headers: { apikey: PUBLISHABLE_KEY, Authorization: `Bearer ${session.access_token}` },
+      }),
+    );
+    if (!response.ok) {
+      // Do not discard a brand-new local session merely because a second
+      // Supabase service is momentarily behind the Auth server's clock.
+      if (isJwtIssuedAtFutureError(body)) return true;
+      storeSession(null);
+      return false;
+    }
+    const user = body as AuthUser;
     if (!user?.id || user.id !== session.user?.id) { storeSession(null); return false; }
     return true;
   } catch {
