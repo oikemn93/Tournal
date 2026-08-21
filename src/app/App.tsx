@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { checkBackend, signQZ, sendInvoiceEmail, storePDFForSMS, getCurrentAuthUser, hasAuthenticatedSession, validateServerSession, refreshSessionIfNeeded, getAuthBootstrap, signInWithPhone, changeOwnPassword, getPinStatus, setQuickPin, verifyQuickPin, startAppSession, validateAppSession, lockAppSession, setAppSessionRecoveryHandler, signOut as signOutFromSupabase, createBoutique, createUser, resetUserPassword, subscribeToBoutiqueChanges, subscribeToBoutiqueSync, isBoutiqueSyncV2Enabled, assignUserToBoutique, unassignUserFromBoutique, upsertAssignmentDirect, deleteAssignmentDirect, recordAuditLog, loadBoutiqueSnapshot, loadBoutiqueSyncPatch, loadPlatformUsers, loadGroupes, saveGroupes, loadAuthSettings as loadStoredAuthSettings, saveAuthSettings, type BoutiqueSyncEvent, type BoutiqueSyncPatch } from "../lib/api";
+import { checkBackend, signQZ, sendInvoiceEmail, storePDFForSMS, getCurrentAuthUser, hasAuthenticatedSession, validateServerSession, refreshSessionIfNeeded, getAuthBootstrap, signInWithPhone, changeOwnPassword, getPinStatus, setQuickPin, verifyQuickPin, startAppSession, validateAppSession, lockAppSession, setAppSessionRecoveryHandler, signOut as signOutFromSupabase, createBoutique, createUser, resetUserPassword, subscribeToBoutiqueChanges, subscribeToBoutiqueSync, isBoutiqueSyncV2Enabled, assignUserToBoutique, unassignUserFromBoutique, upsertAssignmentDirect, deleteAssignmentDirect, recordAuditLog, loadBoutiqueSnapshot, loadBoutiqueSyncPatch, loadPlatformUsers, loadGroupes, saveGroupes, loadAuthSettings as loadStoredAuthSettings, saveAuthSettings, type BoutiqueSyncEvent, type BoutiqueSyncPatch, type LegacyBoutiqueChange } from "../lib/api";
 import { getNotifications, markNotificationRead, markAllNotificationsRead, dismissAllNotifications, subscribeToNotifications, getPushState, enableWebPush, disableWebPush, syncWebPushBoutique, type PushState } from "../lib/notifications";
 import { toast, Toaster } from "sonner";
 import {
@@ -8777,6 +8777,60 @@ export default function App() {
     }
   }, [applyBoutiqueSyncPatch, pullRemote]);
 
+  // V1 is kept as the safety net while V2 rolls out boutique by boutique.
+  // Stock movements are frequent and independent, so external product/entry
+  // events can safely use the same narrow canonical patch as V2. Every other
+  // V1 event falls back to the complete reconciliation path.
+  const processLegacyBoutiqueChanges = useCallback(async (
+    changes: LegacyBoutiqueChange[],
+    reason: "events" | "reconnect" | "unavailable",
+  ) => {
+    if (reason !== "events") {
+      await pullRemote();
+      return;
+    }
+    const patchable = changes.length > 0
+      && changes.every(change => (change.table === "products" || change.table === "stock_entries") && change.operation !== "DELETE")
+      // The originating client has already applied an optimistic stock entry.
+      // It receives a full snapshot instead, avoiding a transient double count.
+      && !changes.some(change => change.ownStockWrite);
+    if (!patchable) {
+      await pullRemote();
+      return;
+    }
+    const events: BoutiqueSyncEvent[] = [];
+    for (const [index, change] of changes.entries()) {
+      const record = change.record;
+      const recordId = String(record.id ?? "");
+      const entityId = change.table === "stock_entries"
+        ? String(record.product_id ?? "")
+        : recordId;
+      if (!recordId || !entityId) {
+        await pullRemote();
+        return;
+      }
+      events.push({
+        event_id: `v1:${change.table}:${recordId}:${index}`,
+        revision: index,
+        domain: change.table === "stock_entries" ? "stock" : "catalogue",
+        entity_type: change.table === "stock_entries" ? "stock_entry" : "product",
+        entity_id: entityId,
+        record_id: recordId,
+        operation: change.operation,
+      });
+    }
+    try {
+      const boutiqueId = activeBoutiqueIdRef.current;
+      if (!boutiqueId) return;
+      const patch = await loadBoutiqueSyncPatch(boutiqueId, events);
+      applyBoutiqueSyncPatch(patch);
+      setLastSyncAt(Date.now());
+    } catch (error) {
+      console.warn("Correctif ciblé Realtime V1 indisponible, réconciliation complète utilisée", error);
+      await pullRemote();
+    }
+  }, [applyBoutiqueSyncPatch, pullRemote]);
+
 
   const hydrateBoutique = useCallback(async (boutiqueId: string) => {
     setBusinessLoading(true);
@@ -9038,10 +9092,10 @@ export default function App() {
     const useSyncV2 = boutiqueSyncProtocol?.boutiqueId === activeBoutiqueId && boutiqueSyncProtocol.version === "v2";
     const unsubscribe = useSyncV2
       ? subscribeToBoutiqueSync(activeBoutiqueId ?? "", (events, reason) => { void processBoutiqueSyncEvents(events, reason); })
-      : subscribeToBoutiqueChanges(activeBoutiqueId ?? "", pullRemote);
+      : subscribeToBoutiqueChanges(activeBoutiqueId ?? "", (changes, reason) => { void processLegacyBoutiqueChanges(changes, reason); });
     document.addEventListener("visibilitychange", onVisible);
     return () => { unsubscribe(); document.removeEventListener("visibilitychange", onVisible); };
-  }, [synced, pullRemote, activeBoutiqueId, businessLoading, locked, appSessionReady, endSessionForInactivity, renewAppSession, sessionExpiryMs, processBoutiqueSyncEvents, boutiqueSyncProtocol]);
+  }, [synced, pullRemote, activeBoutiqueId, businessLoading, locked, appSessionReady, endSessionForInactivity, renewAppSession, sessionExpiryMs, processBoutiqueSyncEvents, processLegacyBoutiqueChanges, boutiqueSyncProtocol]);
 
   // Boutique updates are persisted by domain-specific relational operations.
   // Never write a full JSON state blob from the client.

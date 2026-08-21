@@ -372,45 +372,83 @@ export async function resetUserQuickPin(userId: string) {
   );
 }
 
+export type LegacyBoutiqueChange = {
+  table: string;
+  operation: "INSERT" | "UPDATE" | "DELETE";
+  record: Record<string, unknown>;
+  oldRecord: Record<string, unknown>;
+  ownStockWrite: boolean;
+};
+
 /**
- * Watches the shared boutique state over a WebSocket.  A database update
- * triggers a single refresh for connected users instead of periodic polling.
+ * Watches the legacy Postgres Changes transport for a boutique. The callback
+ * receives a short batch so the UI can fast-path isolated stock movements,
+ * while non-stock changes still reconcile from the canonical full snapshot.
  */
-export function subscribeToBoutiqueChanges(boutiqueId: string, onChange: () => void) {
+export function subscribeToBoutiqueChanges(
+  boutiqueId: string,
+  onChanges: (changes: LegacyBoutiqueChange[], reason: "events" | "reconnect" | "unavailable") => void,
+) {
   const session = readSession();
   if (!session?.access_token || !boutiqueId) return () => undefined;
 
   try {
     realtimeClient.realtime.setAuth(session.access_token);
+    const refreshRealtimeAuth = () => {
+      const refreshed = readSession();
+      if (refreshed?.access_token) realtimeClient.realtime.setAuth(refreshed.access_token);
+    };
+    window.addEventListener("tournal:session-refreshed", refreshRealtimeAuth);
     const filter = `boutique_id=eq.${boutiqueId}`;
     let refreshTimer: ReturnType<typeof setTimeout> | null = null;
     let hasSubscribed = false;
-    const scheduleRefresh = () => {
+    let pending: LegacyBoutiqueChange[] = [];
+    const flush = (reason: "events" | "reconnect" | "unavailable") => {
       if (refreshTimer) return;
       refreshTimer = setTimeout(() => {
         refreshTimer = null;
-        onChange();
-      }, 300);
+        const changes = pending;
+        pending = [];
+        onChanges(changes, reason);
+      }, 80);
     };
     let channel = realtimeClient.channel(`tournal:${boutiqueId}`);
     // Each subscription is scoped to one boutique and only to relational tables.
     // This deliberately avoids both the former global JSON blob and polling.
     for (const table of ["products", "stock_entries", "invoices", "invoice_lines", "invoice_payments", "clients", "charges", "caisse_sessions", "suppliers", "categories", "boutique_partners", "boutique_assignments", "audit_log"]) {
-      channel = channel.on("postgres_changes", { event: "*", schema: "public", table, filter }, scheduleRefresh);
+      channel = channel.on("postgres_changes", { event: "*", schema: "public", table, filter }, (payload: any) => {
+        const operation = payload?.eventType;
+        if (operation !== "INSERT" && operation !== "UPDATE" && operation !== "DELETE") return;
+        const record = (operation === "DELETE" ? payload?.old : payload?.new) ?? {};
+        const oldRecord = payload?.old ?? {};
+        pending.push({
+          table,
+          operation,
+          record,
+          oldRecord,
+          // Products do not keep an operator id, but the paired stock entry
+          // does. The UI uses this to avoid merging an optimistic own entry
+          // with its canonical Realtime copy.
+          ownStockWrite: table === "stock_entries" && String(record.operator_id ?? "") === session.user.id,
+        });
+        flush("events");
+      });
     }
     channel = channel.subscribe((status) => {
       // The first snapshot is loaded explicitly by the application. A later
       // subscription means the socket reconnected and needs reconciliation.
       if (status === "SUBSCRIBED") {
-        if (hasSubscribed) scheduleRefresh();
+        if (hasSubscribed) flush("reconnect");
         hasSubscribed = true;
       }
       if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
         console.warn(`Realtime ${status.toLowerCase()} pour la boutique ${boutiqueId}`);
+        flush("unavailable");
       }
     });
     return () => {
       if (refreshTimer) clearTimeout(refreshTimer);
+      window.removeEventListener("tournal:session-refreshed", refreshRealtimeAuth);
       void realtimeClient.removeChannel(channel);
     };
   } catch (error) {
