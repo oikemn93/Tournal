@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { checkBackend, signQZ, sendInvoiceEmail, storePDFForSMS, getCurrentAuthUser, hasAuthenticatedSession, validateServerSession, refreshSessionIfNeeded, getAuthBootstrap, signInWithPhone, changeOwnPassword, getPinStatus, setQuickPin, verifyQuickPin, startAppSession, lockAppSession, signOut as signOutFromSupabase, createBoutique, createUser, resetUserPassword, subscribeToBoutiqueChanges, assignUserToBoutique, unassignUserFromBoutique, upsertAssignmentDirect, deleteAssignmentDirect, recordAuditLog, loadBoutiqueSnapshot, loadPlatformUsers, loadGroupes, saveGroupes, loadAuthSettings as loadStoredAuthSettings, saveAuthSettings } from "../lib/api";
+import { checkBackend, signQZ, sendInvoiceEmail, storePDFForSMS, getCurrentAuthUser, hasAuthenticatedSession, validateServerSession, refreshSessionIfNeeded, getAuthBootstrap, signInWithPhone, changeOwnPassword, getPinStatus, setQuickPin, verifyQuickPin, startAppSession, validateAppSession, lockAppSession, setAppSessionRecoveryHandler, signOut as signOutFromSupabase, createBoutique, createUser, resetUserPassword, subscribeToBoutiqueChanges, assignUserToBoutique, unassignUserFromBoutique, upsertAssignmentDirect, deleteAssignmentDirect, recordAuditLog, loadBoutiqueSnapshot, loadPlatformUsers, loadGroupes, saveGroupes, loadAuthSettings as loadStoredAuthSettings, saveAuthSettings } from "../lib/api";
 import { getNotifications, markNotificationRead, markAllNotificationsRead, dismissAllNotifications, subscribeToNotifications, getPushState, enableWebPush, disableWebPush, syncWebPushBoutique, type PushState } from "../lib/notifications";
 import { toast, Toaster } from "sonner";
 import {
@@ -6745,6 +6745,8 @@ function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdat
   const [sessValue, setSessValue] = useState(initValue);
   const [sessUnit, setSessUnit] = useState<SessUnit>(initUnit);
   const [authSaved, setAuthSaved] = useState(false);
+  const [authSaving, setAuthSaving] = useState(false);
+  const [authSaveError, setAuthSaveError] = useState<string | null>(null);
   const sessMinutes = Math.max(5, Math.round(sessValue * (sessUnit === "min" ? 1 : sessUnit === "h" ? 60 : 1440)));
 
   const boutiqueUsers = platformUsers.filter(u=>!u.isSuperAdmin&&u.assignments.some(a=>a.boutiqueId===boutique.id));
@@ -7058,7 +7060,7 @@ function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdat
             </div>
           </div>
           <div className="bg-card rounded-2xl border border-border overflow-hidden">
-            <div className="px-4 py-3 border-b border-border"><p className="font-bold text-sm">Expiration de session</p><p className="text-xs text-muted-foreground mt-0.5">Après cette durée, l'utilisateur doit se reconnecter avec ses identifiants complets</p></div>
+            <div className="px-4 py-3 border-b border-border"><p className="font-bold text-sm">Expiration de session</p><p className="text-xs text-muted-foreground mt-0.5">Durée maximale d'inactivité avant une reconnexion complète</p></div>
             <div className="px-4 py-4 space-y-3">
               <div className="flex items-center gap-2">
                 <input type="number" min={1} value={sessValue}
@@ -7084,13 +7086,24 @@ function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdat
               </p>
             </div>
           </div>
-          <button onClick={()=>{ setAuthSaved(true);
-              if (onSaveAuthSettings) onSaveAuthSettings(lockMinutes, sessMinutes).catch(()=>{});
-              setTimeout(()=>setAuthSaved(false),2000);
-              logAction("Paramètres auth modifiés",`Verrou ${lockMinutes}min · Session ${sessMinutes}min`,"🔒"); }}
-            className="w-full py-4 rounded-2xl text-base font-black active:scale-95 transition-all"
+          {authSaveError && <p className="text-xs font-semibold" style={{ color:SEM.danger.text }}>{authSaveError}</p>}
+          <button onClick={async()=>{
+              if (authSaving) return;
+              setAuthSaving(true); setAuthSaveError(null);
+              try {
+                await onSaveAuthSettings?.(lockMinutes, sessMinutes);
+                setAuthSaved(true);
+                setTimeout(()=>setAuthSaved(false),2000);
+                logAction("Paramètres auth modifiés",`Verrou ${lockMinutes}min · Session ${sessMinutes}min`,"🔒");
+              } catch (error) {
+                setAuthSaveError(error instanceof Error ? error.message : "Enregistrement impossible. Réessayez.");
+              } finally {
+                setAuthSaving(false);
+              }
+            }} disabled={authSaving}
+            className="w-full py-4 rounded-2xl text-base font-black active:scale-95 transition-all disabled:opacity-60"
             style={{ background:authSaved?SEM.success.accent:boutique.color, color:"#fff", fontFamily:"'Nunito',sans-serif" }}>
-            {authSaved?"✓ Enregistré":"Appliquer les paramètres"}
+            {authSaving ? "Enregistrement…" : authSaved ? "✓ Enregistré" : "Appliquer les paramètres"}
           </button>
         </div>}
 
@@ -8631,7 +8644,11 @@ export default function App() {
   const notifiedLowStock = useRef(new Set<number>());
   const lockTimer   = useRef<ReturnType<typeof setTimeout>|null>(null);
   const logoutTimer = useRef<ReturnType<typeof setTimeout>|null>(null);
-  const appSessionRenewalInFlight = useRef<Promise<void>|null>(null);
+  const appSessionRenewalInFlight = useRef<Promise<boolean>|null>(null);
+  const appSessionRecoveryInFlight = useRef<Promise<boolean>|null>(null);
+  const appSessionHeartbeatAt = useRef(0);
+  const lastUserActivityAt = useRef(Date.now());
+  const endingSessionForInactivity = useRef(false);
   // Auth settings come from the relational auth_settings table.
   const [lockTimeoutMs, setLockTimeoutMs] = useState(10 * 60 * 1000);
   const [sessionExpiryMs, setSessionExpiryMs] = useState(SESSION_EXPIRY_MS);
@@ -8840,7 +8857,13 @@ export default function App() {
       // All writes and protected reads require this short-lived application
       // session. Starting it once here removes the former race with the
       // notifications effect and with the first user action.
-      await startAppSession(boutiqueId);
+      const appSession = await startAppSession(boutiqueId);
+      appSessionHeartbeatAt.current = Date.now();
+      lastUserActivityAt.current = Date.now();
+      if (appSession.locked) {
+        try { sessionStorage.setItem(APP_LOCK_KEY, "1"); } catch {}
+        setLocked(true);
+      }
       const remoteB = await loadBoutiqueSnapshot<Boutique[]>(boutiqueId);
       if (remoteB?.[0]) {
         const hydrated = remoteB[0];
@@ -8867,21 +8890,45 @@ export default function App() {
     }
   }, []);
 
+  const endSessionForInactivity = useCallback(() => {
+    if (endingSessionForInactivity.current) return;
+    endingSessionForInactivity.current = true;
+    const boutiqueId = activeBoutiqueIdRef.current;
+    if (boutiqueId) void logTech(boutiqueId, { level:"info", cat:"session", msg:"Session expirée après inactivité" });
+    void signOutFromSupabase().catch(() => undefined).finally(() => {
+      clearSession();
+      setAppSessionReady(false);
+      setCurrentUser(null);
+      setActiveBoutiqueId(null);
+      setActiveAssign(null);
+      setLocked(false);
+      setScreen("login");
+      endingSessionForInactivity.current = false;
+    });
+  }, []);
+
   // The database application session has the same idle-lifetime setting as
   // the UI. Renew it while the app is in use so an active cashier cannot end
   // up with a valid Auth token but an expired write session. A locked screen is
   // never renewed: unlocking still requires the quick PIN on the server.
-  const renewAppSession = useCallback(async () => {
+  const renewAppSession = useCallback(async (): Promise<boolean> => {
     const boutiqueId = activeBoutiqueIdRef.current;
-    if (screen !== "app" || !appSessionReady || locked || !boutiqueId) return;
+    if (screen !== "app" || !appSessionReady || locked || !boutiqueId) return false;
     if (appSessionRenewalInFlight.current) return appSessionRenewalInFlight.current;
 
     const renewal = startAppSession(boutiqueId)
-      .then(() => undefined)
+      .then((appSession) => {
+        if (!appSession.locked) {
+          appSessionHeartbeatAt.current = Date.now();
+          return true;
+        }
+        try { sessionStorage.setItem(APP_LOCK_KEY, "1"); } catch {}
+        setLocked(true);
+        return false;
+      })
       .catch((error) => {
-        // Keep the existing session state intact. The next user action still
-        // receives the server's precise authorization error if renewal failed.
         console.warn("Renouvellement de session applicative différé :", error);
+        return false;
       })
       .finally(() => {
         appSessionRenewalInFlight.current = null;
@@ -8889,6 +8936,54 @@ export default function App() {
     appSessionRenewalInFlight.current = renewal;
     return renewal;
   }, [appSessionReady, locked, screen]);
+
+  // A protected request can arrive just after a browser timer was delayed.
+  // Confirm that it is an app-session issue before restoring it: real missing
+  // permissions must continue to be rejected normally.
+  const recoverAppSession = useCallback(async (): Promise<boolean> => {
+    const boutiqueId = activeBoutiqueIdRef.current;
+    if (screen !== "app" || locked || !boutiqueId) return false;
+    if (Date.now() - lastUserActivityAt.current >= sessionExpiryMs) {
+      endSessionForInactivity();
+      return false;
+    }
+    if (appSessionRecoveryInFlight.current) return appSessionRecoveryInFlight.current;
+
+    const recovery = (async () => {
+      let isActive: boolean;
+      try {
+        isActive = await validateAppSession(boutiqueId);
+      } catch {
+        return false;
+      }
+      if (isActive) return false;
+
+      try {
+        const appSession = await startAppSession(boutiqueId);
+        if (appSession.locked) {
+          try { sessionStorage.setItem(APP_LOCK_KEY, "1"); } catch {}
+          setLocked(true);
+          return false;
+        }
+        setAppSessionReady(true);
+        appSessionHeartbeatAt.current = Date.now();
+        toast.message("Session rétablie. Votre action est relancée.");
+        return true;
+      } catch (error) {
+        console.warn("Rétablissement de session applicative impossible :", error);
+        return false;
+      }
+    })().finally(() => {
+      appSessionRecoveryInFlight.current = null;
+    });
+    appSessionRecoveryInFlight.current = recovery;
+    return recovery;
+  }, [endSessionForInactivity, locked, screen, sessionExpiryMs]);
+
+  useEffect(() => {
+    setAppSessionRecoveryHandler(recoverAppSession);
+    return () => setAppSessionRecoveryHandler(null);
+  }, [recoverAppSession]);
 
   const refreshAuthenticatedFlow = useCallback(async () => {
     if (!hasAuthenticatedSession()) {
@@ -8982,6 +9077,10 @@ export default function App() {
     if (!synced || businessLoading || !appSessionReady || !hasAuthenticatedSession()) return;
     const onVisible = () => {
       if (document.visibilityState !== "visible") return;
+      if (Date.now() - lastUserActivityAt.current >= sessionExpiryMs) {
+        endSessionForInactivity();
+        return;
+      }
       void validateServerSession().then(async valid => {
         if (!valid) { handleLogout(); return; }
         await renewAppSession();
@@ -8991,7 +9090,7 @@ export default function App() {
     const unsubscribe = subscribeToBoutiqueChanges(activeBoutiqueId ?? "", pullRemote);
     document.addEventListener("visibilitychange", onVisible);
     return () => { unsubscribe(); document.removeEventListener("visibilitychange", onVisible); };
-  }, [synced, pullRemote, activeBoutiqueId, businessLoading, appSessionReady, renewAppSession]);
+  }, [synced, pullRemote, activeBoutiqueId, businessLoading, appSessionReady, endSessionForInactivity, renewAppSession, sessionExpiryMs]);
 
   // Boutique updates are persisted by domain-specific relational operations.
   // Never write a full JSON state blob from the client.
@@ -9011,19 +9110,15 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [screen]);
 
-  // Start well before the server-side lifetime ends. This is intentionally
-  // independent of token refresh: an Auth refresh preserves the login, while
-  // the app session is the separate server-side gate for protected writes.
   useEffect(() => {
-    if (screen !== "app" || !appSessionReady || locked) return;
-    const intervalMs = Math.max(30_000, Math.min(5 * 60_000, Math.floor(sessionExpiryMs * 0.6)));
-    const timer = window.setInterval(() => { void renewAppSession(); }, intervalMs);
-    return () => window.clearInterval(timer);
-  }, [appSessionReady, locked, renewAppSession, screen, sessionExpiryMs]);
-
-  useEffect(() => {
-    if (screen !== "app") return;
+    if (screen !== "app" || !appSessionReady) return;
     function resetTimers() {
+      const now = Date.now();
+      if (now - lastUserActivityAt.current >= sessionExpiryMs) {
+        endSessionForInactivity();
+        return;
+      }
+      lastUserActivityAt.current = now;
       if (lockTimer.current)   clearTimeout(lockTimer.current);
       if (logoutTimer.current) clearTimeout(logoutTimer.current);
       lockTimer.current   = setTimeout(() => {
@@ -9033,22 +9128,23 @@ export default function App() {
         setLocked(true);
       }, LOCK_TIMEOUT_MS);
       logoutTimer.current = setTimeout(() => {
-        const bid = activeBoutiqueIdRef.current;
-        if (bid) void logTech(bid, { level:"info", cat:"session", msg:"Session expirée après inactivité" });
-        void signOutFromSupabase().catch(() => undefined).finally(() => {
-          clearSession(); setAppSessionReady(false); setCurrentUser(null); setActiveBoutiqueId(null); setActiveAssign(null); setLocked(false); setScreen("login");
-        });
+        endSessionForInactivity();
       }, sessionExpiryMs);
+      // A live user refreshes the server-side gate at most once per minute.
+      // No interval runs in the background, so inactivity can still expire.
+      if (!locked && now - appSessionHeartbeatAt.current >= 60_000) void renewAppSession();
     }
-    const events = ["mousemove", "keydown", "touchstart", "click"];
+    const events = ["mousemove", "pointerdown", "keydown", "touchstart", "click", "input", "change", "focusin", "wheel"];
     events.forEach(e => document.addEventListener(e, resetTimers, { passive: true }));
+    document.addEventListener("scroll", resetTimers, { passive: true, capture: true });
     resetTimers();
     return () => {
       if (lockTimer.current)   clearTimeout(lockTimer.current);
       if (logoutTimer.current) clearTimeout(logoutTimer.current);
       events.forEach(e => document.removeEventListener(e, resetTimers));
+      document.removeEventListener("scroll", resetTimers, true);
     };
-  }, [screen, sessionExpiryMs]);
+  }, [appSessionReady, endSessionForInactivity, lockTimeoutMs, locked, renewAppSession, screen, sessionExpiryMs]);
 
   // Keep stable refs in sync for asynchronous callbacks.
   useEffect(() => { activeBoutiqueIdRef.current = activeBoutiqueId; }, [activeBoutiqueId]);
@@ -9285,7 +9381,14 @@ export default function App() {
         if (result.ok) {
           setLockPin("");
           try { sessionStorage.removeItem(APP_LOCK_KEY); } catch {}
+          appSessionHeartbeatAt.current = Date.now();
+          lastUserActivityAt.current = Date.now();
           setLocked(false);
+          return;
+        }
+        if (result.sessionExpired) {
+          setLockError("Session expirée. Reconnectez-vous avec vos identifiants.");
+          endSessionForInactivity();
           return;
         }
         if (!result.configured) { setLockPin(""); setLocked(false); setScreen("pin-setup"); return; }

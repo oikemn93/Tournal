@@ -20,6 +20,17 @@ const PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? "sb_pub
 const SESSION_STORAGE_KEY = "tournal.supabase.session";
 const SESSION_REFRESH_SKEW_MS = 2 * 60_000;
 let refreshSessionInFlight: Promise<AuthSession> | null = null;
+type AppSessionRecoveryHandler = () => Promise<boolean>;
+let appSessionRecoveryHandler: AppSessionRecoveryHandler | null = null;
+
+/**
+ * Lets the active application screen restore an expired server-side app
+ * session before a protected request is rejected by RLS. The handler is kept
+ * in the UI layer because only it knows the currently selected boutique.
+ */
+export function setAppSessionRecoveryHandler(handler: AppSessionRecoveryHandler | null) {
+  appSessionRecoveryHandler = handler;
+}
 
 // Singleton stored on globalThis so HMR re-evaluations reuse the same instance.
 const _global = globalThis as unknown as Record<string, unknown>;
@@ -112,7 +123,7 @@ export async function refreshSessionIfNeeded(force = false): Promise<AuthSession
   return refreshSessionInFlight;
 }
 
-async function dataRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function dataRequest<T>(path: string, init: RequestInit = {}, allowSessionRecovery = true): Promise<T> {
   const session = await refreshSessionIfNeeded();
   const response = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
     ...init,
@@ -124,7 +135,17 @@ async function dataRequest<T>(path: string, init: RequestInit = {}): Promise<T> 
     },
   });
   const body = await response.json().catch(() => null);
-  if (!response.ok) throw new Error(body?.message ?? body?.hint ?? "Accès aux données refusé");
+  if (!response.ok) {
+    // RLS uses the same HTTP status for a genuine missing permission and for
+    // an expired application session. Ask the app to restore the latter once,
+    // then retry the original request exactly once. A valid app session leaves
+    // the real permission error untouched.
+    if (allowSessionRecovery && (response.status === 401 || response.status === 403) && appSessionRecoveryHandler) {
+      const restored = await appSessionRecoveryHandler().catch(() => false);
+      if (restored) return dataRequest<T>(path, init, false);
+    }
+    throw new Error(body?.message ?? body?.hint ?? "Accès aux données refusé");
+  }
   return body as T;
 }
 
@@ -252,11 +273,11 @@ export async function validateServerSession(): Promise<boolean> {
 }
 
 export async function startAppSession(boutiqueId: string) {
-  return dataRequest<{ expires_at:string }>("rpc/start_app_session", { method:"POST", body:JSON.stringify({ p_boutique_id:boutiqueId }) });
+  return dataRequest<{ expires_at:string; locked:boolean }>("rpc/start_app_session", { method:"POST", body:JSON.stringify({ p_boutique_id:boutiqueId }) }, false);
 }
 
 export async function validateAppSession(boutiqueId: string) {
-  return dataRequest<boolean>("rpc/validate_app_session", { method:"POST", body:JSON.stringify({ p_boutique_id:boutiqueId }) });
+  return dataRequest<boolean>("rpc/validate_app_session", { method:"POST", body:JSON.stringify({ p_boutique_id:boutiqueId }) }, false);
 }
 
 export async function getPinStatus() {
@@ -273,14 +294,14 @@ export async function setQuickPin(pin: string) {
 }
 
 export async function verifyQuickPin(pin: string, boutiqueId: string) {
-  if (!/^\d{6}$/.test(pin)) return { ok:false, configured:true, attemptsRemaining:0 } as const;
-  return dataRequest<{ ok:boolean; configured:boolean; attemptsRemaining?:number; lockedUntil?:string|null }>(
+  if (!/^\d{6}$/.test(pin)) return { ok:false, configured:true, attemptsRemaining:0, lockedUntil:null, sessionExpired:false } as const;
+  return dataRequest<{ ok:boolean; configured:boolean; attemptsRemaining?:number; lockedUntil?:string|null; sessionExpired?:boolean }>(
     "rpc/verify_quick_pin", { method:"POST", body:JSON.stringify({ p_pin:pin, p_boutique_id:boutiqueId }) },
   );
 }
 
 export async function lockAppSession(boutiqueId: string) {
-  return dataRequest<void>("rpc/lock_app_session", { method:"POST", body:JSON.stringify({ p_boutique_id:boutiqueId }) });
+  return dataRequest<void>("rpc/lock_app_session", { method:"POST", body:JSON.stringify({ p_boutique_id:boutiqueId }) }, false);
 }
 
 export async function resetUserQuickPin(userId: string) {
