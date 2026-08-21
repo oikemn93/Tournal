@@ -1,13 +1,20 @@
 import React, { useState, useRef } from "react";
 import { Search, Plus, Edit2, ArrowLeft, History, Camera, Trash2 } from "lucide-react";
-import type { Boutique, Product } from "../types";
+import type { Boutique, Product, StockEntry } from "../types";
 import { PLACEHOLDER_IMGS, inputCls } from "../constants";
 import { fmt, today, imgSrc, resizeImage } from "../utils/formatting";
 import { productQty, productMontant, productMontantNet, stockStatus, stockDot } from "../utils/inventory";
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
-import { createProduct, recordStockMovement } from "../../lib/api";
+import { createProduct, recordStockMovement, updateProduct } from "../../lib/api";
+
+function sortStockEntriesNewestFirst(a: StockEntry, b: StockEntry) {
+  const aTime = a.recordedAt ? Date.parse(a.recordedAt) : Number.NaN;
+  const bTime = b.recordedAt ? Date.parse(b.recordedAt) : Number.NaN;
+  const byTimestamp = (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0);
+  return byTimestamp || b.id - a.id;
+}
 
 export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
   boutique: Boutique; onUpdate: (u: Partial<Boutique>) => void;
@@ -82,6 +89,8 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
   // Edit product
   const [editNom, setEditNom] = useState("");
   const [editCat, setEditCat] = useState("");
+  const [editPrixAchat, setEditPrixAchat] = useState("");
+  const [savingProduct, setSavingProduct] = useState(false);
 
   const photoInputRef = useRef<HTMLInputElement>(null);
   const editPhotoRef  = useRef<HTMLInputElement>(null);
@@ -131,7 +140,7 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
       alert(error instanceof Error ? error.message : "Entrée de stock impossible");
       return;
     }
-    onUpdate({ entries: [...entries, { id: Date.now(), productId: detail.id, qty, unit: dUnit, montantDu: Number(dMontant) || 0, date: today(), fournisseur: dFourn, ...lotExtra, ...(dSku.trim() ? { sku: dSku.trim() } : {}) }] });
+    onUpdate({ entries: [...entries, { id: Date.now(), productId: detail.id, qty, unit: dUnit, montantDu: Number(dMontant) || 0, date: today(), recordedAt:new Date().toISOString(), fournisseur: dFourn, ...lotExtra, ...(dSku.trim() ? { sku: dSku.trim() } : {}) }] });
     const lab = dLotMode
       ? (isPieces ? `${dLots}lot×${dPieces}p=+${qty}p` : `${dLots}lot×${dPieces}p×${dLongueur}${dUnit}=+${qty}${dUnit}`)
       : `+${qty} ${dUnit}`;
@@ -152,13 +161,13 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
     const lotExtra = nLotMode ? { nbLots: Number(nLots)||1, nbPieces: Number(nPieces)||0, ...(nUnit !== "pièces" ? { longueurPiece: Number(nLongueur)||0 } : {}) } : {};
     let persisted;
     try {
-      persisted = await createProduct({ boutiqueId:boutique.id, name:nNom.trim(), unit:nUnit, categoryId:cats.find(c=>c.nom===finalCat)?.id, purchasePrice:Number(nMontant) || 0, salePrice:Number(nPrixUnit) || 0 });
+      persisted = await createProduct({ boutiqueId:boutique.id, name:nNom.trim(), unit:nUnit, categoryId:cats.find(c=>c.nom===finalCat)?.id, purchasePrice:Number(nPrixUnit) || 0, salePrice:Number(nPrixUnit) || 0 });
       if (initQty > 0) await recordStockMovement({ boutiqueId:boutique.id, productId:persisted.product_id, qty:initQty, type:"achat", prixUnit:initQty ? (Number(nMontant) || 0) / initQty : 0, note:nFourn });
     } catch (error) { alert(error instanceof Error ? error.message : "Création du produit impossible"); return; }
     const pid = persisted.product_id;
-    const newEntries = initQty > 0 ? [...entries, { id: pid + 1, productId: pid, qty: initQty, unit: nUnit, montantDu: Number(nMontant) || 0, date: today(), fournisseur: nFourn, ...lotExtra }] : entries;
+    const newEntries = initQty > 0 ? [...entries, { id: pid + 1, productId: pid, qty: initQty, unit: nUnit, montantDu: Number(nMontant) || 0, date: today(), recordedAt:new Date().toISOString(), fournisseur: nFourn, ...lotExtra }] : entries;
     onUpdate({
-      products: [...products, { id: pid, nom: nNom.trim(), img: nImg ?? PLACEHOLDER_IMGS[Math.floor(Math.random() * 4)], unit: nUnit, fournisseur: nFourn, categorie: finalCat || undefined }],
+      products: [...products, { id: pid, nom: nNom.trim(), img: nImg ?? PLACEHOLDER_IMGS[Math.floor(Math.random() * 4)], unit: nUnit, fournisseur: nFourn, categorie: finalCat || undefined, prixAchat:Number(nPrixUnit) || 0, prixVente:Number(nPrixUnit) || 0 }],
       entries: newEntries, categories: updatedCats,
     });
     logAction("Nouveau produit", `${nNom.trim()}${finalCat ? " · " + finalCat : ""}`, "🆕");
@@ -166,19 +175,35 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
     setNLotMode(false); setNLots("1"); setNPieces(""); setNLongueur(""); setShowNew(false);
   }
 
-  function saveProductEdit() {
-    if (!detail || !editNom.trim()) return;
-    onUpdate({ products: products.map(p => p.id === detail.id ? { ...p, nom: editNom.trim(), categorie: editCat || undefined } : p) });
-    setDetail({ ...detail, nom: editNom.trim(), categorie: editCat || undefined });
-    setEditingProduct(false);
-    logAction("Produit modifié", editNom.trim(), "✏️");
+  async function saveProductEdit() {
+    const purchasePrice = Number(editPrixAchat);
+    if (!detail || !editNom.trim() || !Number.isFinite(purchasePrice) || purchasePrice < 0 || savingProduct) return;
+    const category = cats.find(c => c.nom === editCat);
+    setSavingProduct(true);
+    try {
+      await updateProduct({
+        boutiqueId:boutique.id,
+        productId:detail.id,
+        name:editNom.trim(),
+        categoryId:editCat ? category?.id : null,
+        purchasePrice,
+      });
+      const updated = { ...detail, nom:editNom.trim(), categorie:editCat || undefined, prixAchat:purchasePrice };
+      onUpdate({ products:products.map(p => p.id === detail.id ? updated : p) });
+      setDetail(updated);
+      setEditingProduct(false);
+      logAction("Produit modifié", editNom.trim(), "✏️");
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Modification du produit impossible");
+    } finally {
+      setSavingProduct(false);
+    }
   }
 
   // Stock correction
   const [editingEntryId, setEditingEntryId] = useState<number|null>(null);
   const [editEntryQty, setEditEntryQty] = useState("");
   const [stockCorrectionBusy, setStockCorrectionBusy] = useState<number|null>(null);
-  const todayRaw = new Date().toISOString().split("T")[0];
 
   async function saveEntryEdit(entryId: number) {
     const original = entries.find(e => e.id === entryId);
@@ -199,7 +224,7 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
       });
       const adjustment = {
         id:Date.now(), productId:original.productId, qty:delta, unit:original.unit,
-        montantDu:delta * originalUnitCost, date:today(), fournisseur:`Correction entrée #${entryId}`,
+        montantDu:delta * originalUnitCost, date:today(), recordedAt:new Date().toISOString(), fournisseur:`Correction entrée #${entryId}`,
       };
       onUpdate({ entries:[...entries, adjustment] });
       logAction("Correction stock", `Entrée #${entryId} · ajustement ${delta > 0 ? "+" : ""}${delta} ${original.unit}`, "✏️");
@@ -228,7 +253,7 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
       });
       const reversal = {
         id:Date.now(), productId:original.productId, qty:-original.qty, unit:original.unit,
-        montantDu:-Math.abs(original.montantDu), date:today(), fournisseur:`Annulation entrée #${entryId}`,
+        montantDu:-Math.abs(original.montantDu), date:today(), recordedAt:new Date().toISOString(), fournisseur:`Annulation entrée #${entryId}`,
       };
       onUpdate({ entries:[...entries, reversal] });
       logAction("Annulation réception", `Entrée #${entryId} · mouvement inverse ${-original.qty} ${original.unit}`, "↩️");
@@ -348,7 +373,7 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
                 </div>
               </div>
               <div className="flex gap-2">
-                <button onClick={() => { setEditingProduct(true); setEditNom(detail.nom); setEditCat(detail.categorie ?? ""); }}
+                <button onClick={() => { setEditingProduct(true); setEditNom(detail.nom); setEditCat(detail.categorie ?? ""); setEditPrixAchat(String(detail.prixAchat ?? 0)); }}
                   className="flex-1 flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs font-bold text-left" style={{ background: "#EEE9D8", color: "#7A7055" }}>
                   <Edit2 size={13}/> Modifier
                 </button>
@@ -359,11 +384,9 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
               <div>
                 <div className="flex items-center gap-2 mb-3"><History size={15} style={{ color: "#3b82f6" }}/><p className="text-xs font-black tracking-wider" style={{ color: "#3b82f6" }}>HISTORIQUE</p></div>
                 <div className="space-y-2">
-                  {entries.filter(e => e.productId === detail.id).sort((a, b) => b.id - a.id).map(e => {
+                  {entries.filter(e => e.productId === detail.id).sort(sortStockEntriesNewestFirst).map(e => {
                     const isSale = e.qty < 0;
                     const sc = suppliers.find(s => s.nom === e.fournisseur)?.color ?? "#6b7280";
-                    const entryDate = new Date(e.id).toISOString().split("T")[0];
-                    const isToday = entryDate === todayRaw || e.date.startsWith(new Date().toLocaleDateString("fr-FR", { day:"2-digit", month:"short" }));
                     const isEditing = editingEntryId === e.id;
                     if (isEditing) return (
                       <div key={e.id} className="rounded-xl px-3 py-3 space-y-2 border-2" style={{ borderColor:"#3b82f6", background:"#3b82f608" }}>
@@ -387,7 +410,7 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
                           <p className="text-xs text-muted-foreground">{isSale ? "Vente" : e.nbPieces ? "Lot reçu" : "Achat"} · {e.fournisseur.replace("Vente → ", "")} · {e.date}{e.sku ? ` · SKU: ${e.sku}` : ""}</p>
                         </div>
                         {!isSale && <p className="text-sm font-black" style={{ color: "#C9A227", fontFamily: "'Nunito', sans-serif" }}>{fmt(e.montantDu)}</p>}
-                        {!isSale && isToday && (
+                        {!isSale && (
                           <div className="flex gap-1 ml-1">
                             <button onClick={()=>{ setEditingEntryId(e.id); setEditEntryQty(String(e.qty)); }} className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background:"#3b82f615" }}><Edit2 size={12} style={{ color:"#3b82f6" }}/></button>
                             <button onClick={()=>deleteEntry(e.id)} className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background:"#ef444415" }}><Trash2 size={12} style={{ color:"#ef4444" }}/></button>
@@ -418,7 +441,11 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
                   ))}
                 </div>
               </Field>
-              <SubmitBtn color={boutique.color} label="Enregistrer les modifications" onClick={saveProductEdit} disabled={!editNom.trim()}/>
+              <Field label="PRIX D'ACHAT UNITAIRE">
+                <input value={editPrixAchat} onChange={e => setEditPrixAchat(e.target.value)} type="number" min="0" step="0.01" inputMode="decimal" placeholder="0" className={inputCls}/>
+              </Field>
+              <p className="text-xs text-muted-foreground">Ce prix sera utilisé pour les prochains mouvements ; les mouvements déjà enregistrés restent inchangés.</p>
+              <SubmitBtn color={boutique.color} label={savingProduct ? "Enregistrement…" : "Enregistrer les modifications"} onClick={saveProductEdit} disabled={!editNom.trim() || !Number.isFinite(Number(editPrixAchat)) || Number(editPrixAchat) < 0 || savingProduct}/>
             </>
           )}
 

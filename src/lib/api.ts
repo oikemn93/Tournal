@@ -128,13 +128,13 @@ async function dataRequest<T>(path: string, init: RequestInit = {}): Promise<T> 
   return body as T;
 }
 
-async function dataRequestAll<T>(path: string, orderColumn = "id"): Promise<T[]> {
+async function dataRequestAll<T>(path: string, order = "id.asc"): Promise<T[]> {
   const pageSize = 1000;
   const separator = path.includes("?") ? "&" : "?";
   const rows: T[] = [];
   for (let offset = 0; ; offset += pageSize) {
     const page = await dataRequest<T[]>(
-      `${path}${separator}order=${encodeURIComponent(orderColumn)}.asc&limit=${pageSize}&offset=${offset}`,
+      `${path}${separator}order=${encodeURIComponent(order)}&limit=${pageSize}&offset=${offset}`,
     );
     rows.push(...page);
     if (page.length < pageSize) return rows;
@@ -539,7 +539,7 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string): Promise<T | n
     const [boutiques, categories, products, entries, clients, suppliers, invoices, payments, charges, sessions, users, auditLogs] = await Promise.all([
       dataRequest<any[]>(`boutiques?select=*${boutiqueFilter}&order=nom.asc`),
       dataRequest<any[]>(`categories?select=*${scoped()}`), dataRequest<any[]>(`products?select=*${scoped()}`),
-      dataRequestAll<any>(`stock_entries?select=*${scoped()}`), dataRequest<any[]>(`clients?select=*${scoped()}`),
+      dataRequestAll<any>(`stock_entries?select=*${scoped()}`, "entry_date.desc,id.desc"), dataRequest<any[]>(`clients?select=*${scoped()}`),
       dataRequest<any[]>(`suppliers?select=*${scoped()}`),
       dataRequest<any[]>(`invoices?select=*,invoice_lines(*)${scoped()}`),
       dataRequest<any[]>(`invoice_payments?select=*${scoped()}&order=paid_at.asc`), dataRequest<any[]>(`charges?select=*${scoped()}`),
@@ -578,7 +578,7 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string): Promise<T | n
         longueurParPiece: Number(p.length_per_piece ?? 0),
         unitVente: p.unit,
       })),
-      entries: entries.filter(e => e.boutique_id === b.id).map(e => ({ id:e.id, productId:e.product_id, qty:Number(e.qty), unit:"unité", montantDu:Number(e.qty)*Number(e.prix_unit ?? 0), date:day(e.entry_date), fournisseur:e.note ?? "", invoiceId:undefined })),
+      entries: entries.filter(e => e.boutique_id === b.id).map(e => ({ id:e.id, productId:e.product_id, qty:Number(e.qty), unit:"unité", montantDu:Number(e.qty)*Number(e.prix_unit ?? 0), date:day(e.entry_date), recordedAt:e.entry_date, fournisseur:e.note ?? "", invoiceId:undefined })),
       clients: clients.filter(c => c.boutique_id === b.id).map(c => {
         // A wholesale client is stored as B2B with a marker in `contact`.
         const isWholesale = typeof c.contact === "string" && c.contact.includes(WHOLESALE_MARKER);
@@ -851,6 +851,15 @@ export async function createSupplier(params:{ boutiqueId:string; name:string; ph
 }
 export async function createProduct(params:{ boutiqueId:string; name:string; unit:string; categoryId?:string; purchasePrice?:number; salePrice?:number }) {
   return dataRequest<{product_id:number}>("rpc/create_product", { method:"POST", body:JSON.stringify({ p_boutique_id:params.boutiqueId,p_idempotency_key:crypto.randomUUID(),p_nom:params.name,p_unit:params.unit,p_category_id:params.categoryId ?? null,p_prix_achat:params.purchasePrice ?? 0,p_prix_vente:params.salePrice ?? 0 }) });
+}
+
+export async function updateProduct(params:{ boutiqueId:string; productId:number; name:string; categoryId?:string|null; purchasePrice:number }) {
+  const body: Record<string, unknown> = { nom:params.name, prix_achat:params.purchasePrice };
+  if (params.categoryId !== undefined) body.category_id = params.categoryId;
+  const updated = await dataRequest<Array<{ id:number }>>(`products?id=eq.${params.productId}&boutique_id=eq.${encodeURIComponent(params.boutiqueId)}&select=id`, {
+    method:"PATCH", headers:{ Prefer:"return=representation" }, body:JSON.stringify(body),
+  });
+  if (updated.length !== 1) throw new Error("Modification refusée ou produit introuvable");
 }
 
 export async function updateBoutiqueProfile(params: { boutiqueId:string; nom:string; ville:string; adresse?:string; email?:string; tel?:string }) {
