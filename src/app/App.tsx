@@ -8631,6 +8631,7 @@ export default function App() {
   const notifiedLowStock = useRef(new Set<number>());
   const lockTimer   = useRef<ReturnType<typeof setTimeout>|null>(null);
   const logoutTimer = useRef<ReturnType<typeof setTimeout>|null>(null);
+  const appSessionRenewalInFlight = useRef<Promise<void>|null>(null);
   // Auth settings come from the relational auth_settings table.
   const [lockTimeoutMs, setLockTimeoutMs] = useState(10 * 60 * 1000);
   const [sessionExpiryMs, setSessionExpiryMs] = useState(SESSION_EXPIRY_MS);
@@ -8866,6 +8867,29 @@ export default function App() {
     }
   }, []);
 
+  // The database application session has the same idle-lifetime setting as
+  // the UI. Renew it while the app is in use so an active cashier cannot end
+  // up with a valid Auth token but an expired write session. A locked screen is
+  // never renewed: unlocking still requires the quick PIN on the server.
+  const renewAppSession = useCallback(async () => {
+    const boutiqueId = activeBoutiqueIdRef.current;
+    if (screen !== "app" || !appSessionReady || locked || !boutiqueId) return;
+    if (appSessionRenewalInFlight.current) return appSessionRenewalInFlight.current;
+
+    const renewal = startAppSession(boutiqueId)
+      .then(() => undefined)
+      .catch((error) => {
+        // Keep the existing session state intact. The next user action still
+        // receives the server's precise authorization error if renewal failed.
+        console.warn("Renouvellement de session applicative différé :", error);
+      })
+      .finally(() => {
+        appSessionRenewalInFlight.current = null;
+      });
+    appSessionRenewalInFlight.current = renewal;
+    return renewal;
+  }, [appSessionReady, locked, screen]);
+
   const refreshAuthenticatedFlow = useCallback(async () => {
     if (!hasAuthenticatedSession()) {
       setAppSessionReady(false);
@@ -8958,15 +8982,16 @@ export default function App() {
     if (!synced || businessLoading || !appSessionReady || !hasAuthenticatedSession()) return;
     const onVisible = () => {
       if (document.visibilityState !== "visible") return;
-      void validateServerSession().then(valid => {
-        if (valid) void pullRemote();
-        else handleLogout();
+      void validateServerSession().then(async valid => {
+        if (!valid) { handleLogout(); return; }
+        await renewAppSession();
+        void pullRemote();
       });
     };
     const unsubscribe = subscribeToBoutiqueChanges(activeBoutiqueId ?? "", pullRemote);
     document.addEventListener("visibilitychange", onVisible);
     return () => { unsubscribe(); document.removeEventListener("visibilitychange", onVisible); };
-  }, [synced, pullRemote, activeBoutiqueId, businessLoading, appSessionReady]);
+  }, [synced, pullRemote, activeBoutiqueId, businessLoading, appSessionReady, renewAppSession]);
 
   // Boutique updates are persisted by domain-specific relational operations.
   // Never write a full JSON state blob from the client.
@@ -8985,6 +9010,16 @@ export default function App() {
     const timer = window.setInterval(refresh, 5 * 60_000);
     return () => window.clearInterval(timer);
   }, [screen]);
+
+  // Start well before the server-side lifetime ends. This is intentionally
+  // independent of token refresh: an Auth refresh preserves the login, while
+  // the app session is the separate server-side gate for protected writes.
+  useEffect(() => {
+    if (screen !== "app" || !appSessionReady || locked) return;
+    const intervalMs = Math.max(30_000, Math.min(5 * 60_000, Math.floor(sessionExpiryMs * 0.6)));
+    const timer = window.setInterval(() => { void renewAppSession(); }, intervalMs);
+    return () => window.clearInterval(timer);
+  }, [appSessionReady, locked, renewAppSession, screen, sessionExpiryMs]);
 
   useEffect(() => {
     if (screen !== "app") return;
