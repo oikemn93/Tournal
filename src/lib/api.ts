@@ -926,7 +926,12 @@ export async function signQZ(toSign: string): Promise<string> {
     body: JSON.stringify({ request: toSign }),
   });
   const signature = await response.text();
-  if (!response.ok || !signature) throw new Error("Signature QZ indisponible");
+  if (!response.ok || !signature) {
+    // The Edge Function deliberately returns a short, safe diagnostic (for
+    // example a missing signing key). Keep it so the workstation can be fixed
+    // without exposing any secret or having to inspect browser devtools.
+    throw new Error(signature.trim() || "Signature QZ indisponible");
+  }
   return signature;
 }
 

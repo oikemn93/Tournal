@@ -5059,9 +5059,9 @@ lFVACAKPBsq9w6fXa/BtZlsmYfYTi9mxRCFGjyV/zBSKW9jRlEQuIYtaZKu0P82X
 
 const PA: {
   status: "idle"|"loading"|"connected"|"disconnected";
-  qz: any; printers: string[]; printer: string;
+  qz: any; printers: string[]; printer: string; lastError: string|null;
   listeners: Set<()=>void>;
-} = { status:"idle", qz:null, printers:[], printer:"", listeners: new Set() };
+} = { status:"idle", qz:null, printers:[], printer:"", lastError:null, listeners: new Set() };
 
 function onPAChange(cb: ()=>void) { PA.listeners.add(cb); return ()=>PA.listeners.delete(cb); }
 function notifyPA() { PA.listeners.forEach(cb=>cb()); }
@@ -5072,16 +5072,30 @@ function usePAStatus() {
   return PA;
 }
 
+function qzErrorMessage(error: unknown) {
+  const raw = error instanceof Error ? error.message : String(error || "");
+  const message = raw.replace(/\s+/g, " ").trim();
+  if (!message || message === "load failed") return "Le module QZ Tray n’a pas pu être chargé. Vérifiez la connexion Internet puis réessayez.";
+  if (/connection|websocket|refused|closed|failed to connect/i.test(message)) {
+    return "QZ Tray ne répond pas. Vérifiez qu’il est lancé sur ce poste, puis réessayez.";
+  }
+  return message.slice(0, 240);
+}
+
 async function connectQZ(savedPrinter?: string): Promise<void> {
   if (PA.status === "loading" || PA.status === "connected") return;
-  PA.status = "loading"; notifyPA();
+  PA.status = "loading"; PA.lastError = null; notifyPA();
   try {
     if (!(window as any).qz) {
       await new Promise<void>((resolve, reject) => {
         const s = document.createElement("script");
+        const timeout = window.setTimeout(() => {
+          s.remove();
+          reject(new Error("Le chargement de QZ Tray a dépassé 10 secondes"));
+        }, 10_000);
         s.src = "https://cdn.jsdelivr.net/npm/qz-tray@2.2.4/qz-tray.js";
-        s.onload = ()=>resolve();
-        s.onerror = ()=>reject(new Error("load failed"));
+        s.onload = ()=>{ window.clearTimeout(timeout); resolve(); };
+        s.onerror = ()=>{ window.clearTimeout(timeout); reject(new Error("load failed")); };
         document.head.appendChild(s);
       });
     }
@@ -5099,20 +5113,29 @@ async function connectQZ(savedPrinter?: string): Promise<void> {
     if (!qz.websocket.isActive()) {
       await qz.websocket.connect({
         host:"localhost",
-        port:{ secure:[8181,8182], insecure:[8181,8182] },
-        usingSecure: false, keepAlive: 60, retries: 1,
+        // Tournal is served over HTTPS. A ws:// connection is mixed content
+        // and is commonly blocked by browsers. QZ Tray exposes secure ports
+        // in pairs so keep the documented fallback range as well.
+        port:{ secure:[8181,8282,8383,8484] },
+        usingSecure: true, keepAlive: 60, retries: 2,
       });
     }
     PA.qz = qz; PA.status = "connected";
-    qz.websocket.setClosedCallbacks(()=>{ PA.status="disconnected"; PA.qz=null; PA.printers=[]; notifyPA(); });
+    qz.websocket.setClosedCallbacks(()=>{
+      PA.status="disconnected"; PA.qz=null; PA.printers=[];
+      PA.lastError = "La connexion à QZ Tray a été fermée.";
+      notifyPA();
+    });
 
     const found = await qz.printers.find();
     PA.printers = Array.isArray(found) ? found : (found ? [found] : []);
     if (savedPrinter && PA.printers.includes(savedPrinter)) PA.printer = savedPrinter;
     else if (!PA.printer && PA.printers.length > 0) PA.printer = PA.printers[0];
     notifyPA();
-  } catch {
-    PA.status = "disconnected"; notifyPA();
+  } catch (error) {
+    PA.status = "disconnected"; PA.qz = null; PA.printers = [];
+    PA.lastError = qzErrorMessage(error);
+    notifyPA();
   }
 }
 
@@ -5123,7 +5146,11 @@ async function agentPrint(html: string, printer?: string): Promise<"ok"|"fail"|"
       const cfg = PA.qz.configs.create(target, { size:{width:72,height:null}, units:"mm", copies:1 });
       await PA.qz.print(cfg, [{ type:"pixel", format:"html", flavor:"plain", data:html }]);
       return "ok";
-    } catch { return "fail"; }
+    } catch (error) {
+      PA.lastError = qzErrorMessage(error);
+      notifyPA();
+      return "fail";
+    }
   }
   silentPrint(html);
   return "fallback";
@@ -6306,6 +6333,7 @@ ${PA.printer ? `<div class="c" style="font-size:8pt;margin-top:2mm">Imprimante :
             {sc.label}
           </p>
           <p className="text-xs text-muted-foreground mt-0.5 leading-snug">{sc.text}</p>
+          {pa.status === "disconnected" && pa.lastError && <p className="text-xs mt-1 leading-snug" style={{ color:"#b91c1c" }}>{pa.lastError}</p>}
         </div>
         <button onClick={()=>{ PA.status="idle"; notifyPA(); connectQZ(boutique.printerName); }} disabled={pa.status==="loading"}
           className="px-3 py-1.5 rounded-xl text-xs font-black active:scale-95 flex-shrink-0"
@@ -6422,7 +6450,7 @@ ${PA.printer ? `<div class="c" style="font-size:8pt;margin-top:2mm">Imprimante :
         <div className="divide-y divide-border">
           {[
             { n:"1", t:"Installer le pilote imprimante", d:"Téléchargez et installez le pilote de votre imprimante thermique 80mm (Xprinter, Epson TM-T20, Star TSP143…) depuis le site du fabricant." },
-            { n:"2", t:"Installer et lancer QZ Tray", d:"Téléchargez QZ Tray sur qz.io/download, installez-le et lancez-le. L'icône apparaîtra dans la barre système. Aucune configuration supplémentaire n'est requise — Tournal utilise un certificat de confiance." },
+            { n:"2", t:"Installer et lancer QZ Tray", d:"Téléchargez QZ Tray sur qz.io/download, installez-le et lancez-le. L'icône apparaît dans la barre système. Au premier raccordement, validez l'accès demandé pour Tournal." },
             { n:"3", t:"Sélectionner l'imprimante", d:"Cliquez sur \"Connecter\" ci-dessus. La liste des imprimantes détectées s'affiche. Sélectionnez votre imprimante thermique." },
             { n:"4", t:"Tester l'impression réelle", d:"Cliquez sur \"Test réel\" pour envoyer un ticket de test via QZ Tray. Si le papier sort : vous êtes prêt. Activez ensuite l'impression automatique." },
           ].map(s=>(
@@ -7315,6 +7343,7 @@ function MonPosteWidget({ boutique }: { boutique: Boutique }) {
                   ? `${printers.length} imprimante${printers.length!==1?"s":""} disponible${printers.length!==1?"s":""}`
                   : "Permet l'impression directe sans dialogue"}
               </p>
+              {qzStatus==="error" && pa.lastError && <p className="text-xs mt-1 leading-snug" style={{ color:"#b91c1c" }}>{pa.lastError}</p>}
             </div>
             <button onClick={connectQZ} className="px-3 py-1.5 rounded-lg text-xs font-bold flex-shrink-0"
               style={{ background:"#37415120", color:"#374151" }}>
