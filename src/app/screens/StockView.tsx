@@ -386,6 +386,7 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
                 <div className="space-y-2">
                   {entries.filter(e => e.productId === detail.id).sort(sortStockEntriesNewestFirst).map(e => {
                     const isSale = e.qty < 0;
+                    const isReturn = e.movementType === "retour";
                     const sc = suppliers.find(s => s.nom === e.fournisseur)?.color ?? "#6b7280";
                     const isEditing = editingEntryId === e.id;
                     if (isEditing) return (
@@ -407,10 +408,10 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
                             {isSale ? "−" : "+"}{Math.abs(e.qty)} <span className="text-muted-foreground font-normal">{e.unit}</span>
                             {e.nbPieces ? <span className="text-xs text-muted-foreground font-normal ml-1">({e.nbLots && e.nbLots > 1 ? `${e.nbLots}lots×` : ""}{e.nbPieces}p{e.longueurPiece ? `×${e.longueurPiece}` : ""})</span> : null}
                           </p>
-                          <p className="text-xs text-muted-foreground">{isSale ? "Vente" : e.nbPieces ? "Lot reçu" : "Achat"} · {e.fournisseur.replace("Vente → ", "")} · {e.date}{e.sku ? ` · SKU: ${e.sku}` : ""}</p>
+                          <p className="text-xs text-muted-foreground">{isSale ? "Vente" : isReturn ? "Retour client" : e.nbPieces ? "Lot reçu" : "Achat"} · {e.fournisseur.replace("Vente → ", "")} · {e.date}{e.sku ? ` · SKU: ${e.sku}` : ""}</p>
                         </div>
-                        {!isSale && <p className="text-sm font-black" style={{ color: "#C9A227", fontFamily: "'Nunito', sans-serif" }}>{fmt(e.montantDu)}</p>}
-                        {!isSale && (
+                        {!isSale && !isReturn && <p className="text-sm font-black" style={{ color: "#C9A227", fontFamily: "'Nunito', sans-serif" }}>{fmt(e.montantDu)}</p>}
+                        {!isSale && !isReturn && (
                           <div className="flex gap-1 ml-1">
                             <button onClick={()=>{ setEditingEntryId(e.id); setEditEntryQty(String(e.qty)); }} className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background:"#3b82f615" }}><Edit2 size={12} style={{ color:"#3b82f6" }}/></button>
                             <button onClick={()=>deleteEntry(e.id)} className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background:"#ef444415" }}><Trash2 size={12} style={{ color:"#ef4444" }}/></button>

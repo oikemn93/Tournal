@@ -477,7 +477,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
     // Restore stock
     const restoreEntries: StockEntry[] = returnLines.map((l,i) => ({
       id: Date.now() + i, productId: l.productId, qty: l.qty, unit: l.unit,
-      montantDu: 0, date: today(), fournisseur: `Retour ${returnInv.id}`,
+      montantDu: 0, movementType:"retour", date: today(), fournisseur: `Retour ${returnInv.id}`,
     }));
     onUpdate({ invoices: [...invoices, retInv], entries: [...entries, ...restoreEntries] });
     logAction("Retour articles", `${retId} ← ${returnInv.id} · ${returnLines.length} article(s) · ${fmt(refundTotal)}`, "↩️");

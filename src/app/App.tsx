@@ -88,7 +88,7 @@ type PlatformUser = {
   isSuspended?: boolean; suspensionReason?: string; suspendedAt?: string;
 };
 type Product    = { id: number; nom: string; img: string; unit: string; fournisseur: string; categorie?: string; couleur?: string; alertOk?: number; alertLow?: number };
-type StockEntry = { id: number; productId: number; qty: number; unit: string; montantDu: number; date: string; fournisseur: string; invoiceId?: string; nbLots?: number; nbPieces?: number; longueurPiece?: number; sku?: string; isTransfertInterne?: boolean };
+type StockEntry = { id: number; productId: number; qty: number; unit: string; montantDu: number; date: string; fournisseur: string; movementType?: "achat"|"ajustement"|"retour"|"inventaire"|string; invoiceId?: string; nbLots?: number; nbPieces?: number; longueurPiece?: number; sku?: string; isTransfertInterne?: boolean };
 type Supplier   = { id: number; nom: string; ville: string; lastDelivery: string; tel: string; initials: string; color: string; email?: string; contact?: string };
 type Client     = { id: number; nom: string; type: ClientType; tel: string; total: number; last: string; ville: string; adresse?: string; email?: string; contact?: string };
 type PaymentEntry = { method: PaymentMethod; amount: number };
@@ -8487,6 +8487,7 @@ export default function App() {
   const lastRemoteB          = useRef<string>(""); // JSON fingerprint to detect real changes
   const lastSyncRevision     = useRef<number|null>(null);
   const seenSyncEventIds     = useRef<Set<string>>(new Set());
+  const lastDataTab          = useRef<{ boutiqueId:string; tab:Tab }|null>(null);
   const platformUsersRef     = useRef<PlatformUser[]>([]);
   const activeBoutiqueIdRef  = useRef<string|null>(null); // stable ref for async callbacks
   const currentUserRef       = useRef<PlatformUser | null>(null);
@@ -9096,6 +9097,24 @@ export default function App() {
     document.addEventListener("visibilitychange", onVisible);
     return () => { unsubscribe(); document.removeEventListener("visibilitychange", onVisible); };
   }, [synced, pullRemote, activeBoutiqueId, businessLoading, locked, appSessionReady, endSessionForInactivity, renewAppSession, sessionExpiryMs, processBoutiqueSyncEvents, processLegacyBoutiqueChanges, boutiqueSyncProtocol]);
+
+  // Realtime keeps the shared state current in normal use. When a cashier
+  // explicitly opens Stock, Sale or Invoices after working elsewhere, run one
+  // background reconciliation as a safety net for a missed socket event.
+  useEffect(() => {
+    const boutiqueId = activeBoutiqueId;
+    const dataTab = tab === "stock" || tab === "pos" || tab === "factures";
+    if (!synced || screen !== "app" || businessLoading || locked || !appSessionReady || !boutiqueId || !dataTab) {
+      if (screen !== "app" || !boutiqueId) lastDataTab.current = null;
+      return;
+    }
+    const previous = lastDataTab.current;
+    lastDataTab.current = { boutiqueId, tab };
+    if (!previous || (previous.boutiqueId === boutiqueId && previous.tab === tab)) return;
+    // Avoid an immediate duplicate fetch after a just-received Realtime patch.
+    if (Date.now() - lastSyncAt < 1_500) return;
+    void pullRemote();
+  }, [activeBoutiqueId, appSessionReady, businessLoading, lastSyncAt, locked, pullRemote, screen, synced, tab]);
 
   // Boutique updates are persisted by domain-specific relational operations.
   // Never write a full JSON state blob from the client.

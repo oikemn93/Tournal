@@ -699,7 +699,7 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string): Promise<T | n
         longueurParPiece: Number(p.length_per_piece ?? 0),
         unitVente: p.unit,
       })),
-      entries: entries.filter(e => e.boutique_id === b.id).map(e => ({ id:e.id, productId:e.product_id, qty:Number(e.qty), unit:"unité", montantDu:Number(e.qty)*Number(e.prix_unit ?? 0), date:day(e.entry_date), recordedAt:e.entry_date, fournisseur:e.note ?? "", invoiceId:undefined })),
+      entries: entries.filter(e => e.boutique_id === b.id).map(e => ({ id:e.id, productId:e.product_id, qty:Number(e.qty), unit:"unité", montantDu:Number(e.qty)*Number(e.prix_unit ?? 0), movementType:e.type ?? undefined, date:day(e.entry_date), recordedAt:e.entry_date, fournisseur:e.note ?? "", invoiceId:undefined })),
       clients: clients.filter(c => c.boutique_id === b.id).map(c => {
         // A wholesale client is stored as B2B with a marker in `contact`.
         const isWholesale = typeof c.contact === "string" && c.contact.includes(WHOLESALE_MARKER);
@@ -983,7 +983,7 @@ export async function loadBoutiqueSyncPatch(boutiqueId: string, sourceEvents: Bo
     patch.products = products.map(row => ({ id:row.id, nom:row.nom, img:row.image_url ?? "", unit:row.unit, fournisseur:row.supplier_name ?? "", categorie:categoryById.get(row.category_id)?.nom, prixVente:Number(row.prix_vente ?? 0), prixAchat:Number(row.prix_achat ?? 0) }));
     patch.productParams = products.filter(row => row.pieces_per_lot != null || row.length_per_piece != null).map(row => ({ productId:row.id, nbPiecesParLot:Number(row.pieces_per_lot ?? 0), longueurParPiece:Number(row.length_per_piece ?? 0), unitVente:row.unit }));
   }
-  if (entries.length) patch.entries = entries.map(row => ({ id:row.id, productId:row.product_id, qty:Number(row.qty), unit:"unité", montantDu:Number(row.qty) * Number(row.prix_unit ?? 0), date:syncDate(row.entry_date), recordedAt:row.entry_date, fournisseur:row.note ?? "", invoiceId:undefined }));
+  if (entries.length) patch.entries = entries.map(row => ({ id:row.id, productId:row.product_id, qty:Number(row.qty), unit:"unité", montantDu:Number(row.qty) * Number(row.prix_unit ?? 0), movementType:row.type ?? undefined, date:syncDate(row.entry_date), recordedAt:row.entry_date, fournisseur:row.note ?? "", invoiceId:undefined }));
   if (clients.length) patch.clients = clients.map(row => {
     const wholesale = typeof row.contact === "string" && row.contact.includes(WHOLESALE_MARKER);
     return { id:row.id, nom:row.nom, type:wholesale ? "Grossiste" : row.type, tel:row.tel ?? "", total:Number(row.total ?? 0), last:syncDate(row.last_invoice_at), ville:row.ville ?? "", adresse:row.adresse ?? undefined, email:row.email ?? undefined, contact:wholesale ? row.contact.replace(WHOLESALE_MARKER, "").trim() || undefined : row.contact ?? undefined };

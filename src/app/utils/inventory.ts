@@ -22,14 +22,17 @@ export function lineDispQty(l: InvoiceLine | CartItem) {
 export function lineDispUnit(l: InvoiceLine | CartItem) { return l.sellUnit || l.unit; }
 export function lineTotal(l: InvoiceLine | CartItem) { return lineDispQty(l) * l.prixUnit; }
 export function productQty(pid: number, entries: StockEntry[]) { return entries.filter(e => e.productId === pid).reduce((s, e) => s + e.qty, 0); }
-export function productMontant(pid: number, entries: StockEntry[]) { return entries.filter(e => e.productId === pid && e.qty > 0).reduce((s, e) => s + e.montantDu, 0); }
+// A customer return restores physical stock at its historical cost, but it is
+// not a new supplier purchase and must never increase the amount owed.
+const isSupplierDebtEntry = (entry: StockEntry) => entry.qty > 0 && entry.movementType !== "retour";
+export function productMontant(pid: number, entries: StockEntry[]) { return entries.filter(e => e.productId === pid && isSupplierDebtEntry(e)).reduce((s, e) => s + e.montantDu, 0); }
 export function productMontantNet(pid: number, entries: StockEntry[], charges: Charge[]) {
-  const pEntries = entries.filter(e => e.productId === pid && e.qty > 0);
+  const pEntries = entries.filter(e => e.productId === pid && isSupplierDebtEntry(e));
   const sups = [...new Set(pEntries.map(e => e.fournisseur))];
   let net = 0;
   for (const sup of sups) {
     const prodDû = pEntries.filter(e => e.fournisseur === sup).reduce((s, e) => s + e.montantDu, 0);
-    const totalDû = entries.filter(e => e.fournisseur === sup && e.qty > 0).reduce((s, e) => s + e.montantDu, 0);
+    const totalDû = entries.filter(e => e.fournisseur === sup && isSupplierDebtEntry(e)).reduce((s, e) => s + e.montantDu, 0);
     const totalPayé = charges.filter(c => c.fournisseur === sup).reduce((s, c) => s + c.montant, 0);
     const ratio = totalDû > 0 ? Math.min(1, totalPayé / totalDû) : 0;
     net += prodDû * (1 - ratio);
@@ -39,7 +42,7 @@ export function productMontantNet(pid: number, entries: StockEntry[], charges: C
 export function supplierBalance(nom: string, entries: StockEntry[], charges?: Charge[]) {
   const linkedCharges = (charges ?? []).filter(c => c.fournisseur === nom);
   const regularPurchases = entries
-    .filter(e => e.fournisseur === nom && e.qty > 0)
+    .filter(e => e.fournisseur === nom && isSupplierDebtEntry(e))
     .reduce((s, e) => s + e.montantDu, 0);
   const transferPurchases = linkedCharges
     .filter(c => c.source === "transfer")
