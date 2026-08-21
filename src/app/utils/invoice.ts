@@ -331,9 +331,9 @@ export function silentPrint(html: string) {
 
 export const PA: {
   status: "idle"|"loading"|"connected"|"disconnected";
-  qz: any; printers: string[]; printer: string;
+  qz: any; printers: string[]; printer: string; lastError: string|null;
   listeners: Set<()=>void>;
-} = { status:"idle", qz:null, printers:[], printer:"", listeners: new Set() };
+} = { status:"idle", qz:null, printers:[], printer:"", lastError:null, listeners: new Set() };
 
 export function onPAChange(cb: ()=>void) { PA.listeners.add(cb); return ()=>PA.listeners.delete(cb); }
 export function notifyPA() { PA.listeners.forEach(cb=>cb()); }
@@ -344,9 +344,18 @@ export function usePAStatus() {
   return PA;
 }
 
+function qzErrorMessage(error: unknown) {
+  const message = (error instanceof Error ? error.message : String(error || "")).replace(/\s+/g, " ").trim();
+  if (!message || message === "load failed") return "Le module QZ Tray n’a pas pu être chargé. Réessayez dans quelques instants.";
+  if (/connection|websocket|refused|closed|failed to connect/i.test(message)) {
+    return "QZ Tray ne répond pas. Vérifiez qu’il est lancé sur ce poste, puis réessayez.";
+  }
+  return message.slice(0, 240);
+}
+
 export async function connectQZ(savedPrinter?: string): Promise<void> {
   if (PA.status === "loading" || PA.status === "connected") return;
-  PA.status = "loading"; notifyPA();
+  PA.status = "loading"; PA.lastError = null; notifyPA();
   try {
     if (!(window as any).qz) {
       await new Promise<void>((resolve, reject) => {
@@ -379,19 +388,25 @@ export async function connectQZ(savedPrinter?: string): Promise<void> {
         // The application is served over HTTPS.  Use QZ Tray's WSS endpoint
         // first; forcing ws:// here is blocked by modern browsers as mixed
         // content even when QZ Tray is correctly installed.
-        port:{ secure:[8181,8282], insecure:[8182,8283] },
-        usingSecure: true, keepAlive: 60, retries: 1,
+        port:{ secure:[8181,8282,8383,8484] },
+        usingSecure: true, keepAlive: 60, retries: 2,
       });
     }
     PA.qz = qz; PA.status = "connected";
-    qz.websocket.setClosedCallbacks(()=>{ PA.status="disconnected"; PA.qz=null; PA.printers=[]; notifyPA(); });
+    qz.websocket.setClosedCallbacks(()=>{
+      PA.status="disconnected"; PA.qz=null; PA.printers=[];
+      PA.lastError = "La connexion à QZ Tray a été fermée.";
+      notifyPA();
+    });
     const found = await qz.printers.find();
     PA.printers = Array.isArray(found) ? found : (found ? [found] : []);
     if (savedPrinter && PA.printers.includes(savedPrinter)) PA.printer = savedPrinter;
     else if (!PA.printer && PA.printers.length > 0) PA.printer = PA.printers[0];
     notifyPA();
-  } catch {
-    PA.status = "disconnected"; notifyPA();
+  } catch (error) {
+    PA.status = "disconnected"; PA.qz = null; PA.printers = [];
+    PA.lastError = qzErrorMessage(error);
+    notifyPA();
   }
 }
 
@@ -402,7 +417,11 @@ export async function agentPrint(html: string, printer?: string): Promise<"ok"|"
       const cfg = PA.qz.configs.create(target, { size:{width:72,height:null}, units:"mm", copies:1 });
       await PA.qz.print(cfg, [{ type:"pixel", format:"html", flavor:"plain", data:html }]);
       return "ok";
-    } catch { return "fail"; }
+    } catch (error) {
+      PA.lastError = qzErrorMessage(error);
+      notifyPA();
+      return "fail";
+    }
   }
   silentPrint(html);
   return "fallback";

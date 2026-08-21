@@ -4,7 +4,7 @@ import type { Boutique, CartItem, Invoice, Product, PlatformUser, PaymentMethod,
 import { SEM, inputCls, PAYMENT_METHODS, PM_ICON } from "../constants";
 import { fmt, today, imgSrc } from "../utils/formatting";
 import { productQty, lineTotal, lineDispQty, lineDispUnit } from "../utils/inventory";
-import { silentPrint, buildOrderTicketHtml, buildReceiptHtml, agentPrint, connectQZ, PA } from "../utils/invoice";
+import { silentPrint, buildOrderTicketHtml, buildReceiptHtml, agentPrint, connectQZ, PA, usePAStatus } from "../utils/invoice";
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
@@ -19,6 +19,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
 }) {
   const POS_COLOR = boutique.color;
   const { products, entries, invoices } = boutique;
+  const pa = usePAStatus();
 
   // Order taking
   const [search, setSearch] = useState("");
@@ -304,15 +305,16 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
       })()}
 
       <div className="rounded-2xl border border-border bg-card px-3 py-2.5 flex items-center gap-3">
-        <Printer size={16} className={PA.status==="connected" ? "text-emerald-600" : "text-muted-foreground"}/>
-        <div className="min-w-0 flex-1"><p className="text-xs font-black">Imprimante QZ Tray</p><p className="truncate text-xs text-muted-foreground">{PA.status==="connected" ? (printerName || PA.printer || "Sélectionnez une imprimante") : "Non connectée"}</p></div>
+        <Printer size={16} className={pa.status==="connected" ? "text-emerald-600" : "text-muted-foreground"}/>
+        <div className="min-w-0 flex-1"><p className="text-xs font-black">Imprimante QZ Tray</p><p className="truncate text-xs text-muted-foreground">{pa.status==="connected" ? (printerName || pa.printer || "Sélectionnez une imprimante") : "Non connectée"}</p></div>
         <button onClick={()=>setPrinterOpen(true)} className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-bold"><Settings size={14} className="inline mr-1"/>Configurer</button>
       </div>
       {printerOpen && <Modal title="Imprimante QZ Tray" color={POS_COLOR} onClose={()=>setPrinterOpen(false)}>
         <p className="mb-3 text-sm text-muted-foreground">QZ Tray doit être installé et ouvert sur ce poste. À la première utilisation, acceptez la demande locale de QZ Tray.</p>
-        <button onClick={connectPrinter} disabled={qzBusy} className="w-full rounded-2xl bg-slate-800 py-3 font-black text-white disabled:opacity-50">{qzBusy ? "Connexion…" : PA.status==="connected" ? "Actualiser les imprimantes" : "Connecter QZ Tray"}</button>
-        {PA.status==="connected" && <div className="mt-4 space-y-2"><p className="text-xs font-black">IMPRIMANTE DE CE POSTE</p>{PA.printers.length ? PA.printers.map((name:string)=><button key={name} onClick={()=>selectPrinter(name)} className="flex w-full items-center gap-2 rounded-xl border border-border p-3 text-left text-sm font-bold"><Printer size={16}/><span className="flex-1">{name}</span>{printerName===name&&<CheckCircle size={16} className="text-emerald-600"/>}</button>) : <p className="text-sm text-muted-foreground">Aucune imprimante détectée.</p>}</div>}
-        {PA.status!=="connected" && <a className="mt-4 block text-center text-sm font-bold text-blue-700 underline" href="https://qz.io/download" target="_blank" rel="noreferrer">Télécharger QZ Tray</a>}
+        <button onClick={connectPrinter} disabled={qzBusy} className="w-full rounded-2xl bg-slate-800 py-3 font-black text-white disabled:opacity-50">{qzBusy ? "Connexion…" : pa.status==="connected" ? "Actualiser les imprimantes" : "Connecter QZ Tray"}</button>
+        {pa.status==="disconnected" && pa.lastError && <p className="mt-3 text-sm font-medium text-red-700">{pa.lastError}</p>}
+        {pa.status==="connected" && <div className="mt-4 space-y-2"><p className="text-xs font-black">IMPRIMANTE DE CE POSTE</p>{pa.printers.length ? pa.printers.map((name:string)=><button key={name} onClick={()=>selectPrinter(name)} className="flex w-full items-center gap-2 rounded-xl border border-border p-3 text-left text-sm font-bold"><Printer size={16}/><span className="flex-1">{name}</span>{printerName===name&&<CheckCircle size={16} className="text-emerald-600"/>}</button>) : <p className="text-sm text-muted-foreground">Aucune imprimante détectée.</p>}</div>}
+        {pa.status!=="connected" && <a className="mt-4 block text-center text-sm font-bold text-blue-700 underline" href="https://qz.io/download" target="_blank" rel="noreferrer">Télécharger QZ Tray</a>}
       </Modal>}
 
       {/* Two tabs: Produits / Commandes */}
