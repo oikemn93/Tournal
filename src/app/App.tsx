@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { getData, saveData, checkBackend, stripImages, mergeImages, signQZ, sendInvoiceEmail, storePDFForSMS, getCurrentAuthUser, hasAuthenticatedSession, validateServerSession, getAuthBootstrap, signInWithPhone, changeOwnPassword, getPinStatus, setQuickPin, verifyQuickPin, startAppSession, lockAppSession, signOut as signOutFromSupabase, createBoutique, createUser, resetUserPassword, subscribeToBoutiqueChanges, assignUserToBoutique, unassignUserFromBoutique, upsertAssignmentDirect, deleteAssignmentDirect, recordAuditLog } from "../lib/api";
+import { checkBackend, signQZ, sendInvoiceEmail, storePDFForSMS, getCurrentAuthUser, hasAuthenticatedSession, validateServerSession, refreshSessionIfNeeded, getAuthBootstrap, signInWithPhone, changeOwnPassword, getPinStatus, setQuickPin, verifyQuickPin, startAppSession, lockAppSession, signOut as signOutFromSupabase, createBoutique, createUser, resetUserPassword, subscribeToBoutiqueChanges, assignUserToBoutique, unassignUserFromBoutique, upsertAssignmentDirect, deleteAssignmentDirect, recordAuditLog, loadBoutiqueSnapshot, loadPlatformUsers, loadGroupes, saveGroupes, loadAuthSettings as loadStoredAuthSettings, saveAuthSettings } from "../lib/api";
 import { getNotifications, markNotificationRead, markAllNotificationsRead, dismissAllNotifications, subscribeToNotifications, getPushState, enableWebPush, disableWebPush, syncWebPushBoutique, type PushState } from "../lib/notifications";
 import { toast, Toaster } from "sonner";
 import {
@@ -77,7 +77,7 @@ type InvoiceLine = { productId: number; nom: string; qty: number; unit: string; 
 
 type AuditEntry = {
   id: number; userId: string; userNom: string; userColor: string;
-  action: string; detail: string; icon: string; timestamp: number; date: string; source?: "native" | "legacy_kv";
+  action: string; detail: string; icon: string; timestamp: number; date: string; source?: "native";
 };
 type BoutiqueAssignment = { boutiqueId: string; role: string; droits: Record<Permission, boolean> };
 type Groupe = { id: string; nom: string };
@@ -135,14 +135,13 @@ function clearSession() { try { sessionStorage.removeItem(SESSION_KEY); sessionS
 type TechLogCat   = "sync"|"email"|"pdf"|"qz"|"session"|"backend";
 type TechLogLevel = "error"|"warn"|"info";
 type TechLog = { id:string; ts:number; level:TechLogLevel; cat:TechLogCat; msg:string; detail?:string; };
-const TECH_LOGS_MAX = 300;
 async function logTech(boutiqueId: string, entry: Omit<TechLog,"id"|"ts">) {
-  try {
-    const key = `logs:tech:${boutiqueId}`;
-    const prev = (await getData<TechLog[]>(key)) ?? [];
-    const e: TechLog = { id: Date.now().toString(36)+Math.random().toString(36).slice(2,5), ts:Date.now(), ...entry };
-    await saveData(key, [e, ...prev].slice(0, TECH_LOGS_MAX));
-  } catch {}
+  // Browser diagnostics must not become a hidden second persistence system.
+  // Durable user-visible activity is written to public.audit_log instead.
+  console[entry.level === "error" ? "error" : entry.level === "warn" ? "warn" : "info"](
+    `[${boutiqueId}] ${entry.cat}: ${entry.msg}`,
+    entry.detail,
+  );
 }
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
@@ -6489,21 +6488,17 @@ function SupervisionSection({ boutique, allBoutiques, backendOk, lastSyncAt }: {
   const [netLoading, setNetLoading]   = useState(false);
 
   useEffect(() => {
-    setLoading(true);
-    getData<TechLog[]>(`logs:tech:${boutique.id}`)
-      .then(d => setLogs(d ?? []))
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    // Legacy diagnostic events were intentionally removed. Operational logs
+    // live server-side; this panel only reflects the current client health.
+    setLogs([]);
+    setLoading(false);
   }, [boutique.id]);
 
   useEffect(() => {
     if (tab !== "reseau" || allBoutiques.length < 2) return;
     setNetLoading(true);
-    Promise.all(allBoutiques.map(b =>
-      getData<TechLog[]>(`logs:tech:${b.id}`).then(d => [b.id, d ?? []] as [string,TechLog[]])
-    )).then(entries => setNetworkHealth(Object.fromEntries(entries)))
-      .catch(() => {})
-      .finally(() => setNetLoading(false));
+    setNetworkHealth(Object.fromEntries(allBoutiques.map(b => [b.id, []])));
+    setNetLoading(false);
   }, [tab, allBoutiques]);
 
   const now = Date.now();
@@ -7139,8 +7134,8 @@ function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdat
                       <div className="flex items-center gap-2 flex-wrap">
                         <p className="text-sm font-bold">{e.action}</p>
                         {currentUser?.isSuperAdmin && e.source && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded-md font-black uppercase tracking-wide" style={{ background:e.source === "legacy_kv" ? "#dc262615" : "#16a34a15", color:e.source === "legacy_kv" ? "#dc2626" : "#16a34a" }}>
-                            {e.source === "legacy_kv" ? "KV legacy" : "Native"}
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-md font-black uppercase tracking-wide" style={{ background:"#16a34a15", color:"#16a34a" }}>
+                            Natif
                           </span>
                         )}
                       </div>
@@ -8585,6 +8580,7 @@ export default function App() {
   const [activeBoutiqueId, setActiveBoutiqueId] = useState<string|null>(null);
   const [activeAssign,     setActiveAssign]     = useState<BoutiqueAssignment|null>(null);
   const [businessLoading,  setBusinessLoading]  = useState(false);
+  const [appSessionReady,  setAppSessionReady]  = useState(false);
   const [tab,              setTab]              = useState<Tab>("dashboard");
   const [navFilter,        setNavFilter]        = useState<Record<string,string>>({});
   const [synced,           setSynced]           = useState(false);
@@ -8606,17 +8602,14 @@ export default function App() {
   const notifiedLowStock = useRef(new Set<number>());
   const lockTimer   = useRef<ReturnType<typeof setTimeout>|null>(null);
   const logoutTimer = useRef<ReturnType<typeof setTimeout>|null>(null);
-  // Auth settings — loaded from KV store on mount, fallback to hardcoded defaults
+  // Auth settings come from the relational auth_settings table.
   const [lockTimeoutMs, setLockTimeoutMs] = useState(10 * 60 * 1000);
   const [sessionExpiryMs, setSessionExpiryMs] = useState(SESSION_EXPIRY_MS);
   const LOCK_TIMEOUT_MS = lockTimeoutMs; // alias for existing refs
   const saveTimer   = useRef<ReturnType<typeof setTimeout>|null>(null);
-  const pendingSaves = useRef<Record<string, unknown>>({});
-  const isSaving             = useRef(false); // true while a save is in-flight
-  const isPulling            = useRef(false); // prevents setInterval + visibilitychange overlap
+  const isPulling            = useRef(false); // prevents overlapping Realtime reconciliations
   const pullQueued           = useRef(false); // guarantees a trailing refresh when an event arrives mid-pull
   const lastRemoteB          = useRef<string>(""); // JSON fingerprint to detect real changes
-  const lastRemoteU          = useRef<string>("");
   const platformUsersRef     = useRef<PlatformUser[]>([]);
   const activeBoutiqueIdRef  = useRef<string|null>(null); // stable ref for async callbacks
   const currentUserRef       = useRef<PlatformUser | null>(null);
@@ -8658,7 +8651,7 @@ export default function App() {
   }, [activeBoutiqueId]);
 
   useEffect(() => {
-    if (screen !== "app" || !currentUser || !activeBoutiqueId || !hasAuthenticatedSession()) {
+    if (screen !== "app" || !appSessionReady || !currentUser || !activeBoutiqueId || !hasAuthenticatedSession()) {
       setNotifs([]);
       return;
     }
@@ -8667,8 +8660,6 @@ export default function App() {
     const refreshPushState = () => { void getPushState().then(setPushState).catch(() => undefined); };
     const activate = async () => {
       setNotifs([]);
-      try { await startAppSession(activeBoutiqueId); } catch {}
-      if (cancelled) return;
       await syncWebPushBoutique().catch(() => undefined);
       if (cancelled) return;
       await refreshServerNotifications();
@@ -8686,7 +8677,7 @@ export default function App() {
       document.removeEventListener("visibilitychange", onVisible);
       navigator.serviceWorker?.removeEventListener("controllerchange", refreshPushState);
     };
-  }, [screen, currentUser?.id, activeBoutiqueId, refreshServerNotifications]);
+  }, [screen, appSessionReady, currentUser?.id, activeBoutiqueId, refreshServerNotifications]);
 
   const togglePushNotifications = React.useCallback(async () => {
     if (pushBusy) return;
@@ -8742,23 +8733,12 @@ export default function App() {
     });
   }, [boutiques, activeBoutiqueId]);
 
-  const debouncedSave = useCallback((key: string, data: unknown) => {
-    pendingSaves.current[key] = data;
+  const saveGroupesDebounced = useCallback((groups: Groupe[]) => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(async () => {
-      const entries = Object.entries(pendingSaves.current);
-      pendingSaves.current = {};
-      isSaving.current = true;
       setSaveState("saving");
       try {
-        await Promise.all(entries.map(([k, v]) => {
-          if (k === "boutiques") {
-            lastRemoteB.current = JSON.stringify(v);
-            const { stripped, images } = stripImages(v as any[]);
-            return Promise.all([saveData(k, stripped), saveData("boutique_images", images)]);
-          }
-          return saveData(k, v);
-        }));
+        await saveGroupes(groups);
         setBackendOk(true);
         setSaveState("saved");
         setTimeout(() => setSaveState("idle"), 2000);
@@ -8766,10 +8746,8 @@ export default function App() {
         setBackendOk(false);
         setSaveState("error");
         toast.error("Erreur de sauvegarde : " + String(e), { duration: 6000 });
-        const bid = Object.keys(pendingSaves.current)[0] ? activeBoutiqueIdRef.current : null;
+        const bid = activeBoutiqueIdRef.current;
         if (bid) logTech(bid, { level:"error", cat:"sync", msg:"Échec de sauvegarde", detail: String(e) });
-      } finally {
-        isSaving.current = false;
       }
     }, 800);
   }, []);
@@ -8777,96 +8755,39 @@ export default function App() {
   // ── Load boutique auth settings on mount ───────────────────────────────────
   const loadAuthSettings = useCallback(async (boutiqueId: string) => {
     try {
-      const settings = await getData<{ lockMinutes?: number; sessionHours?: number; sessionMinutes?: number }>(`settings:auth:${boutiqueId}`);
+      const settings = await loadStoredAuthSettings(boutiqueId);
       if (settings) {
         if (settings.lockMinutes) setLockTimeoutMs(settings.lockMinutes * 60 * 1000);
-        // sessionMinutes is canonical; sessionHours kept for backwards compat
-        const sessMin = settings.sessionMinutes ?? (settings.sessionHours ? settings.sessionHours * 60 : null);
-        if (sessMin) setSessionExpiryMs(sessMin * 60 * 1000);
+        if (settings.sessionMinutes) setSessionExpiryMs(settings.sessionMinutes * 60 * 1000);
       }
     } catch { /* use defaults */ }
   }, []);
 
-  // ── Auto-generate recurring charges that are past due ────────────────────────
-  const checkRecurringCharges = useCallback((boutiqueList: Boutique[]) => {
-    const now = new Date();
-    const updated = boutiqueList.map(b => {
-      const charges = b.charges ?? [];
-      const toAdd: typeof charges = [];
-      charges.filter(c => c.recurrence !== "unique").forEach(c => {
-        if (!c.dateRaw) return;
-        const lastDate = new Date(c.dateRaw);
-        if (isNaN(lastDate.getTime())) return;
-        const diffDays = Math.floor((now.getTime() - lastDate.getTime()) / 86400000);
-        const threshold = c.recurrence === "mensuelle" ? 28 : 7;
-        if (diffDays >= threshold) {
-          const newDate = new Date(now);
-          const dateStr = newDate.toLocaleDateString("fr-FR",{day:"2-digit",month:"short"});
-          const dateRaw = newDate.toISOString().split("T")[0];
-          // Only add if no charge with same label+categorie exists this period
-          const alreadyExists = charges.some(x =>
-            x.label === c.label && x.categorie === c.categorie &&
-            x.dateRaw && Math.abs(new Date(x.dateRaw).getTime() - now.getTime()) < threshold * 86400000
-          );
-          if (!alreadyExists) {
-            toAdd.push({ ...c, id: Date.now() + toAdd.length, date: dateStr, dateRaw });
-          }
-        }
-      });
-      if (toAdd.length === 0) return b;
-      return { ...b, charges: [...charges, ...toAdd] };
-    });
-    const hasChanges = updated.some((b, i) => b.charges !== boutiqueList[i].charges);
-    if (hasChanges) {
-      setBoutiques(updated);
-      // Persist immediately — auto-save useEffect may miss this if synced is still false at initial load
-      debouncedSave("boutiques", updated);
-    }
-  }, [debouncedSave]);
-
-  // Pull fresh data from backend and apply if changed and no local save is pending.
-  // isPulling prevents concurrent calls (setInterval + visibilitychange firing together).
-  // boutique_images is only fetched when boutiques fingerprint changes — not every 2s tick —
-  // which eliminates the slow 460ms poll that caused "connection closed" errors on navigation.
+  // Reconcile the active boutique after a debounced Realtime event. Account and
+  // group metadata is deliberately excluded: it is unrelated to stock/sales and
+  // used to triple every Realtime refresh.
   const pullRemote = useCallback(async () => {
     if (isPulling.current) {
       pullQueued.current = true;
       return;
     }
-    if (isSaving.current || Object.keys(pendingSaves.current).length > 0) return;
     isPulling.current = true;
     try {
       const bid = activeBoutiqueIdRef.current;
-      const [remoteB, remoteU, remoteG] = await Promise.all([
-        bid ? getData<Boutique[]>(`boutique:${bid}`) : Promise.resolve(null),
-        getData<PlatformUser[]>("platform_users"),
-        getData<Groupe[]>("groupes"),
-      ]);
+      const remoteB = bid ? await loadBoutiqueSnapshot<Boutique[]>(bid) : null;
       if (remoteB && remoteB.length > 0) {
         const fingerprint = JSON.stringify(remoteB);
         if (fingerprint !== lastRemoteB.current) {
           lastRemoteB.current = fingerprint;
-          // Boutiques changed — fetch images too (a logo may have been updated)
-          const remoteImgs = await getData<Record<string,string>>("boutique_images");
-          const freshBoutiques = mergeImages(remoteB, remoteImgs ?? {}) as Boutique[];
-          if (bid && freshBoutiques[0]) {
+          if (bid && remoteB[0]) {
             setBoutiques(prev => prev.some(b=>b.id===bid)
-              ? prev.map(b=>b.id===bid?freshBoutiques[0]:b)
-              : [...prev, freshBoutiques[0]]);
+              ? prev.map(b=>b.id===bid?remoteB[0]:b)
+              : [...prev, remoteB[0]]);
           } else {
-            setBoutiques(freshBoutiques);
+            setBoutiques(remoteB);
           }
-          checkRecurringCharges(freshBoutiques);
         }
       }
-      if (remoteU && remoteU.length > 0) {
-        const fingerprint = JSON.stringify(remoteU);
-        if (fingerprint !== lastRemoteU.current) {
-          lastRemoteU.current = fingerprint;
-          setPlatformUsers(remoteU);
-        }
-      }
-      if (remoteG && remoteG.length > 0) setGroupes(remoteG);
       setLastSyncAt(Date.now());
     } catch (e) {
       const bid = activeBoutiqueIdRef.current;
@@ -8884,27 +8805,30 @@ export default function App() {
 
   const hydrateBoutique = useCallback(async (boutiqueId: string) => {
     setBusinessLoading(true);
+    setAppSessionReady(false);
     try {
-      const [remoteB, remoteU, remoteG] = await Promise.all([
-        getData<Boutique[]>(`boutique:${boutiqueId}`),
-        getData<PlatformUser[]>("platform_users"),
-        getData<Groupe[]>("groupes"),
-      ]);
+      // All writes and protected reads require this short-lived application
+      // session. Starting it once here removes the former race with the
+      // notifications effect and with the first user action.
+      await startAppSession(boutiqueId);
+      const remoteB = await loadBoutiqueSnapshot<Boutique[]>(boutiqueId);
       if (remoteB?.[0]) {
         const hydrated = remoteB[0];
         lastRemoteB.current = JSON.stringify(remoteB);
         setBoutiques(prev => prev.some(b=>b.id===boutiqueId)
           ? prev.map(b=>b.id===boutiqueId?hydrated:b)
           : [...prev, hydrated]);
-        checkRecurringCharges(remoteB);
       }
-      if (remoteU?.length) {
-        lastRemoteU.current = JSON.stringify(remoteU);
-        setPlatformUsers(remoteU);
-      }
-      if (remoteG?.length) setGroupes(remoteG);
       setLastSyncAt(Date.now());
+      setAppSessionReady(true);
       void checkBackend().then(setBackendOk).catch(()=>setBackendOk(false));
+      // These administration-only collections are non-blocking. The cashier
+      // can use the shop as soon as the business snapshot is available.
+      void Promise.all([loadPlatformUsers<PlatformUser[]>(), loadGroupes<Groupe[]>()])
+        .then(([users, groups]) => {
+          if (users.length) setPlatformUsers(users);
+          setGroupes(groups);
+        }).catch(() => undefined);
     } catch (error) {
       setBackendOk(false);
       toast.error("Données boutique indisponibles : " + (error instanceof Error ? error.message : String(error)), { duration:8000 });
@@ -8915,12 +8839,14 @@ export default function App() {
 
   const refreshAuthenticatedFlow = useCallback(async () => {
     if (!hasAuthenticatedSession()) {
+      setAppSessionReady(false);
       setSynced(true);
       setScreen("login");
       return;
     }
     if (!await validateServerSession()) {
       clearSession();
+      setAppSessionReady(false);
       setCurrentUser(null);
       setSynced(true);
       setScreen("login");
@@ -8938,7 +8864,7 @@ export default function App() {
       setSynced(true);
 
       if (user.isSuspended) {
-        await signOutFromSupabase(); clearSession(); setCurrentUser(null); setScreen("login");
+        await signOutFromSupabase(); clearSession(); setAppSessionReady(false); setCurrentUser(null); setScreen("login");
         toast.error("Compte suspendu — contactez l’administrateur Tournal");
         return;
       }
@@ -8950,7 +8876,7 @@ export default function App() {
       if (user.isSuperAdmin) {
         setScreen("superadmin");
         setTimeout(() => { void Promise.all([
-          getData<PlatformUser[]>("platform_users"), getData<Groupe[]>("groupes"),
+          loadPlatformUsers<PlatformUser[]>(), loadGroupes<Groupe[]>(),
         ]).then(([users, groups]) => {
           if (users?.length) setPlatformUsers(users);
           if (groups?.length) setGroupes(groups);
@@ -9000,7 +8926,7 @@ export default function App() {
   // Supabase Realtime pushes boutique changes to connected users.  A single
   // refresh follows each event; there is no periodic 2-second polling.
   useEffect(() => {
-    if (!synced || businessLoading || !hasAuthenticatedSession()) return;
+    if (!synced || businessLoading || !appSessionReady || !hasAuthenticatedSession()) return;
     const onVisible = () => {
       if (document.visibilityState !== "visible") return;
       void validateServerSession().then(valid => {
@@ -9011,20 +8937,25 @@ export default function App() {
     const unsubscribe = subscribeToBoutiqueChanges(activeBoutiqueId ?? "", pullRemote);
     document.addEventListener("visibilitychange", onVisible);
     return () => { unsubscribe(); document.removeEventListener("visibilitychange", onVisible); };
-  }, [synced, pullRemote, activeBoutiqueId, businessLoading]);
+  }, [synced, pullRemote, activeBoutiqueId, businessLoading, appSessionReady]);
 
   // Boutique updates are persisted by domain-specific relational operations.
   // Never write a full JSON state blob from the client.
-  useEffect(() => { if (!synced) return; debouncedSave("platform_users", platformUsers); }, [platformUsers, synced, debouncedSave]);
-  useEffect(() => { if (!synced) return; debouncedSave("groupes", groupes); }, [groupes, synced, debouncedSave]);
+  useEffect(() => { if (!synced) return; saveGroupesDebounced(groupes); }, [groupes, synced, saveGroupesDebounced]);
 
-  // Auto-lock + auto-logout on inactivity (only when on "app" screen)
+  // Refresh the access token before its expiry so Realtime keeps its existing
+  // channel rather than disconnecting users after an hour.
   useEffect(() => {
-    if (screen !== "app" || !activeBoutiqueId) return;
-    void startAppSession(activeBoutiqueId).catch((error) => {
-      console.warn("Impossible d’ouvrir la session applicative", error);
-    });
-  }, [screen, activeBoutiqueId]);
+    if (!hasAuthenticatedSession()) return;
+    const refresh = () => {
+      void refreshSessionIfNeeded().catch((error) => {
+        console.warn("Renouvellement de session différé :", error);
+      });
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 5 * 60_000);
+    return () => window.clearInterval(timer);
+  }, [screen]);
 
   useEffect(() => {
     if (screen !== "app") return;
@@ -9041,7 +8972,7 @@ export default function App() {
         const bid = activeBoutiqueIdRef.current;
         if (bid) void logTech(bid, { level:"info", cat:"session", msg:"Session expirée après inactivité" });
         void signOutFromSupabase().catch(() => undefined).finally(() => {
-          clearSession(); setCurrentUser(null); setActiveBoutiqueId(null); setActiveAssign(null); setLocked(false); setScreen("login");
+          clearSession(); setAppSessionReady(false); setCurrentUser(null); setActiveBoutiqueId(null); setActiveAssign(null); setLocked(false); setScreen("login");
         });
       }, sessionExpiryMs);
     }
@@ -9055,7 +8986,7 @@ export default function App() {
     };
   }, [screen, sessionExpiryMs]);
 
-  // Keep stable ref in sync for use inside async callbacks (debouncedSave, logTech)
+  // Keep stable refs in sync for asynchronous callbacks.
   useEffect(() => { activeBoutiqueIdRef.current = activeBoutiqueId; }, [activeBoutiqueId]);
   useEffect(() => { platformUsersRef.current = platformUsers; }, [platformUsers]);
   useEffect(() => { currentUserRef.current = currentUser; }, [currentUser]);
@@ -9107,30 +9038,13 @@ export default function App() {
             id: saved.id,
             timestamp: ts,
             date: new Date(ts).toLocaleString("fr-FR", { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit", second:"2-digit" }),
-            source: (saved.source ?? "native") as "native" | "legacy_kv",
+            source: "native",
           }),
         }));
       } catch (error) {
         console.warn("Audit log server write failed", error);
       }
     })();
-  }
-  function handleLogin(user: PlatformUser) {
-    const freshUser = platformUsers.find(u => u.id === user.id) ?? user;
-    setCurrentUser(freshUser);
-    if (freshUser.isSuspended) {
-      void signOutFromSupabase(); clearSession(); setCurrentUser(null); setScreen("login");
-      toast.error("Compte suspendu — contactez l’administrateur Tournal"); return;
-    }
-    if (freshUser.isSuperAdmin) { saveSession(freshUser.id, null, null); setScreen("superadmin"); return; }
-    const active = freshUser.assignments.filter(a => boutiques.find(b => b.id === a.boutiqueId));
-    if (active.length === 0) { saveSession(freshUser.id, null, null); setScreen("boutique-select"); return; }
-    if (active.length === 1) {
-      const a = active[0];
-      setActiveBoutiqueId(a.boutiqueId); setActiveAssign(a); setTab("dashboard"); setScreen("app");
-      saveSession(freshUser.id, a.boutiqueId, a);
-      logTech(a.boutiqueId, { level:"info", cat:"session", msg:`Connexion : ${freshUser.nom}`, detail: a.role });
-    } else { saveSession(freshUser.id, null, null); setScreen("boutique-select"); }
   }
   function handleSelectBoutique(b: Boutique, assignment: BoutiqueAssignment) {
     activeBoutiqueIdRef.current=b.id; setActiveBoutiqueId(b.id); setActiveAssign(assignment); setTab("dashboard"); setBusinessLoading(true); setScreen("app");
@@ -9151,7 +9065,7 @@ export default function App() {
   function handleLogout() {
     if (activeBoutiqueId && currentUser) logTech(activeBoutiqueId, { level:"info", cat:"session", msg:`Déconnexion : ${currentUser.nom}` });
     void signOutFromSupabase();
-    clearSession(); setCurrentUser(null); setActiveBoutiqueId(null); setActiveAssign(null); setScreen("login");
+    clearSession(); setAppSessionReady(false); setCurrentUser(null); setActiveBoutiqueId(null); setActiveAssign(null); setScreen("login");
   }
 
   function handleUpdateBoutique(id: string, nom: string, ville: string) {
@@ -9161,20 +9075,6 @@ export default function App() {
     setBoutiques(prev=>prev.filter(b=>b.id!==id));
     setPlatformUsers(prev=>prev.map(u=>({...u,assignments:u.assignments.filter(a=>a.boutiqueId!==id)})));
   }
-  async function handleResetBackend() {
-    setSaveState("saving");
-    try {
-      const { stripped, images } = stripImages(boutiques);
-      await Promise.all([saveData("boutiques", stripped), saveData("boutique_images", images), saveData("platform_users", platformUsers), saveData("groupes", groupes)]);
-      setBackendOk(true);
-      setSaveState("saved");
-      setTimeout(() => setSaveState("idle"), 2000);
-    } catch {
-      setBackendOk(false);
-      setSaveState("error");
-    }
-  }
-
   async function handleCreateBoutique(nom: string, ville: string, ownerId: string) {
     try {
       const { boutiqueId } = await createBoutique(nom, ville, ownerId);
@@ -9433,7 +9333,7 @@ export default function App() {
         )}
         {safeTab==="transferts"   && canAccess("stock")        && <RelationalTransfersView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} currentUser={currentUser!}/>}
         {safeTab==="admin"        && isOwner                  && (
-          <AdminView
+        <AdminView
             boutique={boutique}
             allBoutiques={boutiques}
             platformUsers={platformUsers}
@@ -9444,6 +9344,11 @@ export default function App() {
             logAction={logAction}
             lockMinutesInit={Math.round(lockTimeoutMs / 60000)}
             sessionMinutesInit={Math.round(sessionExpiryMs / 60000)}
+            onSaveAuthSettings={async (lockMinutes, sessionMinutes) => {
+              await saveAuthSettings(boutique.id, { lockMinutes, sessionMinutes });
+              setLockTimeoutMs(lockMinutes * 60 * 1000);
+              setSessionExpiryMs(sessionMinutes * 60 * 1000);
+            }}
             backendOk={backendOk}
             lastSyncAt={lastSyncAt}
           />

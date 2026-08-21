@@ -8,11 +8,18 @@ import { createClient as createSupabaseClient } from "@supabase/supabase-js";
  */
 
 type AuthUser = { id: string; email?: string | null };
-type AuthSession = { access_token: string; refresh_token: string; user: AuthUser };
+type AuthSession = {
+  access_token: string;
+  refresh_token: string;
+  user: AuthUser;
+  expires_at?: number;
+};
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL ?? "https://cnxtylngddwmhugxkzju.supabase.co";
 const PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? "sb_publishable_Jeo4Bx2IsTPCkzsQMYTuFQ_VKPQc9Aq";
 const SESSION_STORAGE_KEY = "tournal.supabase.session";
+const SESSION_REFRESH_SKEW_MS = 2 * 60_000;
+let refreshSessionInFlight: Promise<AuthSession> | null = null;
 
 // Singleton stored on globalThis so HMR re-evaluations reuse the same instance.
 const _global = globalThis as unknown as Record<string, unknown>;
@@ -47,6 +54,19 @@ function storeSession(session: AuthSession | null) {
   }
 }
 
+function accessTokenExpiryMs(accessToken: string): number | null {
+  try {
+    const payload = accessToken.split(".")[1];
+    if (!payload) return null;
+    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized + "=".repeat((4 - normalized.length % 4) % 4);
+    const parsed = JSON.parse(atob(padded)) as { exp?: number };
+    return typeof parsed.exp === "number" ? parsed.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
 async function authRequest(path: string, init: RequestInit) {
   const response = await fetch(`${SUPABASE_URL}/auth/v1${path}`, {
     ...init,
@@ -61,9 +81,39 @@ async function authRequest(path: string, init: RequestInit) {
   return body;
 }
 
-async function dataRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+/**
+ * Keeps the browser-only session alive without moving tokens to localStorage.
+ * The same refreshed token is immediately supplied to active Realtime channels.
+ */
+export async function refreshSessionIfNeeded(force = false): Promise<AuthSession> {
   const session = readSession();
-  if (!session?.access_token) throw new Error("Connexion requise");
+  if (!session?.access_token || !session.refresh_token) throw new Error("Connexion requise");
+
+  const expiryMs = typeof session.expires_at === "number"
+    ? session.expires_at * 1000
+    : accessTokenExpiryMs(session.access_token);
+  if (!force && (expiryMs === null || expiryMs - Date.now() > SESSION_REFRESH_SKEW_MS)) return session;
+
+  if (!refreshSessionInFlight) {
+    refreshSessionInFlight = authRequest("/token?grant_type=refresh_token", {
+      method: "POST",
+      body: JSON.stringify({ refresh_token: session.refresh_token }),
+    }).then((body) => {
+      const refreshed = body as AuthSession;
+      if (!refreshed.access_token || !refreshed.refresh_token) throw new Error("Renouvellement de session incomplet");
+      storeSession(refreshed);
+      realtimeClient.realtime.setAuth(refreshed.access_token);
+      window.dispatchEvent(new Event("tournal:session-refreshed"));
+      return refreshed;
+    }).finally(() => {
+      refreshSessionInFlight = null;
+    });
+  }
+  return refreshSessionInFlight;
+}
+
+async function dataRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const session = await refreshSessionIfNeeded();
   const response = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
     ...init,
     headers: {
@@ -92,8 +142,7 @@ async function dataRequestAll<T>(path: string, orderColumn = "id"): Promise<T[]>
 }
 
 async function adminProvision<T>(action: string, payload: Record<string, unknown>): Promise<T> {
-  const session = readSession();
-  if (!session?.access_token) throw new Error("Connexion requise");
+  const session = await refreshSessionIfNeeded();
   const response = await fetch(`${SUPABASE_URL}/functions/v1/admin-provision`, {
     method: "POST",
     headers: {
@@ -109,8 +158,7 @@ async function adminProvision<T>(action: string, payload: Record<string, unknown
 }
 
 export async function createInvoiceShare(params: { boutiqueId:string; invoiceId:string; pdf:Blob }) {
-  const session = readSession();
-  if (!session?.access_token) throw new Error("Connexion requise");
+  const session = await refreshSessionIfNeeded();
   const form = new FormData();
   form.append("boutique_id", params.boutiqueId);
   form.append("invoice_id", params.invoiceId);
@@ -139,8 +187,7 @@ export async function signInWithPhone(phone: string, password: string) {
 
 export async function changeOwnPassword(password: string) {
   if (password.length < 12) throw new Error("Utilisez un mot de passe d’au moins 12 caractères");
-  const session = readSession();
-  if (!session?.access_token) throw new Error("Connexion requise");
+  const session = await refreshSessionIfNeeded();
   await authRequest("/user", {
     method: "PUT",
     headers: { Authorization: `Bearer ${session.access_token}` },
@@ -187,9 +234,9 @@ export function hasAuthenticatedSession() {
 
 /** Validates the locally cached token with Supabase Auth, not just localStorage. */
 export async function validateServerSession(): Promise<boolean> {
-  const session = readSession();
-  if (!session?.access_token) return false;
+  if (!readSession()?.access_token) return false;
   try {
+    const session = await refreshSessionIfNeeded();
     const response = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
       headers: { apikey: PUBLISHABLE_KEY, Authorization: `Bearer ${session.access_token}` },
     });
@@ -198,8 +245,9 @@ export async function validateServerSession(): Promise<boolean> {
     if (!user?.id || user.id !== session.user?.id) { storeSession(null); return false; }
     return true;
   } catch {
-    // Do not invalidate a session merely because the device is temporarily offline.
-    return false;
+    // Do not turn a transient network loss into an unexpected logout. Mutations
+    // will still fail safely server-side until the network comes back.
+    return Boolean(readSession()?.access_token);
   }
 }
 
@@ -252,21 +300,36 @@ export function subscribeToBoutiqueChanges(boutiqueId: string, onChange: () => v
   try {
     realtimeClient.realtime.setAuth(session.access_token);
     const filter = `boutique_id=eq.${boutiqueId}`;
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    let hasSubscribed = false;
+    const scheduleRefresh = () => {
+      if (refreshTimer) return;
+      refreshTimer = setTimeout(() => {
+        refreshTimer = null;
+        onChange();
+      }, 300);
+    };
     let channel = realtimeClient.channel(`tournal:${boutiqueId}`);
     // Each subscription is scoped to one boutique and only to relational tables.
     // This deliberately avoids both the former global JSON blob and polling.
     for (const table of ["products", "stock_entries", "invoices", "invoice_lines", "invoice_payments", "clients", "charges", "caisse_sessions", "suppliers", "categories", "boutique_partners", "boutique_assignments", "audit_log"]) {
-      channel = channel.on("postgres_changes", { event: "*", schema: "public", table, filter }, onChange);
+      channel = channel.on("postgres_changes", { event: "*", schema: "public", table, filter }, scheduleRefresh);
     }
     channel = channel.subscribe((status) => {
-      // Postgres Changes does not replay events missed while disconnected.
-      // Reload the canonical rows after every (re)subscription.
-      if (status === "SUBSCRIBED") onChange();
+      // The first snapshot is loaded explicitly by the application. A later
+      // subscription means the socket reconnected and needs reconciliation.
+      if (status === "SUBSCRIBED") {
+        if (hasSubscribed) scheduleRefresh();
+        hasSubscribed = true;
+      }
       if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
         console.warn(`Realtime ${status.toLowerCase()} pour la boutique ${boutiqueId}`);
       }
     });
-    return () => { void realtimeClient.removeChannel(channel); };
+    return () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      void realtimeClient.removeChannel(channel);
+    };
   } catch (error) {
     // Realtime is an enhancement. A transient channel issue must never block
     // the relational data already loaded for the selected boutique.
@@ -286,28 +349,43 @@ export function subscribeToStockTransfers(boutiqueId: string, onChange: () => vo
 
   try {
     realtimeClient.realtime.setAuth(session.access_token);
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    let hasSubscribed = false;
+    const scheduleRefresh = () => {
+      if (refreshTimer) return;
+      refreshTimer = setTimeout(() => {
+        refreshTimer = null;
+        onChange();
+      }, 300);
+    };
     let channel = realtimeClient.channel(`stock-transfers:${boutiqueId}`);
     channel = channel
       .on("postgres_changes", {
         event: "*", schema: "public", table: "stock_transfers",
         filter: `from_boutique_id=eq.${boutiqueId}`,
-      }, onChange)
+      }, scheduleRefresh)
       .on("postgres_changes", {
         event: "*", schema: "public", table: "stock_transfers",
         filter: `to_boutique_id=eq.${boutiqueId}`,
-      }, onChange)
+      }, scheduleRefresh)
       // stock_transfer_lines has no boutique column. RLS on the parent transfer
       // authorizes which line events this authenticated subscriber can receive.
       .on("postgres_changes", {
         event: "*", schema: "public", table: "stock_transfer_lines",
-      }, onChange)
+      }, scheduleRefresh)
       .subscribe((status) => {
-        if (status === "SUBSCRIBED") onChange();
+        if (status === "SUBSCRIBED") {
+          if (hasSubscribed) scheduleRefresh();
+          hasSubscribed = true;
+        }
         if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
           console.warn(`Realtime transferts ${status.toLowerCase()} pour ${boutiqueId}`);
         }
       });
-    return () => { void realtimeClient.removeChannel(channel); };
+    return () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      void realtimeClient.removeChannel(channel);
+    };
   } catch (error) {
     console.warn("Realtime transferts indisponible", error);
     return () => undefined;
@@ -320,7 +398,7 @@ export async function recordAuditLog(params: {
   action: string;
   detail: string;
   icon: string;
-  source?: "native" | "legacy_kv";
+  source?: "native";
 }) {
   return dataRequest<Array<{ id: number; boutique_id: string; user_id: string; action: string; detail: string; icon: string; source?: string; created_at: string }>>(
     "audit_log",
@@ -449,16 +527,15 @@ export async function getAuthBootstrap() {
   };
 }
 
-/** Reads the compatibility state while the screens are progressively moved to relational tables. */
-export async function getData<T>(key: string): Promise<T | null> {
-  const targetedBoutiqueId = key.startsWith("boutique:") ? key.slice("boutique:".length) : null;
-  if (key === "boutiques" || targetedBoutiqueId) {
-    // Compatibility projection: callers can request all visible boutiques or one
-    // targeted boutique. Login and Realtime use the targeted path so business
-    // payloads never block the authentication shell.
-    const bid = targetedBoutiqueId ? encodeURIComponent(targetedBoutiqueId) : null;
-    const boutiqueFilter = bid ? `&id=eq.${bid}` : "";
-    const scoped = (column = "boutique_id") => bid ? `&${column}=eq.${bid}` : "";
+/**
+ * Loads the relational snapshot required by the active boutique screens.
+ * It is intentionally scoped to one boutique: the authentication shell never
+ * downloads another shop's business history.
+ */
+export async function loadBoutiqueSnapshot<T>(boutiqueId: string): Promise<T | null> {
+    const bid = encodeURIComponent(boutiqueId);
+    const boutiqueFilter = `&id=eq.${bid}`;
+    const scoped = (column = "boutique_id") => `&${column}=eq.${bid}`;
     const [boutiques, categories, products, entries, clients, suppliers, invoices, payments, charges, sessions, users, auditLogs] = await Promise.all([
       dataRequest<any[]>(`boutiques?select=*${boutiqueFilter}&order=nom.asc`),
       dataRequest<any[]>(`categories?select=*${scoped()}`), dataRequest<any[]>(`products?select=*${scoped()}`),
@@ -468,9 +545,20 @@ export async function getData<T>(key: string): Promise<T | null> {
       dataRequest<any[]>(`invoice_payments?select=*${scoped()}&order=paid_at.asc`), dataRequest<any[]>(`charges?select=*${scoped()}`),
       dataRequest<any[]>(`caisse_sessions?select=*${scoped()}`),
       dataRequest<any[]>("platform_users?select=id,nom,initials,color"),
-      dataRequest<any[]>(`audit_log?select=*${scoped()}&order=created_at.desc`),
+      // The administration view presents recent activity. Loading the entire
+      // audit trail at every login or Realtime event was the largest avoidable
+      // payload in production.
+      dataRequest<any[]>(`audit_log?select=*${scoped()}&order=created_at.desc&limit=200`),
     ]);
     const userById = new Map(users.map((u: any) => [u.id, u]));
+    const categoryById = new Map(categories.map((category: any) => [category.id, category]));
+    const clientById = new Map(clients.map((client: any) => [client.id, client]));
+    const paymentsByInvoice = new Map<string, any[]>();
+    for (const payment of payments) {
+      const invoicePayments = paymentsByInvoice.get(payment.invoice_id) ?? [];
+      invoicePayments.push(payment);
+      paymentsByInvoice.set(payment.invoice_id, invoicePayments);
+    }
     const day = (value?: string | null) => value ? new Date(value).toLocaleDateString("fr-FR") : "";
     return boutiques.map((b) => ({
       id: b.id, nom: b.nom, ville: b.ville ?? "", color: b.color ?? "#C9A227",
@@ -483,7 +571,7 @@ export async function getData<T>(key: string): Promise<T | null> {
         nbPiecesParLot: Number(c.pieces_per_lot ?? 0),
         longueurParPiece: Number(c.length_per_piece ?? 0),
       })),
-      products: products.filter(p => p.boutique_id === b.id).map(p => ({ id:p.id, nom:p.nom, img:p.image_url ?? "", unit:p.unit, fournisseur:p.supplier_name ?? "", categorie:categories.find(c=>c.boutique_id===b.id&&c.id===p.category_id)?.nom, prixVente:Number(p.prix_vente ?? 0), prixAchat:Number(p.prix_achat ?? 0) })),
+      products: products.filter(p => p.boutique_id === b.id).map(p => ({ id:p.id, nom:p.nom, img:p.image_url ?? "", unit:p.unit, fournisseur:p.supplier_name ?? "", categorie:categoryById.get(p.category_id)?.nom, prixVente:Number(p.prix_vente ?? 0), prixAchat:Number(p.prix_achat ?? 0) })),
       productParams: products.filter(p => p.boutique_id === b.id && (p.pieces_per_lot != null || p.length_per_piece != null)).map(p => ({
         productId: p.id,
         nbPiecesParLot: Number(p.pieces_per_lot ?? 0),
@@ -500,12 +588,12 @@ export async function getData<T>(key: string): Promise<T | null> {
       }),
       suppliers: suppliers.filter(s => s.boutique_id === b.id).map(s => ({ id:s.id, nom:s.nom, ville:s.ville ?? "", lastDelivery:day(s.last_delivery_at), tel:s.tel ?? "", initials:s.initials ?? "", color:s.color ?? "#C9A227", email:s.email ?? undefined, contact:s.contact ?? undefined })),
       invoices: invoices.filter(i => i.boutique_id === b.id).map(i => {
-        const invoicePayments = payments.filter(p => p.boutique_id === b.id && p.invoice_id === i.id);
+        const invoicePayments = paymentsByInvoice.get(i.id) ?? [];
         const paid = invoicePayments.length
           ? invoicePayments.reduce((sum, p) => sum + Number(p.amount), 0)
           : Number(i.acompte);
         const operator = userById.get(i.operator_id) ?? {};
-        const clientRecord = clients.find(c => c.boutique_id === b.id && c.id === i.client_id);
+        const clientRecord = clientById.get(i.client_id);
         return {
           id:i.id,
           clientId:i.client_id ?? undefined,
@@ -588,14 +676,16 @@ export async function getData<T>(key: string): Promise<T | null> {
           };
         }),
     })) as T;
-  }
-  if (key === "platform_users") {
+}
+
+/** Loads account metadata for administration screens from named relational tables. */
+export async function loadPlatformUsers<T>(): Promise<T> {
     const [users, assignments] = await Promise.all([
       dataRequest<Array<any>>("platform_users?select=id,phone,nom,initials,color,is_super_admin,is_suspended,suspension_reason,suspended_at,group_id,is_compte_mere,must_change_password"),
       dataRequest<Array<any>>("boutique_assignments?select=boutique_id,user_id,role,droits"),
     ]);
     const toRole = (role: string) => role === "owner" ? "Propriétaire" : role === "manager" ? "Manager" : "Vendeur";
-    return users.map((user) => ({
+  return users.map((user) => ({
       id: user.id,
       phone: user.phone,
       nom: user.nom,
@@ -613,53 +703,41 @@ export async function getData<T>(key: string): Promise<T | null> {
         role: toRole(a.role),
         droits: a.droits ?? {},
       })),
-    })) as T;
-  }
-  if (key === "groupes") {
-    const rows = await dataRequest<Array<{ id: string; nom: string }>>("groupes?select=id,nom&order=nom.asc");
-    return rows as T;
-  }
-  if (key.startsWith("settings:auth:")) {
-    const boutiqueId = key.slice("settings:auth:".length);
-    const rows = await dataRequest<Array<{ lock_minutes: number; session_minutes: number }>>(
-      `auth_settings?select=lock_minutes,session_minutes&boutique_id=eq.${encodeURIComponent(boutiqueId)}&limit=1`,
-    );
-    const row = rows[0];
-    return row ? { lockMinutes: row.lock_minutes, sessionMinutes: row.session_minutes } as T : null;
-  }
-  // Technical logs are intentionally not mirrored in the browser anymore.
-  return null;
+  })) as T;
 }
 
-export async function saveData<T>(key: string, value: T): Promise<void> {
-  if (key === "boutiques") {
-    // Full-state writes are intentionally disabled: business mutations must use
-    // a dedicated relational RPC or endpoint.
-    return;
-  }
-  if (key === "groupes") {
-    const groups = value as Array<{ id: string; nom: string }>;
-    if (!groups.length) return;
-    await dataRequest("groupes?on_conflict=id", {
-      method: "POST",
-      headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
-      body: JSON.stringify(groups),
-    });
-    return;
-  }
-  if (key.startsWith("settings:auth:")) {
-    const boutiqueId = key.slice("settings:auth:".length);
-    const settings = value as { lockMinutes?: number; sessionMinutes?: number };
-    await dataRequest("auth_settings?on_conflict=boutique_id", {
-      method: "POST",
-      headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
-      body: JSON.stringify({
-        boutique_id: boutiqueId,
-        lock_minutes: settings.lockMinutes ?? 10,
-        session_minutes: settings.sessionMinutes ?? 720,
-      }),
-    });
-  }
+export async function loadGroupes<T>(): Promise<T> {
+  const rows = await dataRequest<Array<{ id: string; nom: string }>>("groupes?select=id,nom&order=nom.asc");
+  return rows as T;
+}
+
+export async function saveGroupes(groups: Array<{ id: string; nom: string }>): Promise<void> {
+  if (!groups.length) return;
+  await dataRequest("groupes?on_conflict=id", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify(groups),
+  });
+}
+
+export async function loadAuthSettings(boutiqueId: string): Promise<{ lockMinutes: number; sessionMinutes: number } | null> {
+  const rows = await dataRequest<Array<{ lock_minutes: number; session_minutes: number }>>(
+    `auth_settings?select=lock_minutes,session_minutes&boutique_id=eq.${encodeURIComponent(boutiqueId)}&limit=1`,
+  );
+  const row = rows[0];
+  return row ? { lockMinutes: row.lock_minutes, sessionMinutes: row.session_minutes } : null;
+}
+
+export async function saveAuthSettings(boutiqueId: string, settings: { lockMinutes?: number; sessionMinutes?: number }): Promise<void> {
+  await dataRequest("auth_settings?on_conflict=boutique_id", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify({
+      boutique_id: boutiqueId,
+      lock_minutes: settings.lockMinutes ?? 10,
+      session_minutes: settings.sessionMinutes ?? 720,
+    }),
+  });
 }
 
 export async function createSale(params: { boutiqueId: string; clientId?: number; client: string; clientTel?: string; paymentMethod?: string; lines: Array<{ productId:number; nom:string; qty:number; unit:string; prixUnit:number; sellUnit?:string; sellQty?:number }> }) {
@@ -840,18 +918,8 @@ export async function checkBackend(): Promise<boolean> {
   }
 }
 
-/** Images stay in the protected boutique JSON state until Storage migration is complete. */
-export function stripImages<T>(boutiques: T) {
-  return { stripped: boutiques, images: {} as Record<string, string> };
-}
-
-export function mergeImages<T>(boutiques: T, _images: Record<string, string>) {
-  return boutiques;
-}
-
 export async function signQZ(toSign: string): Promise<string> {
-  const session = readSession();
-  if (!session?.access_token) throw new Error("Connexion requise");
+  const session = await refreshSessionIfNeeded();
   const response = await fetch(`${SUPABASE_URL}/functions/v1/qz-sign`, {
     method: "POST",
     headers: { apikey: PUBLISHABLE_KEY, Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" },
@@ -860,7 +928,6 @@ export async function signQZ(toSign: string): Promise<string> {
   const signature = await response.text();
   if (!response.ok || !signature) throw new Error("Signature QZ indisponible");
   return signature;
-  throw new Error("La signature QZ doit être configurée dans une fonction Supabase dédiée.");
 }
 
 export async function sendInvoiceEmail(_params: unknown): Promise<void> {

@@ -1,4 +1,5 @@
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+import { refreshSessionIfNeeded } from "./api";
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL ?? "https://cnxtylngddwmhugxkzju.supabase.co";
 const PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? "sb_publishable_Jeo4Bx2IsTPCkzsQMYTuFQ_VKPQc9Aq";
@@ -50,8 +51,7 @@ function readSession(): StoredSession | null {
 }
 
 async function dataRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const session = readSession();
-  if (!session?.access_token) throw new Error("Connexion requise");
+  const session = await refreshSessionIfNeeded();
   const response = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
     ...init,
     headers: {
@@ -99,6 +99,11 @@ export function subscribeToNotifications(boutiqueId: string, onChange: () => voi
   if (!boutiqueId || !session?.access_token || !session.user?.id) return () => undefined;
   try {
     realtimeClient.realtime.setAuth(session.access_token);
+    const refreshRealtimeAuth = () => {
+      const refreshedSession = readSession();
+      if (refreshedSession?.access_token) realtimeClient.realtime.setAuth(refreshedSession.access_token);
+    };
+    window.addEventListener("tournal:session-refreshed", refreshRealtimeAuth);
     const channel = realtimeClient
       .channel(`notifications:${session.user.id}:${boutiqueId}`)
       .on("postgres_changes", {
@@ -108,7 +113,10 @@ export function subscribeToNotifications(boutiqueId: string, onChange: () => voi
         filter: `boutique_id=eq.${boutiqueId}`,
       }, onChange)
       .subscribe();
-    return () => { void realtimeClient.removeChannel(channel); };
+    return () => {
+      window.removeEventListener("tournal:session-refreshed", refreshRealtimeAuth);
+      void realtimeClient.removeChannel(channel);
+    };
   } catch {
     return () => undefined;
   }

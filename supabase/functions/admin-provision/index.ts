@@ -7,6 +7,10 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
+const PERMISSION_KEYS = new Set([
+  "dashboard", "stock", "fournisseurs", "clients", "factures", "remboursement",
+  "charges", "compta", "vente", "encaissement_vente", "inventaire", "marges",
+]);
 
 function phoneToEmail(phone: string): string {
   const digits = String(phone ?? "").replace(/\D/g, "");
@@ -17,22 +21,31 @@ function initialsOf(name: string): string {
   return String(name ?? "").trim().split(/\s+/).filter(Boolean).map(w=>w[0]).join("").slice(0,2).toUpperCase();
 }
 const passwordOk=(v:unknown)=>String(v??"").length>=12;
+function normalizeRights(value: unknown): Record<string, boolean> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([key]) => PERMISSION_KEYS.has(key))
+      .map(([key, enabled]) => [key, enabled === true]),
+  );
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (req.method !== "POST") return json({ error:"Method not allowed" },405);
   try {
     const body = await req.json().catch(() => ({}));
     const { action } = body as { action?: string };
-    if (action === "ping") return json({ ok:true, time:new Date().toISOString(), action:"ping" });
 
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth:{ autoRefreshToken:false, persistSession:false } });
     const token = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
     if (!token) return json({ error:"Non authentifié" },401);
     const { data:{ user:caller }, error:authError } = await admin.auth.getUser(token);
-    if (authError || !caller) return json({ error:"Token invalide" },401);
+    const callerId = caller?.id;
+    if (authError || !callerId) return json({ error:"Token invalide" },401);
 
     const { data:callerPlatform, error:platformErr } = await admin.from("platform_users")
-      .select("id,is_super_admin,is_suspended,must_change_password").eq("id",caller.id).single();
+      .select("id,is_super_admin,is_suspended,must_change_password").eq("id",callerId).single();
     if (platformErr || !callerPlatform) return json({ error:"Impossible de vérifier les privilèges" },403);
     if (callerPlatform.is_suspended) return json({ error:"Compte suspendu" },403);
     if (callerPlatform.must_change_password) return json({ error:"Changement de mot de passe requis" },403);
@@ -41,7 +54,7 @@ Deno.serve(async (req) => {
     async function isOwnerOf(boutiqueId:string):Promise<boolean> {
       if (isSuperAdmin) return true;
       const { data } = await admin.from("boutique_assignments").select("role")
-        .eq("boutique_id",boutiqueId).eq("user_id",caller.id).maybeSingle();
+        .eq("boutique_id",boutiqueId).eq("user_id",callerId).maybeSingle();
       return data?.role === "owner";
     }
     async function getTarget(userId:string) {
@@ -72,6 +85,7 @@ Deno.serve(async (req) => {
     if (action === "create_user") {
       const { phone,fullName,password,boutiqueId } = body;
       const requestId = typeof body.requestId === "string" ? body.requestId : `${Date.now()}-${crypto.randomUUID()}`;
+      if (!boutiqueId && !isSuperAdmin) return json({ error:"Accès refusé" },403);
       if (boutiqueId && !(await isOwnerOf(boutiqueId))) return json({ error:"Accès refusé" },403);
       if (!phone || !fullName || !passwordOk(password)) return json({ error:"Nom, téléphone et mot de passe temporaire d’au moins 12 caractères requis" },400);
       const email=phoneToEmail(phone);
@@ -99,9 +113,13 @@ Deno.serve(async (req) => {
     if (action === "reset_password") {
       const { userId,password }=body;
       if (!userId || !passwordOk(password)) return json({error:"Utilisateur et mot de passe temporaire d’au moins 12 caractères requis"},400);
+      const target=await getTarget(userId);
+      if (target.is_super_admin) return json({error:"Réinitialisez le mot de passe d’un superadmin depuis son propre compte"},403);
       if (!isSuperAdmin) {
-        const { data:assignments }=await admin.from("boutique_assignments").select("boutique_id").eq("user_id",userId);
-        const checks=await Promise.all((assignments ?? []).map(a=>isOwnerOf(a.boutique_id)));
+        const { data:assignments }=await admin.from("boutique_assignments").select("boutique_id,role").eq("user_id",userId);
+        const checks=await Promise.all((assignments ?? [])
+          .filter(a=>a.role!=="owner")
+          .map(a=>isOwnerOf(a.boutique_id)));
         if (!checks.some(Boolean)) return json({error:"Accès refusé"},403);
       }
       const { error }=await admin.auth.admin.updateUserById(userId,{password});
@@ -114,10 +132,12 @@ Deno.serve(async (req) => {
     if (action === "assign_user") {
       const { boutiqueId,userId,role,droits }=body;
       if (!boutiqueId || !userId || !role) return json({error:"Champs requis manquants"},400);
+      if (!(["owner","manager","employee"] as string[]).includes(role)) return json({error:"Rôle invalide"},400);
       if (!(await isOwnerOf(boutiqueId))) return json({error:"Accès refusé"},403);
       const target=await getTarget(userId);
+      if (!isSuperAdmin && (target.is_super_admin || role === "owner")) return json({error:"Action réservée au superadmin"},403);
       if (target.is_suspended) return json({error:"Réactivez le compte avant de modifier ses accès"},400);
-      const { error }=await admin.from("boutique_assignments").upsert({boutique_id:boutiqueId,user_id:userId,role,droits},{onConflict:"boutique_id,user_id"});
+      const { error }=await admin.from("boutique_assignments").upsert({boutique_id:boutiqueId,user_id:userId,role,droits:normalizeRights(droits)},{onConflict:"boutique_id,user_id"});
       if (error) return json({error:error.message},400);
       if (role==="owner") await admin.from("boutiques").update({owner_id:userId}).eq("id",boutiqueId);
       return json({ok:true});
@@ -140,7 +160,7 @@ Deno.serve(async (req) => {
       const { userId,fullName,phone }=body;
       if (!userId || !fullName || !phone) return json({error:"Nom, téléphone et utilisateur requis"},400);
       const target=await getTarget(userId);
-      if (target.is_super_admin && userId!==caller.id) return json({error:"Modification d’un autre superadmin interdite"},403);
+      if (target.is_super_admin && userId!==callerId) return json({error:"Modification d’un autre superadmin interdite"},403);
       const authAttrs:any={ user_metadata:{nom:String(fullName).trim(),phone:String(phone).trim()} };
       if (String(phone).trim()!==target.phone) { authAttrs.email=phoneToEmail(phone); authAttrs.email_confirm=true; }
       const { error:authUpdateError }=await admin.auth.admin.updateUserById(userId,authAttrs);
@@ -162,7 +182,7 @@ Deno.serve(async (req) => {
         is_suspended:suspended,
         suspension_reason:suspended?(String(reason ?? "").trim() || "Suspendu par le superadmin"):null,
         suspended_at:suspended?new Date().toISOString():null,
-        suspended_by:suspended?caller.id:null,
+        suspended_by:suspended?callerId:null,
       }).eq("id",userId);
       if (profileError) return json({error:profileError.message},400);
       return json({ok:true,isSuspended:suspended});
@@ -172,13 +192,13 @@ Deno.serve(async (req) => {
       requireSuperAdmin();
       const { userId }=body;
       if (!userId) return json({error:"Utilisateur requis"},400);
-      if (userId===caller.id) return json({error:"Impossible de supprimer votre propre compte"},403);
+      if (userId===callerId) return json({error:"Impossible de supprimer votre propre compte"},403);
       const target=await getTarget(userId);
       if (target.is_super_admin) return json({error:"Suppression d’un superadmin interdite"},403);
       const { data:owned }=await admin.from("boutiques").select("id").eq("owner_id",userId);
       for (const b of owned ?? []) {
-        await admin.from("boutiques").update({owner_id:caller.id}).eq("id",b.id);
-        await admin.from("boutique_assignments").upsert({boutique_id:b.id,user_id:caller.id,role:"owner",droits:{}},{onConflict:"boutique_id,user_id"});
+        await admin.from("boutiques").update({owner_id:callerId}).eq("id",b.id);
+        await admin.from("boutique_assignments").upsert({boutique_id:b.id,user_id:callerId,role:"owner",droits:{}},{onConflict:"boutique_id,user_id"});
       }
       const { error }=await admin.auth.admin.deleteUser(userId);
       if (error) return json({error:error.message},400);

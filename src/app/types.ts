@@ -42,7 +42,7 @@ export type PaymentEntry = { method: PaymentMethod; amount: number };
 
 export type AuditEntry = {
   id: number; userId: string; userNom: string; userColor: string;
-  action: string; detail: string; icon: string; timestamp: number; date: string; source?: "native" | "legacy_kv";
+  action: string; detail: string; icon: string; timestamp: number; date: string; source?: "native";
 };
 
 export type BoutiqueAssignment = { boutiqueId: string; role: string; droits: Record<Permission, boolean> };
