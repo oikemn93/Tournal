@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Search, Plus, Minus, ChevronRight, ShoppingBag, Trash2, CheckCircle, AlertCircle, Zap, ClipboardList, Printer, Settings, Pencil, Smartphone } from "lucide-react";
+import { Search, Plus, Minus, ChevronRight, ShoppingBag, Trash2, CheckCircle, AlertCircle, Zap, ClipboardList, Printer, Settings, Pencil } from "lucide-react";
 import type { Boutique, CartItem, Invoice, Product, PlatformUser, PaymentMethod, StockEntry } from "../types";
 import { SEM, inputCls, PAYMENT_METHODS, PM_ICON } from "../constants";
 import { fmt, today, imgSrc } from "../utils/formatting";
@@ -220,15 +220,18 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
     }));
   }
 
-  async function handleCancelOrder(inv: Invoice) {
-    if (cancelBusy) return;
+  async function handleCancelOrder(inv: Invoice): Promise<boolean> {
+    if (cancelBusy) return false;
     setCancelBusy(inv.id);
     try {
-      await cancelPendingInvoice(inv.id);
+      const result = await cancelPendingInvoice({ boutiqueId:boutique.id, invoiceId:inv.id });
+      if (!result.deleted) throw new Error("Annulation non confirmée");
       onUpdate({ invoices: invoices.filter(i => i.id !== inv.id) });
       logAction("Commande annulée", `${inv.id} · ${inv.client} · ${fmt(inv.montant)}`, "🗑️");
+      return true;
     } catch (err) {
       alert(err instanceof Error ? err.message : "Annulation impossible");
+      return false;
     } finally {
       setCancelBusy(null);
     }
@@ -246,7 +249,8 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
     setClientNom(inv.client === "Client comptoir" ? "" : inv.client);
     setClientTel(inv.clientTel ?? "+221 ");
     // Cancel the existing order then switch to produits tab so user can complete checkout
-    handleCancelOrder(inv).then(() => {
+    void handleCancelOrder(inv).then((cancelled) => {
+      if (!cancelled) return;
       setPosTab("produits");
       setCheckoutOpen(true);
     });
@@ -284,25 +288,6 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
   // ── Vente (la caisse a été déplacée vers l'écran Factures) ───────────────────
   return (
     <div data-screen-source="relational-pos" className="space-y-3 pb-36">
-
-      {/* Mon poste widget — non-admin local config */}
-      {(()=>{
-        const assign = currentUser.assignments.find(a=>a.boutiqueId===boutique.id);
-        const isAdmin = currentUser.isSuperAdmin || assign?.role==="Propriétaire" || assign?.role==="Manager";
-        if(isAdmin) return null;
-        return (
-          <div className="flex items-center gap-2 px-3 py-2.5 rounded-2xl border border-border bg-card">
-            <Smartphone size={14} className="text-muted-foreground flex-shrink-0"/>
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-bold leading-tight">Mon poste</p>
-              <p className="text-xs text-muted-foreground truncate">
-                {boutique.printerName ? `🖨️ ${boutique.printerName}` : "Aucune imprimante configurée"}
-              </p>
-            </div>
-            <span className="text-xs text-muted-foreground">Config. dans Admin →</span>
-          </div>
-        );
-      })()}
 
       <div className="rounded-2xl border border-border bg-card px-3 py-2.5 flex items-center gap-3">
         <Printer size={16} className={pa.status==="connected" ? "text-emerald-600" : "text-muted-foreground"}/>

@@ -761,6 +761,212 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string): Promise<T | n
     })) as T;
 }
 
+export type BoutiqueSyncEntity =
+  | "product" | "category" | "stock_entry" | "invoice" | "invoice_line"
+  | "invoice_payment" | "client" | "supplier" | "charge" | "caisse_session"
+  | "audit_log" | "assignment" | "stock_transfer";
+
+export type BoutiqueSyncEvent = {
+  event_id: string;
+  revision: number;
+  domain: "catalogue" | "stock" | "sales" | "clients" | "suppliers" | "charges" | "caisse" | "audit" | "access" | "transfers";
+  entity_type: BoutiqueSyncEntity;
+  entity_id: string;
+  record_id?: string | null;
+  operation: "INSERT" | "UPDATE" | "DELETE";
+};
+
+export type BoutiqueSyncPatch = {
+  categories?: any[];
+  products?: any[];
+  productParams?: any[];
+  entries?: any[];
+  clients?: any[];
+  suppliers?: any[];
+  invoices?: any[];
+  charges?: any[];
+  caisseSessions?: any[];
+  auditLog?: any[];
+  deleted: Partial<Record<BoutiqueSyncEntity, string[]>>;
+};
+
+/**
+ * The protocol is chosen by the server for the active boutique, never by a
+ * global build flag. A failed probe deliberately falls back to the legacy
+ * listener in App.tsx, so an unavailable rollout setting cannot stop sync.
+ */
+export async function isBoutiqueSyncV2Enabled(boutiqueId: string) {
+  return dataRequest<boolean>("rpc/is_boutique_sync_v2_enabled", {
+    method:"POST",
+    body:JSON.stringify({ p_boutique_id:boutiqueId }),
+  });
+}
+
+const syncDomains = new Set<BoutiqueSyncEvent["domain"]>([
+  "catalogue", "stock", "sales", "clients", "suppliers", "charges", "caisse", "audit", "access", "transfers",
+]);
+const syncEntities = new Set<BoutiqueSyncEntity>([
+  "product", "category", "stock_entry", "invoice", "invoice_line", "invoice_payment", "client", "supplier", "charge", "caisse_session", "audit_log", "assignment", "stock_transfer",
+]);
+
+function parseBoutiqueSyncEvent(value: unknown): BoutiqueSyncEvent | null {
+  const event = value as Partial<BoutiqueSyncEvent> | null;
+  if (!event || typeof event.event_id !== "string" || typeof event.revision !== "number"
+    || !syncDomains.has(event.domain as BoutiqueSyncEvent["domain"])
+    || !syncEntities.has(event.entity_type as BoutiqueSyncEntity)
+    || typeof event.entity_id !== "string"
+    || !["INSERT", "UPDATE", "DELETE"].includes(String(event.operation))) return null;
+  return event as BoutiqueSyncEvent;
+}
+
+/**
+ * V2 receives one small, private database event per changed record and batches
+ * it in the browser. It deliberately does not carry business rows over the
+ * socket: the subsequent narrow REST reads are still protected by table RLS.
+ */
+export function subscribeToBoutiqueSync(
+  boutiqueId: string,
+  onEvents: (events: BoutiqueSyncEvent[], reason: "events" | "reconnect") => void,
+) {
+  const session = readSession();
+  if (!session?.access_token || !boutiqueId) return () => undefined;
+
+  try {
+    realtimeClient.realtime.setAuth(session.access_token);
+    const refreshRealtimeAuth = () => {
+      const refreshed = readSession();
+      if (refreshed?.access_token) realtimeClient.realtime.setAuth(refreshed.access_token);
+    };
+    window.addEventListener("tournal:session-refreshed", refreshRealtimeAuth);
+
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let hasSubscribed = false;
+    let pending: BoutiqueSyncEvent[] = [];
+    const flush = (reason: "events" | "reconnect") => {
+      if (timer) return;
+      timer = setTimeout(() => {
+        timer = null;
+        const events = pending;
+        pending = [];
+        onEvents(events, reason);
+      }, 80);
+    };
+    const channel = realtimeClient
+      .channel(`tournal:v2:${boutiqueId}`, { config: { private: true } })
+      .on("broadcast", { event: "sync" }, (message: { payload?: unknown }) => {
+        const event = parseBoutiqueSyncEvent(message?.payload);
+        if (!event) return;
+        pending.push(event);
+        flush("events");
+      })
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") {
+          if (hasSubscribed) flush("reconnect");
+          hasSubscribed = true;
+        }
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          console.warn(`Realtime Sync v2 ${status.toLowerCase()} pour la boutique ${boutiqueId}`);
+        }
+      });
+    return () => {
+      if (timer) clearTimeout(timer);
+      window.removeEventListener("tournal:session-refreshed", refreshRealtimeAuth);
+      void realtimeClient.removeChannel(channel);
+    };
+  } catch (error) {
+    console.warn("Realtime Sync v2 indisponible pour cette boutique", error);
+    return () => undefined;
+  }
+}
+
+function syncInFilter(column: string, values: Array<string | number>) {
+  const unique = [...new Set(values.map(value => String(value)).filter(Boolean))];
+  return unique.length ? `&${column}=in.(${unique.map(encodeURIComponent).join(",")})` : "";
+}
+
+const syncDate = (value?: string | null) => value ? new Date(value).toLocaleDateString("fr-FR") : "";
+
+/** Reads the smallest canonical slices needed by the batched v2 event. */
+export async function loadBoutiqueSyncPatch(boutiqueId: string, sourceEvents: BoutiqueSyncEvent[]): Promise<BoutiqueSyncPatch> {
+  const events = sourceEvents.filter(event => event && event.entity_id);
+  const deleted: BoutiqueSyncPatch["deleted"] = {};
+  const ids = (entity: BoutiqueSyncEntity, includeDeleted = false) => {
+    const relevant = events.filter(event => event.entity_type === entity);
+    const removed = relevant.filter(event => event.operation === "DELETE");
+    if (removed.length) deleted[entity] = removed.map(event => entity === "stock_entry" ? String(event.record_id ?? event.entity_id) : event.entity_id);
+    return [...new Set(relevant.filter(event => includeDeleted || event.operation !== "DELETE").map(event => event.entity_id))];
+  };
+  const records = (entity: BoutiqueSyncEntity) => [...new Set(events.filter(event => event.entity_type === entity && event.operation !== "DELETE" && event.record_id).map(event => String(event.record_id)))];
+  const bid = encodeURIComponent(boutiqueId);
+  const scoped = `&boutique_id=eq.${bid}`;
+  const productIds = [...new Set([...ids("product"), ...ids("stock_entry")])];
+  const categoryIds = ids("category");
+  const invoiceIds = [...new Set([...ids("invoice"), ...ids("invoice_line"), ...ids("invoice_payment")])];
+  const clientIds = ids("client");
+  const supplierIds = ids("supplier");
+  const chargeIds = ids("charge");
+  const caisseIds = ids("caisse_session");
+  const auditIds = ids("audit_log");
+  const entryIds = records("stock_entry");
+
+  const [directProducts, categoryProducts, categories, entries, invoices, payments, clients, suppliers, charges, sessions, logs] = await Promise.all([
+    productIds.length ? dataRequest<any[]>(`products?select=*${scoped}${syncInFilter("id", productIds)}`) : Promise.resolve([]),
+    categoryIds.length ? dataRequest<any[]>(`products?select=*${scoped}${syncInFilter("category_id", categoryIds)}`) : Promise.resolve([]),
+    categoryIds.length ? dataRequest<any[]>(`categories?select=*${scoped}${syncInFilter("id", categoryIds)}`) : Promise.resolve([]),
+    entryIds.length ? dataRequest<any[]>(`stock_entries?select=*${scoped}${syncInFilter("id", entryIds)}`) : Promise.resolve([]),
+    invoiceIds.length ? dataRequest<any[]>(`invoices?select=*,invoice_lines(*)${scoped}${syncInFilter("id", invoiceIds)}`) : Promise.resolve([]),
+    invoiceIds.length ? dataRequest<any[]>(`invoice_payments?select=*${scoped}${syncInFilter("invoice_id", invoiceIds)}&order=paid_at.asc`) : Promise.resolve([]),
+    clientIds.length ? dataRequest<any[]>(`clients?select=*${scoped}${syncInFilter("id", clientIds)}`) : Promise.resolve([]),
+    supplierIds.length ? dataRequest<any[]>(`suppliers?select=*${scoped}${syncInFilter("id", supplierIds)}`) : Promise.resolve([]),
+    chargeIds.length ? dataRequest<any[]>(`charges?select=*${scoped}${syncInFilter("id", chargeIds)}`) : Promise.resolve([]),
+    caisseIds.length ? dataRequest<any[]>(`caisse_sessions?select=*${scoped}${syncInFilter("id", caisseIds)}`) : Promise.resolve([]),
+    auditIds.length ? dataRequest<any[]>(`audit_log?select=*${scoped}${syncInFilter("id", auditIds)}&order=created_at.desc`) : Promise.resolve([]),
+  ]);
+  // A category rename changes the denormalized category label displayed on
+  // every product in that category, so refresh that small product slice too.
+  const products = [...new Map([...directProducts, ...categoryProducts].map(row => [row.id, row])).values()];
+  const extraCategoryIds = products.map(row => row.category_id).filter(Boolean);
+  const invoiceClientIds = invoices.map(row => row.client_id).filter(Boolean);
+  const userIds = [...new Set([...invoices.map(row => row.operator_id), ...logs.map(row => row.user_id)].filter(Boolean))];
+  const [extraCategories, invoiceClients, users] = await Promise.all([
+    extraCategoryIds.length ? dataRequest<any[]>(`categories?select=id,nom${scoped}${syncInFilter("id", extraCategoryIds)}`) : Promise.resolve([]),
+    invoiceClientIds.length ? dataRequest<any[]>(`clients?select=id,type,contact${scoped}${syncInFilter("id", invoiceClientIds)}`) : Promise.resolve([]),
+    userIds.length ? dataRequest<any[]>(`platform_users?select=id,nom,color${syncInFilter("id", userIds)}`) : Promise.resolve([]),
+  ]);
+  const categoryById = new Map([...categories, ...extraCategories].map(row => [row.id, row]));
+  const clientById = new Map([...clients, ...invoiceClients].map(row => [row.id, row]));
+  const userById = new Map(users.map(row => [row.id, row]));
+  const paymentsByInvoice = new Map<string, any[]>();
+  payments.forEach(row => paymentsByInvoice.set(row.invoice_id, [...(paymentsByInvoice.get(row.invoice_id) ?? []), row]));
+
+  const patch: BoutiqueSyncPatch = { deleted };
+  if (categories.length) patch.categories = categories.map(row => ({ id:row.id, nom:row.nom, unitVente:row.unit_vente ?? "pièces", nbPiecesParLot:Number(row.pieces_per_lot ?? 0), longueurParPiece:Number(row.length_per_piece ?? 0) }));
+  if (products.length) {
+    patch.products = products.map(row => ({ id:row.id, nom:row.nom, img:row.image_url ?? "", unit:row.unit, fournisseur:row.supplier_name ?? "", categorie:categoryById.get(row.category_id)?.nom, prixVente:Number(row.prix_vente ?? 0), prixAchat:Number(row.prix_achat ?? 0) }));
+    patch.productParams = products.filter(row => row.pieces_per_lot != null || row.length_per_piece != null).map(row => ({ productId:row.id, nbPiecesParLot:Number(row.pieces_per_lot ?? 0), longueurParPiece:Number(row.length_per_piece ?? 0), unitVente:row.unit }));
+  }
+  if (entries.length) patch.entries = entries.map(row => ({ id:row.id, productId:row.product_id, qty:Number(row.qty), unit:"unité", montantDu:Number(row.qty) * Number(row.prix_unit ?? 0), date:syncDate(row.entry_date), recordedAt:row.entry_date, fournisseur:row.note ?? "", invoiceId:undefined }));
+  if (clients.length) patch.clients = clients.map(row => {
+    const wholesale = typeof row.contact === "string" && row.contact.includes(WHOLESALE_MARKER);
+    return { id:row.id, nom:row.nom, type:wholesale ? "Grossiste" : row.type, tel:row.tel ?? "", total:Number(row.total ?? 0), last:syncDate(row.last_invoice_at), ville:row.ville ?? "", adresse:row.adresse ?? undefined, email:row.email ?? undefined, contact:wholesale ? row.contact.replace(WHOLESALE_MARKER, "").trim() || undefined : row.contact ?? undefined };
+  });
+  if (suppliers.length) patch.suppliers = suppliers.map(row => ({ id:row.id, nom:row.nom, ville:row.ville ?? "", lastDelivery:syncDate(row.last_delivery_at), tel:row.tel ?? "", initials:row.initials ?? "", color:row.color ?? "#C9A227", email:row.email ?? undefined, contact:row.contact ?? undefined }));
+  if (invoices.length) patch.invoices = invoices.map(row => {
+    const invoicePayments = paymentsByInvoice.get(row.id) ?? [];
+    const paid = invoicePayments.length ? invoicePayments.reduce((sum, payment) => sum + Number(payment.amount), 0) : Number(row.acompte);
+    const operator = userById.get(row.operator_id) ?? {};
+    const client = clientById.get(row.client_id);
+    return { id:row.id, clientId:row.client_id ?? undefined, client:row.client_nom ?? "Client comptoir", clientTel:row.client_tel ?? undefined, clientType:row.client_type_snapshot ?? client?.type ?? undefined, clientEmailSnapshot:row.client_email_snapshot ?? undefined, clientAdresseSnapshot:row.client_adresse_snapshot ?? undefined, clientVilleSnapshot:row.client_ville_snapshot ?? undefined, clientTypeSnapshot:row.client_type_snapshot ?? undefined, boutiqueNomSnapshot:row.boutique_nom_snapshot ?? undefined, boutiqueVilleSnapshot:row.boutique_ville_snapshot ?? undefined, boutiqueAdresseSnapshot:row.boutique_adresse_snapshot ?? undefined, boutiqueTelSnapshot:row.boutique_tel_snapshot ?? undefined, boutiqueEmailSnapshot:row.boutique_email_snapshot ?? undefined, boutiqueLogoSnapshot:row.boutique_logo_snapshot ?? undefined, montant:Number(row.montant), acompte:paid, date:syncDate(row.invoice_date), dateRaw:row.invoice_date, status:paid >= Number(row.montant) ? "payé" : paid > 0 ? "acompte" : row.status === "en_attente" ? "en attente" : row.status, type:row.type, returnOfInvoiceId:row.return_of_invoice_id ?? undefined, operatorNom:row.operator_nom_snapshot ?? operator.nom ?? undefined, operatorColor:operator.color ?? undefined, paymentMethod:row.payment_method ?? undefined, payments:invoicePayments.map(payment => ({ id:payment.id, amount:Number(payment.amount), paymentMethod:payment.payment_method, paidAt:payment.paid_at, recordedAt:payment.recorded_at, operatorId:payment.operator_id ?? undefined, operatorName:payment.operator_name, batchId:payment.batch_id, source:payment.source })), lines:(row.invoice_lines ?? []).map((line:any) => ({ productId:line.product_id, nom:line.nom, qty:Number(line.qty), unit:line.unit ?? "unité", prixUnit:Number(line.prix_unit), prixAchat:line.prix_achat != null ? Number(line.prix_achat) : undefined, sellUnit:line.sell_unit ?? undefined, sellQty:line.sell_qty ? Number(line.sell_qty) : undefined })) };
+  });
+  if (charges.length) patch.charges = charges.map(row => ({ id:row.id, label:row.label, montant:Number(row.montant), date:syncDate(row.charge_date), dateRaw:row.charge_date, categorie:row.categorie ?? "Autre", recurrence:row.recurrence ?? "unique", note:row.note ?? undefined, fournisseur:row.fournisseur ?? undefined, status:row.status ?? "paid", paidAmount:Number(row.paid_amount ?? row.montant), transferId:row.transfer_id ?? undefined, source:row.source ?? "manual" }));
+  if (sessions.length) patch.caisseSessions = sessions.map(row => ({ id:row.id, openedAt:row.opened_at, closedAt:row.closed_at ?? undefined, fondDeCaisse:Number(row.fond_ouverture ?? 0), openedBy:row.opened_by ?? "", closedBy:row.closed_by ?? "" }));
+  if (logs.length) patch.auditLog = logs.map(row => {
+    const timestamp = new Date(row.created_at).getTime(); const user = userById.get(row.user_id) ?? {};
+    return { id:row.id, userId:row.user_id, userNom:user.nom ?? "Utilisateur", userColor:user.color ?? "#6b7280", action:row.action, detail:row.detail, icon:row.icon, timestamp, date:new Date(timestamp).toLocaleString("fr-FR", { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit", second:"2-digit" }), source:row.source ?? undefined };
+  });
+  return patch;
+}
+
 /** Loads account metadata for administration screens from named relational tables. */
 export async function loadPlatformUsers<T>(): Promise<T> {
     const [users, assignments] = await Promise.all([
@@ -878,11 +1084,16 @@ export async function recordClientPayment(params: { boutiqueId:string; clientId:
   });
 }
 
-/** Cancel a pending (unpaid) invoice — deletes lines then invoice, restores no stock (not yet deducted). */
-export async function cancelPendingInvoice(invoiceId: string) {
-  // Delete lines first (FK), then the invoice header.
-  await dataRequest(`invoice_lines?invoice_id=eq.${encodeURIComponent(invoiceId)}`, { method:"DELETE" });
-  await dataRequest(`invoices?id=eq.${encodeURIComponent(invoiceId)}&acompte=eq.0`, { method:"DELETE" });
+/** Cancel a pending (unpaid) sale atomically. The database enforces the caller's scope. */
+export async function cancelPendingInvoice(params: { boutiqueId:string; invoiceId:string }) {
+  return dataRequest<{ invoice_id:string; deleted:boolean }>("rpc/cancel_pending_sale", {
+    method:"POST",
+    headers:{ Prefer:"return=representation" },
+    body:JSON.stringify({
+      p_boutique_id:params.boutiqueId,
+      p_invoice_id:params.invoiceId,
+    }),
+  });
 }
 
 export async function returnSale(params: { boutiqueId:string; invoiceId:string; lines:Array<{productId:number;qty:number}>; refundMethod:string }) {

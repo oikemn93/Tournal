@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { checkBackend, signQZ, sendInvoiceEmail, storePDFForSMS, getCurrentAuthUser, hasAuthenticatedSession, validateServerSession, refreshSessionIfNeeded, getAuthBootstrap, signInWithPhone, changeOwnPassword, getPinStatus, setQuickPin, verifyQuickPin, startAppSession, validateAppSession, lockAppSession, setAppSessionRecoveryHandler, signOut as signOutFromSupabase, createBoutique, createUser, resetUserPassword, subscribeToBoutiqueChanges, assignUserToBoutique, unassignUserFromBoutique, upsertAssignmentDirect, deleteAssignmentDirect, recordAuditLog, loadBoutiqueSnapshot, loadPlatformUsers, loadGroupes, saveGroupes, loadAuthSettings as loadStoredAuthSettings, saveAuthSettings } from "../lib/api";
+import { checkBackend, signQZ, sendInvoiceEmail, storePDFForSMS, getCurrentAuthUser, hasAuthenticatedSession, validateServerSession, refreshSessionIfNeeded, getAuthBootstrap, signInWithPhone, changeOwnPassword, getPinStatus, setQuickPin, verifyQuickPin, startAppSession, validateAppSession, lockAppSession, setAppSessionRecoveryHandler, signOut as signOutFromSupabase, createBoutique, createUser, resetUserPassword, subscribeToBoutiqueChanges, subscribeToBoutiqueSync, isBoutiqueSyncV2Enabled, assignUserToBoutique, unassignUserFromBoutique, upsertAssignmentDirect, deleteAssignmentDirect, recordAuditLog, loadBoutiqueSnapshot, loadBoutiqueSyncPatch, loadPlatformUsers, loadGroupes, saveGroupes, loadAuthSettings as loadStoredAuthSettings, saveAuthSettings, type BoutiqueSyncEvent, type BoutiqueSyncPatch } from "../lib/api";
 import { getNotifications, markNotificationRead, markAllNotificationsRead, dismissAllNotifications, subscribeToNotifications, getPushState, enableWebPush, disableWebPush, syncWebPushBoutique, type PushState } from "../lib/notifications";
 import { toast, Toaster } from "sonner";
 import {
@@ -29,7 +29,6 @@ import { filterPaymentEventsByPeriod, invoicePaymentEvents, invoiceRemainingAmou
 
 const ReadOnlyCtx = React.createContext(false);
 const useReadOnly = () => React.useContext(ReadOnlyCtx);
-
 // Notification context — consumed by child views to fire notifications
 const NotifCtx = React.createContext<(n: Omit<Notif,"id"|"read"|"dateRaw">) => void>(() => {});
 const useNotif = () => React.useContext(NotifCtx);
@@ -7280,170 +7279,6 @@ function printCaisseReport(session: CaisseSession, boutique: Boutique, invoices:
   silentPrint(html);
 }
 
-// ─── MON POSTE WIDGET ────────────────────────────────────────────────────────
-
-const QZ_LS_KEY = (boutiqueId: string) => `monPoste_printer_${boutiqueId}`;
-
-function MonPosteWidget({ boutique }: { boutique: Boutique }) {
-  const [open, setOpen] = useState(false);
-  const pa = usePAStatus();
-  const [localPrinter, setLocalPrinter] = useState(() => {
-    try { return localStorage.getItem(QZ_LS_KEY(boutique.id)) ?? ""; } catch { return ""; }
-  });
-  const [saving, setSaving] = useState(false);
-
-  const qzStatus = pa.status === "connected" ? "connected" : pa.status === "loading" ? "connecting" : pa.status === "idle" ? "unknown" : "error";
-  const printers = pa.printers;
-
-  async function triggerConnect() {
-    await connectQZ(localPrinter || boutique.printerName || undefined);
-  }
-
-  function savePrinter(name: string) {
-    setSaving(true);
-    setLocalPrinter(name);
-    try { localStorage.setItem(QZ_LS_KEY(boutique.id), name); } catch {}
-    setTimeout(() => setSaving(false), 800);
-  }
-
-  function handleOpen() {
-    setOpen(true);
-    triggerConnect();
-  }
-
-  const displayPrinter = localPrinter || boutique.printerName || "";
-
-  return (
-    <>
-      <button onClick={handleOpen}
-        className="w-full flex items-center gap-2 px-3 py-2.5 rounded-2xl border border-border bg-card active:scale-[0.98] transition-all text-left">
-        <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background:"#37415115" }}>
-          <Printer size={13} style={{ color:"#374151" }}/>
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-xs font-bold leading-tight">Mon poste</p>
-          <p className="text-xs text-muted-foreground truncate">
-            {displayPrinter ? displayPrinter : "Appuyer pour configurer"}
-          </p>
-        </div>
-        <Settings size={13} className="text-muted-foreground flex-shrink-0"/>
-      </button>
-
-      {open && (
-        <Modal title="Mon poste" color="#374151" onClose={()=>setOpen(false)}>
-          {/* QZ Tray status */}
-          <div className="flex items-center gap-3 px-4 py-3 rounded-2xl" style={{
-            background: qzStatus==="connected" ? "#f0fdf4"
-              : qzStatus==="error" ? "#fef2f2"
-              : qzStatus==="connecting" ? "#eff6ff"
-              : "#f3f4f6",
-            border: `1px solid ${qzStatus==="connected"?"#16a34a55":qzStatus==="error"?"#dc262655":qzStatus==="connecting"?"#3b82f655":"#e5e7eb"}`
-          }}>
-            {qzStatus==="connecting" && <div className="w-4 h-4 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin flex-shrink-0"/>}
-            {qzStatus==="connected" && <div className="w-4 h-4 rounded-full flex-shrink-0" style={{ background:"#16a34a" }}/>}
-            {qzStatus==="error"     && <div className="w-4 h-4 rounded-full flex-shrink-0" style={{ background:"#dc2626" }}/>}
-            {qzStatus==="unknown"   && <div className="w-4 h-4 rounded-full flex-shrink-0" style={{ background:"#9ca3af" }}/>}
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-bold" style={{
-                color: qzStatus==="connected"?"#166534":qzStatus==="error"?"#991b1b":qzStatus==="connecting"?"#1d4ed8":"#374151"
-              }}>
-                {qzStatus==="connected" ? "QZ Tray connecté" : qzStatus==="connecting" ? "Connexion en cours…" : qzStatus==="error" ? "QZ Tray non détecté" : "QZ Tray"}
-              </p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {qzStatus==="error"
-                  ? "Installez QZ Tray pour l'impression automatique"
-                  : qzStatus==="connected"
-                  ? `${printers.length} imprimante${printers.length!==1?"s":""} disponible${printers.length!==1?"s":""}`
-                  : "Permet l'impression directe sans dialogue"}
-              </p>
-              {qzStatus==="error" && pa.lastError && <p className="text-xs mt-1 leading-snug" style={{ color:"#b91c1c" }}>{pa.lastError}</p>}
-            </div>
-            <button onClick={connectQZ} className="px-3 py-1.5 rounded-lg text-xs font-bold flex-shrink-0"
-              style={{ background:"#37415120", color:"#374151" }}>
-              {qzStatus==="connecting" ? "…" : "Actualiser"}
-            </button>
-          </div>
-
-          {qzStatus==="error" && (
-            <a href="https://qz.io/download" target="_blank" rel="noreferrer"
-              className="flex items-center gap-3 px-4 py-3 rounded-2xl active:opacity-70"
-              style={{ background:"#3b82f610", border:"1px solid #3b82f630" }}>
-              <Download size={16} style={{ color:"#3b82f6" }}/>
-              <div>
-                <p className="text-sm font-bold" style={{ color:"#3b82f6" }}>Télécharger QZ Tray</p>
-                <p className="text-xs text-muted-foreground">qz.io/download — gratuit, compatible Windows/Mac/Linux</p>
-              </div>
-            </a>
-          )}
-
-          {/* Printer selection */}
-          <div>
-            <p className="text-xs font-black tracking-wider text-muted-foreground mb-2">IMPRIMANTE SÉLECTIONNÉE POUR CE POSTE</p>
-            {printers.length > 0 ? (
-              <div className="space-y-1.5">
-                {printers.map(p => (
-                  <button key={p} onClick={()=>savePrinter(p)}
-                    className="w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all"
-                    style={{
-                      background: localPrinter===p ? "#37415118" : "#f9f9f7",
-                      border: localPrinter===p ? "2px solid #37415155" : "2px solid transparent"
-                    }}>
-                    <Printer size={15} style={{ color: localPrinter===p ? "#374151" : "#9ca3af" }}/>
-                    <span className="flex-1 text-left text-sm font-semibold" style={{ color: localPrinter===p ? "#1f2937" : "#374151" }}>{p}</span>
-                    {localPrinter===p && <div className="w-5 h-5 rounded-full flex items-center justify-center" style={{ background:"#374151" }}><div className="w-2 h-2 rounded-full bg-white"/></div>}
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <div>
-                <div className="w-full flex items-center gap-3 px-4 py-3 rounded-xl mb-2" style={{ background:"#f3f4f6" }}>
-                  <Printer size={15} className="text-muted-foreground"/>
-                  <input
-                    value={localPrinter}
-                    onChange={e=>setLocalPrinter(e.target.value)}
-                    onBlur={()=>{ if(localPrinter.trim()) savePrinter(localPrinter.trim()); }}
-                    placeholder="Nom exact de l'imprimante…"
-                    className="flex-1 bg-transparent text-sm font-semibold outline-none"
-                  />
-                </div>
-                <p className="text-xs text-muted-foreground px-1">
-                  {qzStatus==="error"
-                    ? "Saisissez le nom de l'imprimante manuellement, ou installez QZ Tray pour la détection automatique."
-                    : "Connectez QZ Tray pour détecter les imprimantes automatiquement."}
-                </p>
-              </div>
-            )}
-          </div>
-
-          {/* Boutique default info */}
-          {boutique.printerName && (
-            <div className="flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background:"#f3f4f6" }}>
-              <span className="text-xs text-muted-foreground">Imprimante boutique (par défaut) :</span>
-              <span className="text-xs font-bold">{boutique.printerName}</span>
-              {!localPrinter && <button onClick={()=>savePrinter(boutique.printerName!)} className="ml-auto text-xs font-bold px-2 py-0.5 rounded" style={{ background:"#37415120", color:"#374151" }}>Utiliser</button>}
-            </div>
-          )}
-
-          {saving && (
-            <div className="flex items-center justify-center gap-2 py-2">
-              <div className="w-4 h-4 border-2 border-green-300 border-t-green-600 rounded-full animate-spin"/>
-              <span className="text-xs font-bold" style={{ color:"#16a34a" }}>Enregistré pour ce poste</span>
-            </div>
-          )}
-
-          {localPrinter && !saving && (
-            <button onClick={()=>savePrinter(localPrinter)}
-              className="w-full py-3.5 rounded-2xl text-sm font-black flex items-center justify-center gap-2 active:scale-95 transition-all"
-              style={{ background:"#374151", color:"#fff" }}>
-              <Printer size={15}/> Confirmer : {localPrinter}
-            </button>
-          )}
-        </Modal>
-      )}
-    </>
-  );
-}
-
 // ─── VIEW: POINT DE VENTE ─────────────────────────────────────────────────────
 
 function POSView({ boutique, allBoutiques, currentUser, onUpdate, logAction }: {
@@ -7729,14 +7564,6 @@ function POSView({ boutique, allBoutiques, currentUser, onUpdate, logAction }: {
           </button>
         </div>
       </div>
-
-      {/* Mon poste widget — non-admin local config */}
-      {(()=>{
-        const assign = currentUser.assignments.find(a=>a.boutiqueId===boutique.id);
-        const isAdmin = currentUser.isSuperAdmin || assign?.role==="Propriétaire" || assign?.role==="Manager";
-        if(isAdmin) return null;
-        return <MonPosteWidget boutique={boutique}/>;
-      })()}
 
       {/* Two tabs: Produits / Commandes */}
       <div className="flex bg-card rounded-2xl p-1 border border-border gap-1">
@@ -8623,6 +8450,7 @@ export default function App() {
   const [activeAssign,     setActiveAssign]     = useState<BoutiqueAssignment|null>(null);
   const [businessLoading,  setBusinessLoading]  = useState(false);
   const [appSessionReady,  setAppSessionReady]  = useState(false);
+  const [boutiqueSyncProtocol, setBoutiqueSyncProtocol] = useState<{ boutiqueId:string; version:"v1"|"v2" }|null>(null);
   const [tab,              setTab]              = useState<Tab>("dashboard");
   const [navFilter,        setNavFilter]        = useState<Record<string,string>>({});
   const [synced,           setSynced]           = useState(false);
@@ -8657,6 +8485,8 @@ export default function App() {
   const isPulling            = useRef(false); // prevents overlapping Realtime reconciliations
   const pullQueued           = useRef(false); // guarantees a trailing refresh when an event arrives mid-pull
   const lastRemoteB          = useRef<string>(""); // JSON fingerprint to detect real changes
+  const lastSyncRevision     = useRef<number|null>(null);
+  const seenSyncEventIds     = useRef<Set<string>>(new Set());
   const platformUsersRef     = useRef<PlatformUser[]>([]);
   const activeBoutiqueIdRef  = useRef<string|null>(null); // stable ref for async callbacks
   const currentUserRef       = useRef<PlatformUser | null>(null);
@@ -8848,6 +8678,104 @@ export default function App() {
       }
     }
   }, []);
+
+  const applyBoutiqueSyncPatch = useCallback((patch: BoutiqueSyncPatch) => {
+    const mergeById = (current: any[] | undefined, changes: any[] | undefined, deletedIds: string[] | undefined, idKey = "id") => {
+      const removed = new Set((deletedIds ?? []).map(String));
+      const next = (current ?? []).filter(item => !removed.has(String(item[idKey])));
+      for (const change of changes ?? []) {
+        const index = next.findIndex(item => String(item[idKey]) === String(change[idKey]));
+        if (index < 0) next.push(change);
+        else next[index] = { ...next[index], ...change };
+      }
+      return next;
+    };
+    setBoutiques(previous => previous.map(shop => {
+      if (shop.id !== activeBoutiqueIdRef.current) return shop;
+      const products = mergeById(shop.products, patch.products, patch.deleted.product);
+      const categories = mergeById(shop.categories, patch.categories, patch.deleted.category);
+      const entries = mergeById(shop.entries, patch.entries, patch.deleted.stock_entry);
+      const invoices = mergeById(shop.invoices, patch.invoices, patch.deleted.invoice);
+      const clients = mergeById(shop.clients, patch.clients, patch.deleted.client);
+      const suppliers = mergeById(shop.suppliers, patch.suppliers, patch.deleted.supplier);
+      const charges = mergeById(shop.charges, patch.charges, patch.deleted.charge);
+      const caisseHistory = mergeById(shop.caisseHistory, patch.caisseSessions, patch.deleted.caisse_session)
+        .sort((a, b) => new Date(a.openedAt).getTime() - new Date(b.openedAt).getTime());
+      const auditLog = mergeById(shop.auditLog, patch.auditLog, patch.deleted.audit_log)
+        .sort((a, b) => b.timestamp - a.timestamp).slice(0, 200);
+      const patchedProductIds = new Set((patch.products ?? []).map(product => String(product.id)));
+      // A product can stop using the optional lot/length parameters. Remove
+      // any previous parameters for the refreshed products before merging the
+      // current canonical values.
+      const productParams = mergeById(
+        (shop.productParams ?? []).filter(param => !patchedProductIds.has(String(param.productId))),
+        patch.productParams,
+        patch.deleted.product,
+        "productId",
+      );
+      let caisseSession = shop.caisseSession;
+      if ((patch.deleted.caisse_session ?? []).some(id => String(id) === String(caisseSession?.id))) caisseSession = undefined;
+      for (const session of patch.caisseSessions ?? []) {
+        if (session.closedAt) {
+          if (String(caisseSession?.id) === String(session.id)) caisseSession = undefined;
+        } else {
+          caisseSession = { id:session.id, openedAt:session.openedAt, fondDeCaisse:session.fondDeCaisse, openedBy:session.openedBy };
+        }
+      }
+      return { ...shop, products, categories, entries, invoices, clients, suppliers, charges, caisseHistory, caisseSession, auditLog, productParams };
+    }));
+  }, []);
+
+  const processBoutiqueSyncEvents = useCallback(async (incoming: BoutiqueSyncEvent[], reason: "events" | "reconnect") => {
+    if (reason === "reconnect") {
+      lastSyncRevision.current = null;
+      await pullRemote();
+      return;
+    }
+    let unique = incoming
+      .filter(event => !seenSyncEventIds.current.has(event.event_id))
+      .sort((left, right) => left.revision - right.revision);
+    if (!unique.length) return;
+    for (const event of unique) seenSyncEventIds.current.add(event.event_id);
+    while (seenSyncEventIds.current.size > 500) seenSyncEventIds.current.delete(seenSyncEventIds.current.values().next().value!);
+    const previousRevision = lastSyncRevision.current;
+    if (previousRevision !== null) {
+      let expectedRevision = previousRevision + 1;
+      for (const event of unique) {
+        if (event.revision < expectedRevision) continue;
+        if (event.revision !== expectedRevision) {
+          // An event was missed in the same batch or between two batches. A
+          // targeted patch would be unsafe, so reconcile the authoritative
+          // snapshot before accepting any later event.
+          lastSyncRevision.current = null;
+          await pullRemote();
+          return;
+        }
+        expectedRevision += 1;
+      }
+      unique = unique.filter(event => event.revision > previousRevision);
+      if (!unique.length) return;
+    }
+    if (unique.some(event => event.domain === "access" || event.domain === "transfers")) {
+      // Access changes must refresh the authorization shell; transfers retain
+      // their existing dedicated targeted loader until its screen is migrated.
+      lastSyncRevision.current = null;
+      await pullRemote();
+      return;
+    }
+    try {
+      const boutiqueId = activeBoutiqueIdRef.current;
+      if (!boutiqueId) return;
+      const patch = await loadBoutiqueSyncPatch(boutiqueId, unique);
+      applyBoutiqueSyncPatch(patch);
+      lastSyncRevision.current = unique[unique.length - 1].revision;
+      setLastSyncAt(Date.now());
+    } catch (error) {
+      console.warn("Correctif Sync v2 indisponible, réconciliation complète utilisée", error);
+      lastSyncRevision.current = null;
+      await pullRemote();
+    }
+  }, [applyBoutiqueSyncPatch, pullRemote]);
 
 
   const hydrateBoutique = useCallback(async (boutiqueId: string) => {
@@ -9071,10 +8999,30 @@ export default function App() {
     return () => document.removeEventListener("wheel", onWheel);
   }, []);
 
-  // Supabase Realtime pushes boutique changes to connected users.  A single
-  // refresh follows each event; there is no periodic 2-second polling.
+  // Resolve the sync protocol after the application session is ready. The
+  // result is boutique-specific, so a V2 pilot never changes other shops.
   useEffect(() => {
-    if (!synced || businessLoading || !appSessionReady || !hasAuthenticatedSession()) return;
+    let disposed = false;
+    if (!synced || businessLoading || locked || !appSessionReady || !hasAuthenticatedSession() || !activeBoutiqueId) {
+      setBoutiqueSyncProtocol(null);
+      return () => { disposed = true; };
+    }
+    setBoutiqueSyncProtocol({ boutiqueId:activeBoutiqueId, version:"v1" });
+    void isBoutiqueSyncV2Enabled(activeBoutiqueId)
+      .then(enabled => {
+        if (!disposed) setBoutiqueSyncProtocol({ boutiqueId:activeBoutiqueId, version:enabled ? "v2" : "v1" });
+      })
+      .catch(error => {
+        console.warn("Bascule Sync v2 indisponible, protocole historique conservé", error);
+        if (!disposed) setBoutiqueSyncProtocol({ boutiqueId:activeBoutiqueId, version:"v1" });
+      });
+    return () => { disposed = true; };
+  }, [synced, businessLoading, locked, appSessionReady, activeBoutiqueId]);
+
+  // Sync v2 applies narrow canonical patches only for boutiques explicitly
+  // enabled by the server. Every other boutique retains the legacy listener.
+  useEffect(() => {
+    if (!synced || businessLoading || locked || !appSessionReady || !hasAuthenticatedSession()) return;
     const onVisible = () => {
       if (document.visibilityState !== "visible") return;
       if (Date.now() - lastUserActivityAt.current >= sessionExpiryMs) {
@@ -9087,10 +9035,13 @@ export default function App() {
         void pullRemote();
       });
     };
-    const unsubscribe = subscribeToBoutiqueChanges(activeBoutiqueId ?? "", pullRemote);
+    const useSyncV2 = boutiqueSyncProtocol?.boutiqueId === activeBoutiqueId && boutiqueSyncProtocol.version === "v2";
+    const unsubscribe = useSyncV2
+      ? subscribeToBoutiqueSync(activeBoutiqueId ?? "", (events, reason) => { void processBoutiqueSyncEvents(events, reason); })
+      : subscribeToBoutiqueChanges(activeBoutiqueId ?? "", pullRemote);
     document.addEventListener("visibilitychange", onVisible);
     return () => { unsubscribe(); document.removeEventListener("visibilitychange", onVisible); };
-  }, [synced, pullRemote, activeBoutiqueId, businessLoading, appSessionReady, endSessionForInactivity, renewAppSession, sessionExpiryMs]);
+  }, [synced, pullRemote, activeBoutiqueId, businessLoading, locked, appSessionReady, endSessionForInactivity, renewAppSession, sessionExpiryMs, processBoutiqueSyncEvents, boutiqueSyncProtocol]);
 
   // Boutique updates are persisted by domain-specific relational operations.
   // Never write a full JSON state blob from the client.
