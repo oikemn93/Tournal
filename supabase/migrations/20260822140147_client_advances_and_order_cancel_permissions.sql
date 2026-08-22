@@ -29,8 +29,11 @@ create table if not exists public.client_advances (
 create index if not exists client_advances_client_ledger_idx
   on public.client_advances (boutique_id, client_id, paid_at desc, id desc);
 
+create index if not exists client_advances_operator_id_idx
+  on public.client_advances (operator_id);
+
 alter table public.client_advances enable row level security;
-revoke all on table public.client_advances from public, anon;
+revoke all on table public.client_advances from public, anon, authenticated;
 grant select on table public.client_advances to authenticated;
 
 drop policy if exists "client_advances: select" on public.client_advances;
