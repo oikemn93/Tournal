@@ -9,7 +9,7 @@ import { getSiblings } from "../utils/inventory";
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
-import { applyClientAdvanceToInvoice, createClient, recordClientAdvance, recordClientPayment, updateClientContact, WHOLESALE_MARKER } from "../../lib/api";
+import { applyClientAdvanceToInvoice, createClient, recordClientPayment, updateClientContact, WHOLESALE_MARKER } from "../../lib/api";
 import { PhoneField } from "../components/PhoneField";
 import { formatPreciseDateTime, invoicePaidAmount, invoiceRemainingAmount } from "../utils/payments";
 
@@ -118,10 +118,11 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("Espèces");
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
-  const [paymentMode, setPaymentMode] = useState<"invoices"|"advance">("invoices");
   const [submittingPayment, setSubmittingPayment] = useState(false);
   const [paymentDone, setPaymentDone] = useState(false);
+  const [paymentSummary, setPaymentSummary] = useState<{ applied:number; advance:number }|null>(null);
   const [applyingAdvanceInvoiceId, setApplyingAdvanceInvoiceId] = useState<string|null>(null);
+  const [advanceAppliedNotice, setAdvanceAppliedNotice] = useState<{ invoiceId:string; amount:number }|null>(null);
   const tabDefs: Array<{id:ClientType;label:string;color:string}> = [
     {id:"B2C",      label:"👤 Particuliers", color:"#374151"},
     {id:"B2B",      label:"🏢 Entreprises",  color:"#0e7490"},
@@ -170,43 +171,10 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
       if (requested <= 0) return;
       setSubmittingPayment(true);
       try {
-        if (paymentMode === "advance") {
-          const advance = await recordClientAdvance({
-            boutiqueId:boutique.id,
-            clientId:c.id,
-            amount:requested,
-            paymentMethod,
-            paymentDate,
-          });
-          onUpdate({
-            clientAdvances:[...(boutique.clientAdvances ?? []), {
-              id:advance.advance_id,
-              clientId:advance.client_id,
-              amount:advance.amount,
-              allocatedAmount:0,
-              paymentMethod:advance.payment_method as PaymentMethod,
-              paidAt:advance.paid_at,
-              recordedAt:advance.recorded_at,
-              operatorId:advance.operator_id,
-              operatorName:advance.operator_name,
-              note:advance.note ?? undefined,
-            }],
-          });
-          logAction("Versement d'avance client", `${c.nom} · ${fmt(advance.amount)} · ${advance.payment_method}`, "💳");
-          setPaymentDone(true);
-          setTimeout(() => {
-            setPaymentModal(false); setPaymentAmount(""); setPaymentDone(false); setSubmittingPayment(false);
-          }, 1000);
-          return;
-        }
-        if (totalImpayé <= 0) {
-          setSubmittingPayment(false);
-          return;
-        }
         const result = await recordClientPayment({
           boutiqueId:boutique.id,
           clientId:c.id,
-          amount:Math.min(requested, totalImpayé),
+          amount:requested,
           paymentMethod,
           paymentDate,
         });
@@ -228,11 +196,31 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
             }],
           };
         });
-        onUpdate({ invoices:updatedInvoices });
-        logAction("Versement client", `${c.nom} · ${fmt(result.applied_amount)} · FIFO sur ${result.allocations.length} facture(s)`, "💳");
+        const recordedAdvance = result.advance;
+        onUpdate({
+          invoices:updatedInvoices,
+          ...(recordedAdvance ? { clientAdvances:[...(boutique.clientAdvances ?? []), {
+            id:recordedAdvance.advance_id,
+            clientId:recordedAdvance.client_id,
+            amount:recordedAdvance.amount,
+            allocatedAmount:0,
+            paymentMethod:recordedAdvance.payment_method as PaymentMethod,
+            paidAt:recordedAdvance.paid_at,
+            recordedAt:recordedAdvance.recorded_at,
+            operatorId:recordedAdvance.operator_id,
+            operatorName:recordedAdvance.operator_name,
+            note:recordedAdvance.note ?? undefined,
+          }] } : {}),
+        });
+        const details = [
+          result.applied_amount > 0 ? `${fmt(result.applied_amount)} sur ${result.allocations.length} facture(s)` : null,
+          result.advance_amount > 0 ? `${fmt(result.advance_amount)} en avoir` : null,
+        ].filter(Boolean).join(" · ");
+        logAction("Versement client", `${c.nom} · ${details} · ${paymentMethod}`, "💳");
+        setPaymentSummary({ applied:result.applied_amount, advance:result.advance_amount });
         setPaymentDone(true);
         setTimeout(() => {
-          setPaymentModal(false); setPaymentAmount(""); setPaymentDone(false); setSubmittingPayment(false);
+          setPaymentModal(false); setPaymentAmount(""); setPaymentDone(false); setPaymentSummary(null); setSubmittingPayment(false);
         }, 1000);
       } catch (error) {
         setSubmittingPayment(false);
@@ -293,6 +281,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
         });
         setHighlightedInvoiceId(invoice.id);
         setHighlightedInvoiceNotice("payment");
+        setAdvanceAppliedNotice({ invoiceId:invoice.id, amount:result.applied_amount });
         logAction("Avoir utilisé", `${invoice.id} · ${fmt(result.applied_amount)} · ${c.nom}`, "🎟️");
       } catch (error) {
         alert(error instanceof Error ? error.message : "Utilisation de l'avoir impossible");
@@ -323,7 +312,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
             {canCreateOrder && <button onClick={()=>onCreateOrder(c)} className="py-3 rounded-xl text-xs font-black flex items-center justify-center gap-2" style={{ background:CC, color:"#fff" }}>
               <FilePlus size={15}/> Nouvelle commande
             </button>}
-            {canCollectPayment && <button onClick={()=>{setPaymentMode(totalImpayé>0?"invoices":"advance");setPaymentAmount(totalImpayé>0?String(totalImpayé):"");setPaymentModal(true);}} className="py-3 rounded-xl text-xs font-black flex items-center justify-center gap-2" style={{ background:SEM.success.bg, color:SEM.success.accent }}>
+            {canCollectPayment && <button onClick={()=>{setPaymentAmount(totalImpayé>0?String(totalImpayé):"");setPaymentSummary(null);setPaymentModal(true);}} className="py-3 rounded-xl text-xs font-black flex items-center justify-center gap-2" style={{ background:SEM.success.bg, color:SEM.success.accent }}>
               <Wallet size={15}/> Versement
             </button>}
           </div>}
@@ -342,6 +331,10 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
               const paid = invoicePaidAmount(inv);
               const remaining = invoiceRemainingAmount(inv);
               const isHighlighted = inv.id === highlightedInvoiceId;
+              const canUseAdvance = canCollectPayment && !isReturn && remaining>0 && totalAvoir>0;
+              const paymentNotice = isHighlighted && advanceAppliedNotice?.invoiceId === inv.id
+                ? `✓ Avoir déduit : ${fmt(advanceAppliedNotice.amount)}`
+                : null;
               const content = <>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2"><p className="text-xs font-black text-muted-foreground">{inv.id}</p><span className="text-xs px-1.5 py-0.5 rounded font-bold capitalize" style={{ background:bc,color:tc }}>{inv.status}</span>{isReturn&&<span className="text-xs px-1.5 py-0.5 rounded font-bold" style={{ background:"#ef444415",color:"#ef4444" }}>Retour</span>}</div>
@@ -350,13 +343,18 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
                 </div>
                 <div className="text-right flex-shrink-0"><p className="font-black text-sm" style={{ fontFamily:"'Nunito',sans-serif" }}>{fmt(inv.montant)}</p>{paid>0&&<p className="text-xs font-semibold" style={{ color:SEM.success.accent }}>✓ {fmt(paid)}</p>}{remaining>0&&<p className="text-xs font-semibold" style={{ color:SEM.warning.accent }}>⏳ {fmt(remaining)}</p>}</div>
                 {canOpenInvoice&&<ChevronRight size={15} className="text-muted-foreground"/>}
-                {!canOpenInvoice && canCollectPayment && !isReturn && remaining>0 && totalAvoir>0&&<button type="button" onClick={()=>applyAdvanceToInvoice(inv)} disabled={!!applyingAdvanceInvoiceId} className="rounded-lg px-2 py-2 text-[11px] font-black disabled:opacity-50" style={{background:"#ccfbf1",color:"#0f766e"}}>{applyingAdvanceInvoiceId===inv.id?"…":"🎟️ Utiliser"}</button>}
               </>;
-              const className="w-full rounded-xl p-3 border flex items-center gap-3 text-left" + (isHighlighted ? " ring-2" : " bg-background") + (canOpenInvoice ? " active:scale-[0.99]" : "");
+              const className="w-full rounded-xl p-3 border text-left" + (isHighlighted ? " ring-2" : " bg-background");
               const style = isHighlighted ? {borderColor:SEM.success.accent,background:SEM.success.bg,boxShadow:`0 0 0 2px ${SEM.success.accent}`} : undefined;
-              return canOpenInvoice
-                ? <button type="button" onClick={()=>onOpenInvoice(inv.id)} key={inv.id} className={className} style={style}>{content}</button>
-                : <div key={inv.id} className={className} style={style}>{content}</div>;
+              return <div key={inv.id} className={className} style={style}>
+                <div className="flex items-center gap-3">
+                  {canOpenInvoice
+                    ? <button type="button" onClick={()=>onOpenInvoice(inv.id)} className="flex flex-1 min-w-0 items-center gap-3 text-left active:scale-[0.99]">{content}</button>
+                    : <div className="flex flex-1 min-w-0 items-center gap-3">{content}</div>}
+                  {canUseAdvance&&<button type="button" onClick={()=>applyAdvanceToInvoice(inv)} disabled={!!applyingAdvanceInvoiceId} className="rounded-lg px-2 py-2 text-[11px] font-black disabled:opacity-50" style={{background:"#ccfbf1",color:"#0f766e"}}>{applyingAdvanceInvoiceId===inv.id?"Application…":"🎟️ Utiliser"}</button>}
+                </div>
+                {paymentNotice&&<p className="mt-2 rounded-lg px-2 py-1.5 text-xs font-black" style={{background:"#dcfce7",color:SEM.success.accent}}>{paymentNotice}</p>}
+              </div>;
             })}
           </div>
           {clientInvoices.length>5&&<button type="button" onClick={()=>setShowAllTransactions(value=>!value)} className="mt-3 w-full rounded-xl bg-muted py-2.5 text-xs font-black text-foreground">{showAllTransactions ? "Réduire la liste" : `Voir les ${clientInvoices.length} transactions`}</button>}
@@ -424,23 +422,19 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
           </div>
         </div>}
         {paymentModal&&<Modal title="Versement client" color={SEM.success.accent} onClose={()=>{if(!submittingPayment)setPaymentModal(false);}}>
-          <div className="grid grid-cols-2 gap-2">
-            <button type="button" disabled={totalImpayé<=0} onClick={()=>{setPaymentMode("invoices");setPaymentAmount(String(totalImpayé));}} className="rounded-xl px-3 py-3 text-xs font-black disabled:opacity-40" style={{background:paymentMode==="invoices"?SEM.success.accent:"#EEE9D8",color:paymentMode==="invoices"?"#fff":"#6b7280"}}>Régler des factures</button>
-            <button type="button" onClick={()=>{setPaymentMode("advance");setPaymentAmount("");}} className="rounded-xl px-3 py-3 text-xs font-black" style={{background:paymentMode==="advance"?SEM.success.accent:"#EEE9D8",color:paymentMode==="advance"?"#fff":"#6b7280"}}>Versement d'avance</button>
-          </div>
           <div className="rounded-2xl p-3" style={{background:SEM.success.bg}}>
-            <p className="text-xs text-muted-foreground">{paymentMode==="advance"?"Avoir client à enregistrer":"Solde global dû"}</p>
-            <p className="text-2xl font-black" style={{color:SEM.success.accent}}>{paymentMode==="advance"?"Sans facture":fmt(totalImpayé)}</p>
-            <p className="text-xs text-muted-foreground mt-1">{paymentMode==="advance"?"Le versement est conservé dans la fiche du client, sans créer ni régler de facture.":"Le versement sera affecté aux factures les plus anciennes en premier."}</p>
+            <p className="text-xs text-muted-foreground">Solde global dû</p>
+            <p className="text-2xl font-black" style={{color:SEM.success.accent}}>{fmt(totalImpayé)}</p>
+            <p className="text-xs text-muted-foreground mt-1">Le versement règle d'abord les factures les plus anciennes. Tout dépassement est automatiquement enregistré comme avoir client.</p>
           </div>
           <Field label="MONTANT">
-            <input value={paymentAmount} onChange={e=>{const value=e.target.value;if(value===""){setPaymentAmount("");return;}const amount=Number(value)||0;setPaymentAmount(String(paymentMode==="invoices"?Math.min(amount,totalImpayé):amount));}} type="number" min="0" max={paymentMode==="invoices"?totalImpayé:undefined} className={inputCls}/>
+            <input value={paymentAmount} onChange={e=>setPaymentAmount(e.target.value)} type="number" min="0" className={inputCls}/>
           </Field>
           <Field label="MODE DE PAIEMENT">
             <div className="grid grid-cols-2 gap-2">{PAYMENT_METHODS.map(method=><button key={method} onClick={()=>setPaymentMethod(method)} className="py-2.5 rounded-xl text-xs font-bold" style={{background:paymentMethod===method?CC:"#EEE9D8",color:paymentMethod===method?"#fff":"#6b7280"}}>{PM_ICON[method]} {method}</button>)}</div>
           </Field>
           <Field label="DATE DU PAIEMENT"><input type="date" value={paymentDate} onChange={e=>setPaymentDate(e.target.value)} className={inputCls}/></Field>
-          {paymentDone?<div className="flex items-center justify-center gap-2 py-4 font-black" style={{color:SEM.success.accent}}><CheckCircle size={20}/> Versement enregistré</div>:<SubmitBtn color={SEM.success.accent} label={submittingPayment?"Enregistrement…":`Enregistrer ${fmt(paymentMode==="invoices"?Math.min(Number(paymentAmount)||0,totalImpayé):Number(paymentAmount)||0)}`} onClick={submitClientPayment} disabled={submittingPayment||!Number(paymentAmount)||(paymentMode==="invoices"&&totalImpayé<=0)}/>}
+          {paymentDone ? <div className="rounded-2xl p-4 text-center" style={{background:SEM.success.bg,color:SEM.success.accent}}><div className="flex items-center justify-center gap-2 font-black"><CheckCircle size={20}/> Versement enregistré</div>{paymentSummary&&<p className="mt-1 text-xs font-semibold">{paymentSummary.applied>0&&`${fmt(paymentSummary.applied)} réglé`}{paymentSummary.applied>0&&paymentSummary.advance>0&&" · "}{paymentSummary.advance>0&&`${fmt(paymentSummary.advance)} ajouté à l'avoir`}</p>}</div> : <SubmitBtn color={SEM.success.accent} label={submittingPayment?"Enregistrement…":`Enregistrer ${fmt(Number(paymentAmount)||0)}`} onClick={submitClientPayment} disabled={submittingPayment||!Number(paymentAmount)}/>}
         </Modal>}
       </div>
     );

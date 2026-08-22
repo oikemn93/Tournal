@@ -1150,7 +1150,11 @@ export async function applyClientAdvanceToInvoice(params: { boutiqueId:string; i
 }
 
 export async function recordClientPayment(params: { boutiqueId:string; clientId:number; amount:number; paymentMethod:string; paymentDate:string }) {
-  return dataRequest<{ client_id:number; requested_amount:number; applied_amount:number; remaining_due:number; paid_at:string; operator_id:string; operator_name:string; allocations:Array<{invoice_id:string;amount:number}> }>("rpc/record_client_payment", {
+  return dataRequest<{
+    client_id:number; requested_amount:number; applied_amount:number; advance_amount:number; remaining_due:number;
+    paid_at:string; operator_id:string; operator_name:string; allocations:Array<{invoice_id:string;amount:number}>;
+    advance?: { advance_id:number; client_id:number; amount:number; payment_method:string; paid_at:string; recorded_at:string; operator_id:string; operator_name:string; note?:string|null } | null;
+  }>("rpc/record_client_payment", {
     method:"POST", headers:{ Prefer:"return=representation" },
     body:JSON.stringify({
       p_boutique_id:params.boutiqueId,

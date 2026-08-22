@@ -269,11 +269,21 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
   const sessionEvents = isCaisseOpen && caisseSession
     ? invoicePaymentEvents(invoices).filter(ev => ev.paidAt >= caisseSession.openedAt && ev.source !== "client_advance")
     : [];
-  const sessionTotal = sessionEvents.reduce((s, ev) => s + ev.signedAmount, 0);
+  // A client credit represents money received now, while an invoice payment
+  // sourced from that credit represents money received earlier.  Count only
+  // the first event so the caisse total is exact, including a surplus that was
+  // converted to an avoir during a client payment.
+  const sessionAdvanceEvents = isCaisseOpen && caisseSession
+    ? (boutique.clientAdvances ?? [])
+      .filter(advance => advance.paidAt >= caisseSession.openedAt)
+      .map(advance => ({ paidAt:advance.paidAt, paymentMethod:advance.paymentMethod, signedAmount:advance.amount }))
+    : [];
+  const caissePaymentEvents = [...sessionEvents, ...sessionAdvanceEvents];
+  const sessionTotal = caissePaymentEvents.reduce((s, ev) => s + ev.signedAmount, 0);
   const sessionByMethod = PAYMENT_METHODS.map(m => ({
     m,
-    total: sessionEvents.filter(ev => ev.paymentMethod === m).reduce((s, ev) => s + ev.signedAmount, 0),
-    count: sessionEvents.filter(ev => ev.paymentMethod === m).length,
+    total: caissePaymentEvents.filter(ev => ev.paymentMethod === m).reduce((s, ev) => s + ev.signedAmount, 0),
+    count: caissePaymentEvents.filter(ev => ev.paymentMethod === m).length,
   }));
   const sessionEspeces = sessionByMethod.find(b => b.m === "Espèces")?.total ?? 0;
 
@@ -411,8 +421,9 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
     setSubmittingPayment(true);
     let updatedInv: Invoice = { ...encaissInv };
     let saleEntries: StockEntry[] = [];
+    let persisted: Awaited<ReturnType<typeof recordMultiPayment>>;
     try {
-      const persisted = await recordMultiPayment({
+      persisted = await recordMultiPayment({
         boutiqueId:boutique.id,
         invoiceId:encaissInv.id,
         payments:validSplit.map(entry => ({ amount:entry.amount, paymentMethod:entry.method })),

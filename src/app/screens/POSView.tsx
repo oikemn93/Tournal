@@ -8,7 +8,7 @@ import { silentPrint, buildOrderTicketHtml, buildReceiptHtml, agentPrint, connec
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
-import { createSale, recordPayment, cancelPendingInvoice } from "../../lib/api";
+import { createSale, recordMultiPayment, recordPayment, cancelPendingInvoice } from "../../lib/api";
 import { getDefaultSaleUnit, getLastSalePrice, getSaleUnitOptions, toBaseSaleQty } from "../utils/sales";
 
 export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente = false, initialClientId, onInitialClientPrepared, onOrderCreated, onUpdate, logAction }: {
@@ -16,7 +16,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
   canEncaissVente?: boolean;
   initialClientId?: number;
   onInitialClientPrepared?: () => void;
-  onOrderCreated?: (clientId: number, invoiceId: string) => void;
+  onOrderCreated?: (clientId: number, invoiceId: string, notice?: "order"|"payment") => void;
   onUpdate: (u: Partial<Boutique>) => void;
   logAction: (action: string, detail: string, icon: string) => void;
 }) {
@@ -138,6 +138,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
   const [expPrice, setExpPrice] = useState("");
   const [expSellUnit, setExpSellUnit] = useState("");
   const [expMethod, setExpMethod] = useState<PaymentMethod>("Espèces");
+  const [expUseClientAdvance, setExpUseClientAdvance] = useState(false);
   const [expBusy, setExpBusy] = useState(false);
   const [expDone, setExpDone] = useState(false);
 
@@ -150,8 +151,16 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
     setExpQty("");
     setExpPrice(lastPrice != null ? String(lastPrice) : "");
     setExpMethod("Espèces");
+    setExpUseClientAdvance(false);
     setExpDone(false);
   }
+
+  const expressClient = selectedClientId == null ? undefined : boutique.clients.find(client => client.id === selectedClientId);
+  const expressClientAdvance = expressClient == null
+    ? 0
+    : (boutique.clientAdvances ?? [])
+      .filter(advance => advance.clientId === expressClient.id)
+      .reduce((sum, advance) => sum + Math.max(0, advance.amount - (advance.allocatedAmount ?? 0)), 0);
 
   async function confirmExpress() {
     if (!expressModal || expBusy) return;
@@ -166,11 +175,17 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
     const line = { productId: expressModal.id, nom: expressModal.nom, qty: baseQty, unit: baseUnit, prixUnit: prix, ...(isSell ? { sellUnit: expSellUnit, sellQty: sellQtyN } : {}) };
     setExpBusy(true);
     try {
-      const saved = await createSale({ boutiqueId:boutique.id, client:"Client comptoir", lines:[line] });
+      const saved = await createSale({
+        boutiqueId:boutique.id,
+        clientId:expressClient?.id,
+        client:expressClient?.nom ?? "Client comptoir",
+        clientTel:expressClient?.tel,
+        lines:[line],
+      });
       if (!canEncaissVente) {
         // Sans droit d'encaissement : commande créée en attente, pas de paiement
         const newInv: Invoice = {
-          id:saved.invoice_id, client:"Client comptoir", lines:[line], montant:saved.total, acompte:0,
+          id:saved.invoice_id, clientId:saved.client_id ?? expressClient?.id, client:expressClient?.nom ?? "Client comptoir", clientTel:expressClient?.tel, lines:[line], montant:saved.total, acompte:0,
           date:today(), dateRaw:new Date().toISOString(), status:"en attente", type:"vente",
           operatorId:currentUser.id, operatorNom:currentUser.nom, operatorColor:currentUser.color,
         };
@@ -180,21 +195,67 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
         setTimeout(() => { setExpressModal(null); setExpDone(false); setExpBusy(false); }, 1200);
         return;
       }
-      const paid = await recordPayment({ boutiqueId:boutique.id, invoiceId:saved.invoice_id, amount:saved.total, paymentMethod:expMethod });
+      const advanceAmount = expUseClientAdvance && expressClient
+        ? Math.min(expressClientAdvance, saved.total)
+        : 0;
+      const paid = advanceAmount > 0
+        ? await recordMultiPayment({
+            boutiqueId:boutique.id,
+            invoiceId:saved.invoice_id,
+            payments:[
+              ...(saved.total > advanceAmount ? [{ amount:saved.total - advanceAmount, paymentMethod:expMethod }] : []),
+              { amount:advanceAmount, paymentMethod:"Avoir client" },
+            ],
+          })
+        : await recordPayment({ boutiqueId:boutique.id, invoiceId:saved.invoice_id, amount:saved.total, paymentMethod:expMethod });
+      const paidPayments = "payments" in paid
+        ? paid.payments.map(payment => ({
+            id:payment.id, amount:payment.amount, paymentMethod:payment.payment_method as PaymentMethod,
+            paidAt:payment.paid_at, operatorId:payment.operator_id, operatorName:payment.operator_name,
+            batchId:payment.batch_id, source:payment.source,
+          }))
+        : [{
+            id:paid.payment.id, amount:paid.payment.amount, paymentMethod:paid.payment.payment_method as PaymentMethod,
+            paidAt:paid.payment.paid_at, operatorId:paid.payment.operator_id, operatorName:paid.payment.operator_name,
+            batchId:paid.payment.batch_id, source:paid.payment.source,
+          }];
       const newInv: Invoice = {
-        id:saved.invoice_id, client:"Client comptoir", lines:[line], montant:saved.total, acompte:paid.acompte,
+        id:saved.invoice_id, clientId:saved.client_id ?? expressClient?.id, client:expressClient?.nom ?? "Client comptoir", clientTel:expressClient?.tel, lines:[line], montant:saved.total, acompte:paid.acompte,
         date:today(), dateRaw:new Date().toISOString(), status:"payé", type:"vente",
-        operatorId:currentUser.id, operatorNom:currentUser.nom, operatorColor:currentUser.color, paymentMethod:expMethod,
-        payments:[{ id:paid.payment.id, amount:paid.payment.amount, paymentMethod:paid.payment.payment_method as PaymentMethod, paidAt:paid.payment.paid_at, operatorId:paid.payment.operator_id, operatorName:paid.payment.operator_name, batchId:paid.payment.batch_id, source:paid.payment.source }],
+        operatorId:currentUser.id, operatorNom:currentUser.nom, operatorColor:currentUser.color, paymentMethod:advanceAmount >= saved.total ? "Avoir client" : expMethod,
+        payments:paidPayments,
       };
       const saleEntries: StockEntry[] = paid.stock_deducted
         ? [{ id:Date.now(), productId:line.productId, qty:-line.qty, unit:line.unit, montantDu:0, date:today(), fournisseur:`Vente ${saved.invoice_id}`, invoiceId:saved.invoice_id }]
         : [];
-      onUpdate({ invoices:[...invoices, newInv], ...(saleEntries.length ? { entries:[...entries, ...saleEntries] } : {}) });
-      logAction("Vente express", `${newInv.id} · ${expressModal.nom} · ${fmt(saved.total)} · ${expMethod}`, "⚡");
+      const allocatedByAdvance = new Map<number,number>();
+      if ("advance_allocations" in paid) {
+        paid.advance_allocations.forEach(allocation => allocatedByAdvance.set(
+          allocation.advance_id,
+          (allocatedByAdvance.get(allocation.advance_id) ?? 0) + allocation.amount,
+        ));
+      }
+      const updatedClientAdvances = allocatedByAdvance.size > 0
+        ? (boutique.clientAdvances ?? []).map(advance => ({
+            ...advance,
+            allocatedAmount:(advance.allocatedAmount ?? 0) + (allocatedByAdvance.get(advance.id) ?? 0),
+          }))
+        : undefined;
+      onUpdate({
+        invoices:[...invoices, newInv],
+        ...(saleEntries.length ? { entries:[...entries, ...saleEntries] } : {}),
+        ...(updatedClientAdvances ? { clientAdvances:updatedClientAdvances } : {}),
+      });
+      const paymentLabel = advanceAmount > 0
+        ? `${fmt(advanceAmount)} avoir${saved.total > advanceAmount ? ` + ${expMethod}` : ""}`
+        : expMethod;
+      logAction("Vente express", `${newInv.id} · ${expressModal.nom} · ${fmt(saved.total)} · ${paymentLabel}`, "⚡");
       setExpDone(true);
       setTimeout(() => doPrint(buildReceiptHtml(newInv, boutique, currentUser.nom), "Ticket de vente"), 150);
-      setTimeout(() => { setExpressModal(null); setExpDone(false); setExpBusy(false); }, 1200);
+      setTimeout(() => {
+        setExpressModal(null); setExpDone(false); setExpBusy(false);
+        if (newInv.clientId != null) onOrderCreated?.(newInv.clientId, newInv.id, "payment");
+      }, 1200);
     } catch (error) {
       setExpBusy(false);
       alert(error instanceof Error ? error.message : (canEncaissVente ? "Vente express impossible" : "Commande express impossible"));
@@ -663,7 +724,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
               <p className="font-black text-lg" style={{ color:SEM.success.accent, fontFamily:"'Nunito', sans-serif" }}>
                 {canEncaissVente ? "Vente encaissée ✓" : "Commande enregistrée ✓"}
               </p>
-              <p className="text-sm text-muted-foreground">{canEncaissVente ? "Ticket imprimé automatiquement" : "En attente d'encaissement"}</p>
+              <p className="text-sm text-muted-foreground">{canEncaissVente ? (expressClient ? "Encaissement enregistré dans la fiche client" : "Ticket imprimé automatiquement") : "En attente d'encaissement"}</p>
             </div>
           ) : (<>
             <div className="flex gap-4 items-center">
@@ -675,6 +736,15 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
                 </p>
               </div>
             </div>
+            {expressClient&&<div className="rounded-2xl border p-3" style={{background:"#f8fafc",borderColor:POS_COLOR+"33"}}>
+              <div className="flex items-center justify-between gap-3">
+                <div><p className="text-xs font-black" style={{color:POS_COLOR}}>VENTE POUR {expressClient.nom.toUpperCase()}</p><p className="mt-1 text-xs text-muted-foreground">Client sélectionné depuis sa fiche.</p></div>
+                <p className="text-xs font-black text-right" style={{color:expressClientAdvance>0?"#0f766e":"#6b7280"}}>{expressClientAdvance>0?`🎟️ ${fmt(expressClientAdvance)}`:"Aucun avoir"}</p>
+              </div>
+              {canEncaissVente && expressClientAdvance>0&&<button type="button" onClick={()=>setExpUseClientAdvance(value=>!value)} className="mt-3 w-full rounded-xl px-3 py-2.5 text-xs font-black" style={{background:expUseClientAdvance?"#0f766e":"#ccfbf1",color:expUseClientAdvance?"#fff":"#0f766e"}}>{expUseClientAdvance ? "✓ Avoir ajouté au paiement" : "🎟️ Utiliser l'avoir disponible"}</button>}
+              {canEncaissVente && expUseClientAdvance&&<p className="mt-2 text-xs font-semibold" style={{color:"#0f766e"}}>L'avoir couvrira d'abord la vente ; le reste éventuel sera réglé par le mode choisi ci-dessous.</p>}
+              {!canEncaissVente && expressClientAdvance>0&&<p className="mt-2 text-xs font-semibold" style={{color:"#0f766e"}}>L'avoir sera proposé au caissier lors de l'encaissement.</p>}
+            </div>}
             {getSellOptions(expressModal).length > 1 && (
               <Field label="VENDRE PAR" color={POS_COLOR}>
                 <div className="flex gap-2">
@@ -698,7 +768,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
               </Field>
             </div>
             {canEncaissVente ? (
-              <Field label="MODE DE PAIEMENT" color={POS_COLOR}>
+              <Field label={expUseClientAdvance ? "MODE POUR LE COMPLÉMENT ÉVENTUEL" : "MODE DE PAIEMENT"} color={POS_COLOR}>
                 <div className="grid grid-cols-2 gap-2">
                   {PAYMENT_METHODS.map(m => (
                     <button key={m} onClick={()=>setExpMethod(m)} className="py-2.5 rounded-xl text-xs font-bold" style={{ background: expMethod===m?POS_COLOR:"#EEE9D8", color: expMethod===m?"#fff":"#6b7280" }}>{PM_ICON[m]} {m}</button>
