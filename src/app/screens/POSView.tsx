@@ -11,11 +11,12 @@ import { SubmitBtn } from "../components/SubmitBtn";
 import { createSale, recordPayment, cancelPendingInvoice } from "../../lib/api";
 import { getDefaultSaleUnit, getLastSalePrice, getSaleUnitOptions, toBaseSaleQty } from "../utils/sales";
 
-export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente = false, initialClientId, onInitialClientPrepared, onUpdate, logAction }: {
+export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente = false, initialClientId, onInitialClientPrepared, onOrderCreated, onUpdate, logAction }: {
   boutique: Boutique; allBoutiques: Boutique[]; currentUser: PlatformUser;
   canEncaissVente?: boolean;
   initialClientId?: number;
   onInitialClientPrepared?: () => void;
+  onOrderCreated?: (clientId: number, invoiceId: string) => void;
   onUpdate: (u: Partial<Boutique>) => void;
   logAction: (action: string, detail: string, icon: string) => void;
 }) {
@@ -265,6 +266,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
     setCart(cartItems);
     setClientNom(inv.client === "Client comptoir" ? "" : inv.client);
     setClientTel(inv.clientTel ?? "+221 ");
+    setSelectedClientId(inv.clientId);
     // Cancel the existing order then switch to produits tab so user can complete checkout
     void handleCancelOrder(inv).then((cancelled) => {
       if (!cancelled) return;
@@ -292,9 +294,13 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
       };
       onUpdate({ invoices:[...invoices, newInv] });
       logAction("Commande PDV", `${newInv.id} · ${client} · ${fmt(saved.total)}`, "🛒");
+      setTimeout(() => doPrint(buildOrderTicketHtml(newInv, boutique, currentUser.nom), "Bon de commande"), 200);
+      if (selectedClientId != null && newInv.clientId != null) {
+        onOrderCreated?.(newInv.clientId, newInv.id);
+        return;
+      }
       setLastInv(newInv);
       setDone(true);
-      setTimeout(() => doPrint(buildOrderTicketHtml(newInv, boutique, currentUser.nom), "Bon de commande"), 200);
     } catch (error) {
       alert(error instanceof Error ? error.message : "Impossible d’enregistrer la commande");
     } finally {

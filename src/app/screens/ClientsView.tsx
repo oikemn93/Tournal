@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Search, MapPin, Phone, Lock, Store, ChevronRight, Plus, ArrowLeft, FilePlus, Wallet, CheckCircle } from "lucide-react";
 import type { Boutique, Client, ClientType, Invoice, PaymentMethod, PlatformUser } from "../types";
 import { SEM, inputCls } from "../constants";
@@ -17,12 +17,15 @@ function normalizePhone(value?: string): string {
   return (value ?? "").replace(/\D/g, "");
 }
 
-export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser, onUpdate, logAction, initialTab, canCreateOrder = false, canCollectPayment = false, canOpenInvoice = false, onOpenInvoice, onCreateOrder }: {
+export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser, onUpdate, logAction, initialTab, initialClientId, initialInvoiceId, onInitialClientOpened, canCreateOrder = false, canCollectPayment = false, canOpenInvoice = false, onOpenInvoice, onCreateOrder }: {
   boutique: Boutique; allBoutiques: Boutique[]; platformUsers: PlatformUser[];
   currentUser: PlatformUser;
   onUpdate: (u: Partial<Boutique>) => void;
   logAction: (action: string, detail: string, icon: string) => void;
   initialTab?: ClientType;
+  initialClientId?: number;
+  initialInvoiceId?: string;
+  onInitialClientOpened?: () => void;
   canCreateOrder?: boolean;
   canCollectPayment?: boolean;
   canOpenInvoice?: boolean;
@@ -35,11 +38,34 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
   const [search, setSearch] = useState("");
   const [modal, setModal] = useState(false);
   const [detailClient, setDetailClient] = useState<Client|null>(null);
+  const [showAllTransactions, setShowAllTransactions] = useState(false);
+  const [highlightedInvoiceId, setHighlightedInvoiceId] = useState<string|null>(null);
   const [nom,setNom]=useState(""); const [dialCode,setDialCode]=useState("+221"); const [tel,setTel]=useState(""); const [ville,setVille]=useState(""); const [type,setType]=useState<ClientType>("B2C");
   const [adresse,setAdresse]=useState(""); const [email,setEmail]=useState(""); const [contact,setContact]=useState("");
   const siblings = getSiblings(boutique.id, allBoutiques, platformUsers);
   const filtered = clients.filter(c=>c.type===tab&&(c.nom.toLowerCase().includes(search.toLowerCase())||c.tel.includes(search)||c.ville.toLowerCase().includes(search.toLowerCase())));
   const counts = { "B2C":clients.filter(c=>c.type==="B2C").length, "B2B":clients.filter(c=>c.type==="B2B").length, "Grossiste":clients.filter(c=>c.type==="Grossiste").length };
+
+  // Commands created from a client card come back here, not to the general
+  // invoice screen. The newest transaction is then already at the top.
+  useEffect(() => {
+    if (initialClientId == null) return;
+    const client = clients.find(item => item.id === initialClientId);
+    if (client) {
+      setTab(client.type);
+      setSearch("");
+      setDetailClient(client);
+      setShowAllTransactions(true);
+      setHighlightedInvoiceId(initialInvoiceId ?? null);
+    }
+    onInitialClientOpened?.();
+  }, [initialClientId, initialInvoiceId, clients, onInitialClientOpened]);
+
+  function openClientDetail(client: Client) {
+    setDetailClient(client);
+    setShowAllTransactions(false);
+    setHighlightedInvoiceId(null);
+  }
 
   async function submit() {
     if (!nom.trim()) return;
@@ -49,7 +75,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
       const existing = clients.find(c => normalizePhone(c.tel) === phoneNorm);
       if (existing) {
         setModal(false);
-        setDetailClient(existing);
+        openClientDetail(existing);
         alert(`Ce numéro appartient déjà à ${existing.nom}. La fiche existante a été ouverte.`);
         return;
       }
@@ -65,7 +91,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
         const existing = clients.find(c => normalizePhone(c.tel) === phoneNorm);
         if (existing) {
           setModal(false);
-          setDetailClient(existing);
+          openClientDetail(existing);
           alert(`Ce numéro appartient déjà à ${existing.nom}. La fiche existante a été ouverte.`);
           return;
         }
@@ -126,6 +152,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
     const months = Object.entries(byMonth).sort((a,b)=>b[0].localeCompare(a[0])).slice(0,6);
     const clientPayments = clientInvoices.flatMap(inv => (inv.payments ?? []).map(payment => ({ ...payment, invoiceId:inv.id })))
       .sort((a,b)=>b.paidAt.localeCompare(a.paidAt));
+    const visibleTransactions = showAllTransactions ? clientInvoices : clientInvoices.slice(0, 5);
 
     async function submitClientPayment() {
       if (submittingPayment || totalImpayé <= 0) return;
@@ -172,7 +199,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
 
     return (
       <div className="space-y-4 pb-24">
-        <button onClick={()=>setDetailClient(null)} className="flex items-center gap-2 text-muted-foreground active:opacity-70">
+        <button onClick={()=>{setDetailClient(null);setHighlightedInvoiceId(null);}} className="flex items-center gap-2 text-muted-foreground active:opacity-70">
           <ArrowLeft size={18}/><span className="text-sm font-bold">Retour</span>
         </button>
         {/* Header card */}
@@ -197,6 +224,38 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
             </button>}
           </div>}
         </div>
+        <section className="bg-card rounded-2xl p-3.5 border border-border" aria-label="Factures et commandes du client">
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div><p className="text-xs font-black tracking-wider text-muted-foreground">FACTURES & COMMANDES</p><p className="text-xs text-muted-foreground mt-0.5">Les plus récentes sont affichées en premier.</p></div>
+            <span className="rounded-lg px-2 py-1 text-xs font-black" style={{background:CC+"18",color:CC}}>{clientInvoices.length}</span>
+          </div>
+          {highlightedInvoiceId && <div className="mb-2 rounded-xl px-3 py-2 text-xs font-bold" style={{background:SEM.success.bg,color:SEM.success.accent}}>✓ Nouvelle commande enregistrée : {highlightedInvoiceId}</div>}
+          <div className="space-y-2">
+            {clientInvoices.length===0&&<p className="text-sm text-muted-foreground text-center py-5">Aucune transaction</p>}
+            {visibleTransactions.map(inv=>{
+              const [tc,bc]=invBadge(inv.status);
+              const isReturn=inv.type==="Retour";
+              const paid = invoicePaidAmount(inv);
+              const remaining = invoiceRemainingAmount(inv);
+              const isHighlighted = inv.id === highlightedInvoiceId;
+              const content = <>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2"><p className="text-xs font-black text-muted-foreground">{inv.id}</p><span className="text-xs px-1.5 py-0.5 rounded font-bold capitalize" style={{ background:bc,color:tc }}>{inv.status}</span>{isReturn&&<span className="text-xs px-1.5 py-0.5 rounded font-bold" style={{ background:"#ef444415",color:"#ef4444" }}>Retour</span>}</div>
+                  <p className="text-xs text-muted-foreground mt-0.5">{inv.date} · {inv.type}</p>
+                  {inv.paymentMethod&&<p className="text-xs text-muted-foreground">{PM_ICON[inv.paymentMethod]} {inv.paymentMethod}</p>}
+                </div>
+                <div className="text-right flex-shrink-0"><p className="font-black text-sm" style={{ fontFamily:"'Nunito',sans-serif" }}>{fmt(inv.montant)}</p>{paid>0&&<p className="text-xs font-semibold" style={{ color:SEM.success.accent }}>✓ {fmt(paid)}</p>}{remaining>0&&<p className="text-xs font-semibold" style={{ color:SEM.warning.accent }}>⏳ {fmt(remaining)}</p>}</div>
+                {canOpenInvoice&&<ChevronRight size={15} className="text-muted-foreground"/>}
+              </>;
+              const className="w-full rounded-xl p-3 border flex items-center gap-3 text-left" + (isHighlighted ? " ring-2" : " bg-background") + (canOpenInvoice ? " active:scale-[0.99]" : "");
+              const style = isHighlighted ? {borderColor:SEM.success.accent,background:SEM.success.bg,boxShadow:`0 0 0 2px ${SEM.success.accent}`} : undefined;
+              return canOpenInvoice
+                ? <button type="button" onClick={()=>onOpenInvoice(inv.id)} key={inv.id} className={className} style={style}>{content}</button>
+                : <div key={inv.id} className={className} style={style}>{content}</div>;
+            })}
+          </div>
+          {clientInvoices.length>5&&<button type="button" onClick={()=>setShowAllTransactions(value=>!value)} className="mt-3 w-full rounded-xl bg-muted py-2.5 text-xs font-black text-foreground">{showAllTransactions ? "Réduire la liste" : `Voir les ${clientInvoices.length} transactions`}</button>}
+        </section>
         {/* KPIs */}
         <div className="grid grid-cols-2 gap-2">
           {[
@@ -244,39 +303,6 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
             </div>)}
           </div>
         </div>}
-        {/* All invoices */}
-        <div>
-          <p className="text-xs font-black tracking-wider text-muted-foreground mb-2">TOUTES LES TRANSACTIONS</p>
-          <div className="space-y-2">
-            {clientInvoices.length===0&&<p className="text-sm text-muted-foreground text-center py-6">Aucune transaction</p>}
-            {clientInvoices.map(inv=>{
-              const [tc,bc]=invBadge(inv.status);
-              const isReturn=inv.type==="Retour";
-              const paid = invoicePaidAmount(inv);
-              const remaining = invoiceRemainingAmount(inv);
-              const content = <>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <p className="text-xs font-black text-muted-foreground">{inv.id}</p>
-                    <span className="text-xs px-1.5 py-0.5 rounded font-bold capitalize" style={{ background:bc,color:tc }}>{inv.status}</span>
-                    {isReturn&&<span className="text-xs px-1.5 py-0.5 rounded font-bold" style={{ background:"#ef444415",color:"#ef4444" }}>Retour</span>}
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-0.5">{inv.date} · {inv.type}</p>
-                  {inv.paymentMethod&&<p className="text-xs text-muted-foreground">{PM_ICON[inv.paymentMethod]} {inv.paymentMethod}</p>}
-                </div>
-                <div className="text-right flex-shrink-0">
-                  <p className="font-black text-sm" style={{ fontFamily:"'Nunito',sans-serif" }}>{fmt(inv.montant)}</p>
-                  {paid>0&&<p className="text-xs font-semibold" style={{ color:SEM.success.accent }}>✓ {fmt(paid)}</p>}
-                  {remaining>0&&<p className="text-xs font-semibold" style={{ color:SEM.warning.accent }}>⏳ {fmt(remaining)}</p>}
-                </div>
-                {canOpenInvoice&&<ChevronRight size={15} className="text-muted-foreground"/>}
-              </>;
-              return canOpenInvoice
-                ? <button type="button" onClick={()=>onOpenInvoice(inv.id)} key={inv.id} className="w-full bg-card rounded-2xl p-3.5 border border-border flex items-center gap-3 text-left active:scale-[0.99]">{content}</button>
-                : <div key={inv.id} className="w-full bg-card rounded-2xl p-3.5 border border-border flex items-center gap-3 text-left">{content}</div>;
-            })}
-          </div>
-        </div>
         {paymentModal&&<Modal title="Versement client" color={SEM.success.accent} onClose={()=>{if(!submittingPayment)setPaymentModal(false);}}>
           <div className="rounded-2xl p-3" style={{background:SEM.success.bg}}>
             <p className="text-xs text-muted-foreground">Solde global dû</p>
@@ -393,7 +419,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
           const invCount = clientInvoices.length;
           const montantDu = clientInvoices.reduce((s,inv)=>s+invoiceRemainingAmount(inv),0);
           return (
-          <button key={c.id} onClick={()=>setDetailClient(c)} className="w-full bg-card rounded-2xl p-3.5 border border-border text-left active:scale-[0.98] transition-transform">
+          <button key={c.id} onClick={()=>openClientDetail(c)} className="w-full bg-card rounded-2xl p-3.5 border border-border text-left active:scale-[0.98] transition-transform">
             <div className="flex items-center gap-3">
               <div className="w-11 h-11 rounded-xl flex-shrink-0 flex items-center justify-center text-sm font-black" style={{ background:CC+"22",color:CC,fontFamily:"'Nunito',sans-serif" }}>{ini(c.nom)}</div>
               <div className="flex-1 min-w-0">
