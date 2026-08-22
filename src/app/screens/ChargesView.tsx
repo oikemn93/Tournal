@@ -159,7 +159,7 @@ export function ChargesView({ boutique, onUpdate, logAction }: {
             <div className="flex flex-col gap-2">
               <button type="button" onClick={()=>setFourn("")} className="w-full text-left px-3 py-2.5 rounded-xl text-sm font-medium" style={{background:!fourn?"#f3f4f6":"transparent",color:!fourn?"#374151":"#6b7280",fontWeight:!fourn?700:400}}>Aucun lien fournisseur</button>
               {suppliers.map(s => {
-                const bal = supplierBalance(s.nom, boutique.entries, boutique.charges);
+                const bal = supplierBalance(s, boutique.entries, boutique.charges);
                 return (
                   <button key={s.id} type="button" onClick={()=>setFourn(s.nom)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl" style={{background:fourn===s.nom?s.color+"22":"#EEE9D8",border:fourn===s.nom?`2px solid ${s.color}`:"2px solid transparent"}}>
                     <div className="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-black text-white flex-shrink-0" style={{background:s.color}}>{s.initials}</div>

@@ -39,7 +39,7 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
   const [dQty, setDQty]   = useState("");
   const [dMontant, setDMontant] = useState("");
   const [dPrixUnit, setDPrixUnit] = useState("");
-  const [dFourn, setDFourn] = useState(suppliers[0]?.nom ?? "");
+  const [dSupplierId, setDSupplierId] = useState<number|null>(suppliers[0]?.id ?? null);
   const [dLotMode, setDLotMode] = useState(false);
   const [dLots, setDLots]     = useState("1");
   const [dPieces, setDPieces] = useState("");
@@ -55,7 +55,7 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
   const [nQty, setNQty]     = useState("");
   const [nMontant, setNMontant] = useState("");
   const [nPrixUnit, setNPrixUnit] = useState("");
-  const [nFourn, setNFourn] = useState(suppliers[0]?.nom ?? "");
+  const [nSupplierId, setNSupplierId] = useState<number|null>(suppliers[0]?.id ?? null);
   const [nCat, setNCat]     = useState("");
   const [nImg, setNImg]     = useState<string | null>(null);
   const [nCatNew, setNCatNew] = useState("");
@@ -67,6 +67,8 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
   const nLotQty = nUnit === "pièces"
     ? (Number(nLots) || 1) * (Number(nPieces) || 0)
     : (Number(nLots) || 1) * (Number(nPieces) || 0) * (Number(nLongueur) || 0);
+
+  const supplierById = (supplierId?: number|null) => suppliers.find(s => s.id === supplierId);
 
   function selectNewCat(c: string) {
     setNCat(c);
@@ -118,7 +120,7 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
     setDetail(p); setAddMode(false); setEditingProduct(false);
     setDQty(""); setDMontant(""); setDPrixUnit("");
     setDUnit(eff?.unitVente ?? p.unit);
-    setDFourn(p.fournisseur || (suppliers[0]?.nom ?? ""));
+    setDSupplierId(suppliers.find(s => s.nom === p.fournisseur)?.id ?? suppliers[0]?.id ?? null);
     if (eff && eff.nbPiecesParLot > 0) {
       setDLotMode(true); setDLots("1");
       setDPieces(String(eff.nbPiecesParLot));
@@ -132,15 +134,17 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
     if (!detail) return;
     const qty = dLotMode ? dLotQty : Number(dQty);
     if (!qty || qty <= 0) return;
+    const supplier = supplierById(dSupplierId);
+    if (!supplier) { alert("Sélectionnez un fournisseur avant d'enregistrer la réception."); return; }
     const isPieces = dUnit === "pièces";
     const lotExtra = dLotMode ? { nbLots: Number(dLots) || 1, nbPieces: Number(dPieces) || 0, ...(isPieces ? {} : { longueurPiece: Number(dLongueur) || 0 }) } : {};
     try {
-      await recordStockMovement({ boutiqueId:boutique.id, productId:detail.id, qty, type:"achat", prixUnit:(Number(dMontant) || 0) / qty, note:dFourn });
+      const persisted = await recordStockMovement({ boutiqueId:boutique.id, productId:detail.id, qty, type:"achat", prixUnit:(Number(dMontant) || 0) / qty, note:supplier.nom, supplierId:supplier.id });
+      onUpdate({ entries: [...entries, { id: persisted.entry_id, productId: detail.id, qty, unit: dUnit, montantDu: Number(dMontant) || 0, date: today(), recordedAt:new Date().toISOString(), fournisseur: supplier.nom, supplierId:supplier.id, movementType:"achat", ...lotExtra, ...(dSku.trim() ? { sku: dSku.trim() } : {}) }] });
     } catch (error) {
       alert(error instanceof Error ? error.message : "Entrée de stock impossible");
       return;
     }
-    onUpdate({ entries: [...entries, { id: Date.now(), productId: detail.id, qty, unit: dUnit, montantDu: Number(dMontant) || 0, date: today(), recordedAt:new Date().toISOString(), fournisseur: dFourn, ...lotExtra, ...(dSku.trim() ? { sku: dSku.trim() } : {}) }] });
     const lab = dLotMode
       ? (isPieces ? `${dLots}lot×${dPieces}p=+${qty}p` : `${dLots}lot×${dPieces}p×${dLongueur}${dUnit}=+${qty}${dUnit}`)
       : `+${qty} ${dUnit}`;
@@ -158,18 +162,22 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
       updatedCats = [...cats, { id: "cat" + localPid, nom: nCatNew.trim(), unitVente: nUnit, nbPiecesParLot: 0, longueurParPiece: 0 }];
     }
     const initQty = nLotMode ? nLotQty : Number(nQty);
+    const supplier = supplierById(nSupplierId);
+    if (initQty > 0 && !supplier) { alert("Créez ou sélectionnez un fournisseur avant d'ajouter du stock initial."); return; }
     const lotExtra = nLotMode ? { nbLots: Number(nLots)||1, nbPieces: Number(nPieces)||0, ...(nUnit !== "pièces" ? { longueurPiece: Number(nLongueur)||0 } : {}) } : {};
     let persisted;
     try {
       persisted = await createProduct({ boutiqueId:boutique.id, name:nNom.trim(), unit:nUnit, categoryId:cats.find(c=>c.nom===finalCat)?.id, purchasePrice:Number(nPrixUnit) || 0, salePrice:Number(nPrixUnit) || 0 });
-      if (initQty > 0) await recordStockMovement({ boutiqueId:boutique.id, productId:persisted.product_id, qty:initQty, type:"achat", prixUnit:initQty ? (Number(nMontant) || 0) / initQty : 0, note:nFourn });
+      const movement = initQty > 0 && supplier
+        ? await recordStockMovement({ boutiqueId:boutique.id, productId:persisted.product_id, qty:initQty, type:"achat", prixUnit:initQty ? (Number(nMontant) || 0) / initQty : 0, note:supplier.nom, supplierId:supplier.id })
+        : null;
+      const pid = persisted.product_id;
+      const newEntries = movement ? [...entries, { id: movement.entry_id, productId: pid, qty: initQty, unit: nUnit, montantDu: Number(nMontant) || 0, date: today(), recordedAt:new Date().toISOString(), fournisseur: supplier?.nom ?? "", supplierId:supplier?.id, movementType:"achat" as const, ...lotExtra }] : entries;
+      onUpdate({
+        products: [...products, { id: pid, nom: nNom.trim(), img: nImg ?? PLACEHOLDER_IMGS[Math.floor(Math.random() * 4)], unit: nUnit, fournisseur: supplier?.nom ?? "", categorie: finalCat || undefined, prixAchat:Number(nPrixUnit) || 0, prixVente:Number(nPrixUnit) || 0 }],
+        entries: newEntries, categories: updatedCats,
+      });
     } catch (error) { alert(error instanceof Error ? error.message : "Création du produit impossible"); return; }
-    const pid = persisted.product_id;
-    const newEntries = initQty > 0 ? [...entries, { id: pid + 1, productId: pid, qty: initQty, unit: nUnit, montantDu: Number(nMontant) || 0, date: today(), recordedAt:new Date().toISOString(), fournisseur: nFourn, ...lotExtra }] : entries;
-    onUpdate({
-      products: [...products, { id: pid, nom: nNom.trim(), img: nImg ?? PLACEHOLDER_IMGS[Math.floor(Math.random() * 4)], unit: nUnit, fournisseur: nFourn, categorie: finalCat || undefined, prixAchat:Number(nPrixUnit) || 0, prixVente:Number(nPrixUnit) || 0 }],
-      entries: newEntries, categories: updatedCats,
-    });
     logAction("Nouveau produit", `${nNom.trim()}${finalCat ? " · " + finalCat : ""}`, "🆕");
     setNNom(""); setNQty(""); setNMontant(""); setNPrixUnit(""); setNCat(""); setNCatNew(""); setNImg(null); setNCatMode("select");
     setNLotMode(false); setNLots("1"); setNPieces(""); setNLongueur(""); setShowNew(false);
@@ -221,10 +229,11 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
         type:"ajustement",
         prixUnit:originalUnitCost,
         note:`Correction entrée #${entryId}`,
+        supplierId:original.supplierId,
       });
       const adjustment = {
         id:Date.now(), productId:original.productId, qty:delta, unit:original.unit,
-        montantDu:delta * originalUnitCost, date:today(), recordedAt:new Date().toISOString(), fournisseur:`Correction entrée #${entryId}`,
+        montantDu:delta * originalUnitCost, date:today(), recordedAt:new Date().toISOString(), fournisseur:original.supplierId ? (supplierById(original.supplierId)?.nom ?? original.fournisseur) : `Correction entrée #${entryId}`, supplierId:original.supplierId, movementType:"ajustement" as const,
       };
       onUpdate({ entries:[...entries, adjustment] });
       logAction("Correction stock", `Entrée #${entryId} · ajustement ${delta > 0 ? "+" : ""}${delta} ${original.unit}`, "✏️");
@@ -250,10 +259,11 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
         type:"ajustement",
         prixUnit:unitCost,
         note:`Annulation entrée #${entryId}`,
+        supplierId:original.supplierId,
       });
       const reversal = {
         id:Date.now(), productId:original.productId, qty:-original.qty, unit:original.unit,
-        montantDu:-Math.abs(original.montantDu), date:today(), recordedAt:new Date().toISOString(), fournisseur:`Annulation entrée #${entryId}`,
+        montantDu:-Math.abs(original.montantDu), date:today(), recordedAt:new Date().toISOString(), fournisseur:original.supplierId ? (supplierById(original.supplierId)?.nom ?? original.fournisseur) : `Annulation entrée #${entryId}`, supplierId:original.supplierId, movementType:"ajustement" as const,
       };
       onUpdate({ entries:[...entries, reversal] });
       logAction("Annulation réception", `Entrée #${entryId} · mouvement inverse ${-original.qty} ${original.unit}`, "↩️");
@@ -387,7 +397,8 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
                   {entries.filter(e => e.productId === detail.id).sort(sortStockEntriesNewestFirst).map(e => {
                     const isSale = e.qty < 0;
                     const isReturn = e.movementType === "retour";
-                    const sc = suppliers.find(s => s.nom === e.fournisseur)?.color ?? "#6b7280";
+                    const entrySupplier = supplierById(e.supplierId) ?? suppliers.find(s => s.nom === e.fournisseur);
+                    const sc = entrySupplier?.color ?? "#6b7280";
                     const isEditing = editingEntryId === e.id;
                     if (isEditing) return (
                       <div key={e.id} className="rounded-xl px-3 py-3 space-y-2 border-2" style={{ borderColor:"#3b82f6", background:"#3b82f608" }}>
@@ -408,7 +419,7 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
                             {isSale ? "−" : "+"}{Math.abs(e.qty)} <span className="text-muted-foreground font-normal">{e.unit}</span>
                             {e.nbPieces ? <span className="text-xs text-muted-foreground font-normal ml-1">({e.nbLots && e.nbLots > 1 ? `${e.nbLots}lots×` : ""}{e.nbPieces}p{e.longueurPiece ? `×${e.longueurPiece}` : ""})</span> : null}
                           </p>
-                          <p className="text-xs text-muted-foreground">{isSale ? "Vente" : isReturn ? "Retour client" : e.nbPieces ? "Lot reçu" : "Achat"} · {e.fournisseur.replace("Vente → ", "")} · {e.date}{e.sku ? ` · SKU: ${e.sku}` : ""}</p>
+                          <p className="text-xs text-muted-foreground">{isSale ? "Vente" : isReturn ? "Retour client" : e.nbPieces ? "Lot reçu" : "Achat"} · {(entrySupplier?.nom ?? e.fournisseur).replace("Vente → ", "")} · {e.date}{e.sku ? ` · SKU: ${e.sku}` : ""}</p>
                         </div>
                         {!isSale && !isReturn && <p className="text-sm font-black" style={{ color: "#C9A227", fontFamily: "'Nunito', sans-serif" }}>{fmt(e.montantDu)}</p>}
                         {!isSale && !isReturn && (
@@ -519,15 +530,16 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
                 </Field>
               </div>
 
-              {suppliers.length > 0 && (
-                <Field label="FOURNISSEUR">
-                  <select value={dFourn} onChange={e => setDFourn(e.target.value)} className={inputCls} style={{ appearance: "none" }}>
-                    {suppliers.map(s => <option key={s.id} value={s.nom}>{s.nom}</option>)}
+              <Field label="FOURNISSEUR">
+                {suppliers.length > 0 ? (
+                  <select value={dSupplierId ?? ""} onChange={e => setDSupplierId(e.target.value ? Number(e.target.value) : null)} className={inputCls} style={{ appearance: "none" }}>
+                    <option value="">Choisir un fournisseur…</option>
+                    {suppliers.map(s => <option key={s.id} value={s.id}>{s.nom}</option>)}
                   </select>
-                </Field>
-              )}
+                ) : <p className="rounded-xl bg-amber-50 px-3 py-3 text-sm text-amber-800">Créez d'abord un fournisseur pour rattacher cette réception.</p>}
+              </Field>
               <Field label="RÉFÉRENCE / SKU (optionnel)"><input value={dSku} onChange={e => setDSku(e.target.value)} placeholder="Ex: WAX-001 ou code interne" className={inputCls}/></Field>
-              <SubmitBtn color={boutique.color} label="Enregistrer la réception" onClick={submitEntry} disabled={dLotMode ? dLotQty <= 0 : !dQty || Number(dQty) <= 0}/>
+              <SubmitBtn color={boutique.color} label="Enregistrer la réception" onClick={submitEntry} disabled={!dSupplierId || (dLotMode ? dLotQty <= 0 : !dQty || Number(dQty) <= 0)}/>
             </>
           )}
         </Modal>
@@ -631,13 +643,14 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
             </Field>
           </div>
 
-          {suppliers.length > 0 && (
-            <Field label="FOURNISSEUR">
-              <select value={nFourn} onChange={e => setNFourn(e.target.value)} className={inputCls} style={{ appearance: "none" }}>
-                {suppliers.map(s => <option key={s.id} value={s.nom}>{s.nom}</option>)}
+          <Field label="FOURNISSEUR POUR LE STOCK INITIAL">
+            {suppliers.length > 0 ? (
+              <select value={nSupplierId ?? ""} onChange={e => setNSupplierId(e.target.value ? Number(e.target.value) : null)} className={inputCls} style={{ appearance: "none" }}>
+                <option value="">Choisir un fournisseur…</option>
+                {suppliers.map(s => <option key={s.id} value={s.id}>{s.nom}</option>)}
               </select>
-            </Field>
-          )}
+            ) : <p className="rounded-xl bg-amber-50 px-3 py-3 text-sm text-amber-800">Optionnel sans stock initial. Créez un fournisseur avant toute réception.</p>}
+          </Field>
           <input ref={photoInputRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoFile}/>
           <button type="button" onClick={() => photoInputRef.current?.click()} className="w-full border-2 border-dashed rounded-2xl overflow-hidden active:scale-[0.98]" style={{ borderColor: nImg ? "#3b82f6" : "rgba(0,0,0,0.12)", background: "#3b82f608" }}>
             {nImg

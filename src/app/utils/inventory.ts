@@ -1,4 +1,4 @@
-import type { Boutique, Charge, InvoiceLine, InvoiceStatus, CartItem, PlatformUser, StockEntry, Invoice, Product } from "../types";
+import type { Boutique, Charge, InvoiceLine, InvoiceStatus, CartItem, PlatformUser, StockEntry, Invoice, Product, Supplier } from "../types";
 import { SEM } from "../constants";
 import { fmt } from "./formatting";
 import type { DashPeriod } from "../types";
@@ -39,10 +39,21 @@ export function productMontantNet(pid: number, entries: StockEntry[], charges: C
   }
   return Math.max(0, Math.round(net));
 }
-export function supplierBalance(nom: string, entries: StockEntry[], charges?: Charge[]) {
-  const linkedCharges = (charges ?? []).filter(c => c.fournisseur === nom);
+function matchesSupplier(record: { supplierId?: number; fournisseur?: string }, supplier: Pick<Supplier, "id"|"nom"> | string) {
+  if (typeof supplier === "string") return record.fournisseur === supplier;
+  // Historical imports had only a supplier name. New writes always use the
+  // scoped supplier ID, so a rename cannot detach a receipt or payment.
+  return record.supplierId === supplier.id || (record.supplierId == null && record.fournisseur === supplier.nom);
+}
+
+export function supplierBalance(supplier: Pick<Supplier, "id"|"nom"> | string, entries: StockEntry[], charges?: Charge[]) {
+  const linkedCharges = (charges ?? []).filter(c => matchesSupplier(c, supplier));
   const regularPurchases = entries
-    .filter(e => e.fournisseur === nom && isSupplierDebtEntry(e))
+    .filter(e => matchesSupplier(e, supplier) && (
+      e.movementType === "achat"
+      || (e.supplierId != null && e.movementType === "ajustement")
+      || (e.supplierId == null && isSupplierDebtEntry(e))
+    ))
     .reduce((s, e) => s + e.montantDu, 0);
   const transferPurchases = linkedCharges
     .filter(c => c.source === "transfer")
