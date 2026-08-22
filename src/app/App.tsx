@@ -1105,7 +1105,9 @@ const LOGIN_LOCK_MS = 2 * 60_000;  // lockout duration (mirrors auth_settings.lo
 const LOGIN_LOCK_KEY = "tournal:login_lock";
 
 function TournalLogo({ className = "w-20 h-20", decorative = true, variant = "gold" }: { className?: string; decorative?: boolean; variant?: "gold" | "dark" }) {
-  const src = variant === "dark" ? "/brand/tournal-mark-dark.jpg" : "/brand/tournal-mark-gold.jpg";
+  // Version the URL so clients that received the earlier LFS pointer refresh
+  // the actual image immediately after the logo delivery fix.
+  const src = variant === "dark" ? "/brand/tournal-mark-dark.jpg?v=20260823" : "/brand/tournal-mark-gold.jpg?v=20260823";
   return <img src={src} alt={decorative ? "" : "Tournal"} aria-hidden={decorative || undefined}
     draggable={false} className={className} style={{ objectFit:"contain" }} />;
 }
