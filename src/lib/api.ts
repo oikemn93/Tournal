@@ -342,6 +342,64 @@ export async function validateAppSession(boutiqueId: string) {
   return dataRequest<boolean>("rpc/validate_app_session", { method:"POST", body:JSON.stringify({ p_boutique_id:boutiqueId }) }, false);
 }
 
+type BoutiqueUserScope = {
+  users: Array<Record<string, any>>;
+  assignments: Array<Record<string, any>>;
+};
+
+// A boutique snapshot only needs its own staff profiles. Keeping this short
+// cache avoids a second identical request when the non-blocking Admin data is
+// hydrated just after the business snapshot.
+const boutiqueUserScopeCache = new Map<string, { expiresAt: number; value: BoutiqueUserScope }>();
+const BOUTIQUE_USER_SCOPE_CACHE_MS = 60_000;
+
+async function loadBoutiqueUserScope(boutiqueId: string): Promise<BoutiqueUserScope> {
+  const cached = boutiqueUserScopeCache.get(boutiqueId);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+
+  const bid = encodeURIComponent(boutiqueId);
+  const assignments = await dataRequest<Array<Record<string, any>>>(
+    `boutique_assignments?select=boutique_id,user_id,role,droits&boutique_id=eq.${bid}`,
+  );
+  const profileIds = [...new Set([
+    ...assignments.map((assignment) => String(assignment.user_id ?? "")).filter(Boolean),
+    getCurrentAuthUser()?.id ?? "",
+  ])];
+  const users = profileIds.length
+    ? await dataRequest<Array<Record<string, any>>>(
+      `platform_users?select=id,phone,nom,initials,color,is_super_admin,is_suspended,suspension_reason,suspended_at,group_id,is_compte_mere,must_change_password${syncInFilter("id", profileIds)}`,
+    )
+    : [];
+  const value = { users, assignments };
+  boutiqueUserScopeCache.set(boutiqueId, { expiresAt: Date.now() + BOUTIQUE_USER_SCOPE_CACHE_MS, value });
+  return value;
+}
+
+/** Loads only the active boutique's staff for the boutique administration UI. */
+export async function loadBoutiquePlatformUsers<T>(boutiqueId: string): Promise<T> {
+  const { users, assignments } = await loadBoutiqueUserScope(boutiqueId);
+  const toRole = (role: string) => role === "owner" ? "Propriétaire" : role === "manager" ? "Manager" : "Vendeur";
+  return users.map((user) => ({
+    id: user.id,
+    phone: user.phone,
+    nom: user.nom,
+    initials: user.initials,
+    color: user.color,
+    isSuperAdmin: user.is_super_admin,
+    isSuspended: user.is_suspended === true,
+    suspensionReason: user.suspension_reason ?? undefined,
+    suspendedAt: user.suspended_at ?? undefined,
+    groupeId: user.group_id ?? undefined,
+    isCompteMere: user.is_compte_mere ?? undefined,
+    mustChangePassword: user.must_change_password === true,
+    assignments: assignments.filter((assignment) => assignment.user_id === user.id).map((assignment) => ({
+      boutiqueId: assignment.boutique_id,
+      role: toRole(assignment.role),
+      droits: assignment.droits ?? {},
+    })),
+  })) as T;
+}
+
 export async function getPinStatus() {
   return dataRequest<{ configured:boolean; lockedUntil?:string|null }>(
     "rpc/get_pin_status", { method:"POST", body:JSON.stringify({}) },
@@ -657,7 +715,7 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string): Promise<T | n
     const bid = encodeURIComponent(boutiqueId);
     const boutiqueFilter = `&id=eq.${bid}`;
     const scoped = (column = "boutique_id") => `&${column}=eq.${bid}`;
-    const [boutiques, categories, products, entries, clients, suppliers, invoices, payments, advances, charges, sessions, users, auditLogs] = await Promise.all([
+    const [boutiques, categories, products, entries, clients, suppliers, invoices, payments, advances, charges, sessions, auditLogs, userScope] = await Promise.all([
       dataRequest<any[]>(`boutiques?select=*${boutiqueFilter}&order=nom.asc`),
       dataRequest<any[]>(`categories?select=*${scoped()}`), dataRequest<any[]>(`products?select=*${scoped()}`),
       dataRequestAll<any>(`stock_entries?select=*${scoped()}`, "entry_date.desc,id.desc"), dataRequest<any[]>(`clients?select=*${scoped()}`),
@@ -665,12 +723,13 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string): Promise<T | n
       dataRequest<any[]>(`invoices?select=*,invoice_lines(*)${scoped()}`),
       dataRequest<any[]>(`invoice_payments?select=*${scoped()}&order=paid_at.asc`), dataRequest<any[]>(`client_advances?select=*${scoped()}&order=paid_at.desc,id.desc`), dataRequest<any[]>(`charges?select=*${scoped()}`),
       dataRequest<any[]>(`caisse_sessions?select=*${scoped()}`),
-      dataRequest<any[]>("platform_users?select=id,nom,initials,color"),
       // The administration view presents recent activity. Loading the entire
       // audit trail at every login or Realtime event was the largest avoidable
       // payload in production.
       dataRequest<any[]>(`audit_log?select=*${scoped()}&order=created_at.desc&limit=200`),
+      loadBoutiqueUserScope(boutiqueId),
     ]);
+    const users = userScope.users;
     const userById = new Map(users.map((u: any) => [u.id, u]));
     const categoryById = new Map(categories.map((category: any) => [category.id, category]));
     const clientById = new Map(clients.map((client: any) => [client.id, client]));
@@ -867,6 +926,24 @@ function parseBoutiqueSyncEvent(value: unknown): BoutiqueSyncEvent | null {
   return event as BoutiqueSyncEvent;
 }
 
+function realtimeErrorText(error: unknown) {
+  const visited = new Set<unknown>();
+  const collect = (value: unknown): string[] => {
+    if (typeof value === "string") return [value];
+    if (!value || typeof value !== "object" || visited.has(value)) return [];
+    visited.add(value);
+    const record = value as Record<string, unknown>;
+    return [record.message, record.reason, record.code, record.details, record.cause]
+      .flatMap((part) => typeof part === "string" ? [part] : collect(part));
+  };
+  return collect(error).join(" ").toLowerCase();
+}
+
+function isRealtimeAuthorizationError(error: unknown) {
+  const text = realtimeErrorText(error);
+  return /unauthori[sz]ed|forbidden|permission denied|not authorized|jwt|auth/i.test(text);
+}
+
 /**
  * V2 receives one small, private database event per changed record and batches
  * it in the browser. It deliberately does not carry business rows over the
@@ -875,6 +952,7 @@ function parseBoutiqueSyncEvent(value: unknown): BoutiqueSyncEvent | null {
 export function subscribeToBoutiqueSync(
   boutiqueId: string,
   onEvents: (events: BoutiqueSyncEvent[], reason: "events" | "reconnect") => void,
+  onAuthorizationDenied?: () => void,
 ) {
   const session = readSession();
   if (!session?.access_token || !boutiqueId) return () => undefined;
@@ -889,6 +967,8 @@ export function subscribeToBoutiqueSync(
 
     let timer: ReturnType<typeof setTimeout> | null = null;
     let hasSubscribed = false;
+    let stopped = false;
+    let validatingAuthorization = false;
     let pending: BoutiqueSyncEvent[] = [];
     const flush = (reason: "events" | "reconnect") => {
       if (timer) return;
@@ -899,6 +979,35 @@ export function subscribeToBoutiqueSync(
         onEvents(events, reason);
       }, 80);
     };
+    const stopAuthorizationRetries = (error: unknown) => {
+      if (stopped) return;
+      stopped = true;
+      if (timer) clearTimeout(timer);
+      timer = null;
+      pending = [];
+      window.removeEventListener("tournal:session-refreshed", refreshRealtimeAuth);
+      console.warn(`Realtime Sync v2 refusé pour la boutique ${boutiqueId}; canal suspendu jusqu'au prochain déverrouillage.`, error);
+      void realtimeClient.removeChannel(channel);
+      onAuthorizationDenied?.();
+    };
+    const handleChannelFailure = async (status: string, error: unknown) => {
+      if (stopped || validatingAuthorization) return;
+      const explicitAuthorizationFailure = isRealtimeAuthorizationError(error);
+      if (!explicitAuthorizationFailure && status !== "CHANNEL_ERROR" && status !== "TIMED_OUT") return;
+      validatingAuthorization = true;
+      try {
+        // Realtime exposes the concrete join error on recent clients. If an
+        // intermediary hides it, confirm the app-session gate before stopping
+        // retries. Network failures leave the channel's normal retry intact.
+        const appSessionIsValid = explicitAuthorizationFailure ? false : await validateAppSession(boutiqueId);
+        if (explicitAuthorizationFailure || !appSessionIsValid) stopAuthorizationRetries(error);
+      } catch {
+        // A failed validation can be an offline connection; do not mistake it
+        // for a permission failure and unnecessarily stop a healthy retry.
+      } finally {
+        validatingAuthorization = false;
+      }
+    };
     const channel = realtimeClient
       .channel(`tournal:v2:${boutiqueId}`, { config: { private: true } })
       .on("broadcast", { event: "sync" }, (message: { payload?: unknown }) => {
@@ -907,13 +1016,15 @@ export function subscribeToBoutiqueSync(
         pending.push(event);
         flush("events");
       })
-      .subscribe((status) => {
+      .subscribe((status, error) => {
+        if (stopped) return;
         if (status === "SUBSCRIBED") {
           if (hasSubscribed) flush("reconnect");
           hasSubscribed = true;
         }
         if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-          console.warn(`Realtime Sync v2 ${status.toLowerCase()} pour la boutique ${boutiqueId}`);
+          console.warn(`Realtime Sync v2 ${status.toLowerCase()} pour la boutique ${boutiqueId}`, error);
+          void handleChannelFailure(status, error);
         }
       });
     return () => {
@@ -937,6 +1048,7 @@ const syncDate = (value?: string | null) => value ? new Date(value).toLocaleDate
 /** Reads the smallest canonical slices needed by the batched v2 event. */
 export async function loadBoutiqueSyncPatch(boutiqueId: string, sourceEvents: BoutiqueSyncEvent[]): Promise<BoutiqueSyncPatch> {
   const events = sourceEvents.filter(event => event && event.entity_id);
+  if (events.some(event => event.entity_type === "assignment")) boutiqueUserScopeCache.delete(boutiqueId);
   const deleted: BoutiqueSyncPatch["deleted"] = {};
   const ids = (entity: BoutiqueSyncEntity, includeDeleted = false) => {
     const relevant = events.filter(event => event.entity_type === entity);

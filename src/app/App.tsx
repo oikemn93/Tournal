@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { checkBackend, signQZ, sendInvoiceEmail, storePDFForSMS, getCurrentAuthUser, hasAuthenticatedSession, validateServerSession, refreshSessionIfNeeded, getAuthBootstrap, signInWithPhone, changeOwnPassword, getPinStatus, setQuickPin, verifyQuickPin, startAppSession, validateAppSession, lockAppSession, setAppSessionRecoveryHandler, signOut as signOutFromSupabase, createBoutique, createUser, resetUserPassword, subscribeToBoutiqueChanges, subscribeToBoutiqueSync, isBoutiqueSyncV2Enabled, assignUserToBoutique, unassignUserFromBoutique, upsertAssignmentDirect, deleteAssignmentDirect, recordAuditLog, loadBoutiqueSnapshot, loadBoutiqueSyncPatch, loadPlatformUsers, loadGroupes, saveGroupes, loadAuthSettings as loadStoredAuthSettings, saveAuthSettings, updateBoutiqueProfile, type BoutiqueSyncEvent, type BoutiqueSyncPatch, type LegacyBoutiqueChange } from "../lib/api";
+import { checkBackend, signQZ, sendInvoiceEmail, storePDFForSMS, getCurrentAuthUser, hasAuthenticatedSession, validateServerSession, refreshSessionIfNeeded, getAuthBootstrap, signInWithPhone, changeOwnPassword, getPinStatus, setQuickPin, verifyQuickPin, startAppSession, validateAppSession, lockAppSession, setAppSessionRecoveryHandler, signOut as signOutFromSupabase, createBoutique, createUser, resetUserPassword, subscribeToBoutiqueChanges, subscribeToBoutiqueSync, isBoutiqueSyncV2Enabled, assignUserToBoutique, unassignUserFromBoutique, upsertAssignmentDirect, deleteAssignmentDirect, recordAuditLog, loadBoutiqueSnapshot, loadBoutiqueSyncPatch, loadBoutiquePlatformUsers, loadPlatformUsers, loadGroupes, saveGroupes, loadAuthSettings as loadStoredAuthSettings, saveAuthSettings, updateBoutiqueProfile, type BoutiqueSyncEvent, type BoutiqueSyncPatch, type LegacyBoutiqueChange } from "../lib/api";
 import { getNotifications, markNotificationRead, markAllNotificationsRead, dismissAllNotifications, subscribeToNotifications, getPushState, enableWebPush, disableWebPush, syncWebPushBoutique, type PushState } from "../lib/notifications";
 import { toast, Toaster } from "sonner";
 import {
@@ -8880,9 +8880,17 @@ export default function App() {
       void checkBackend().then(setBackendOk).catch(()=>setBackendOk(false));
       // These administration-only collections are non-blocking. The cashier
       // can use the shop as soon as the business snapshot is available.
-      void Promise.all([loadPlatformUsers<PlatformUser[]>(), loadGroupes<Groupe[]>()])
+      void Promise.all([loadBoutiquePlatformUsers<PlatformUser[]>(boutiqueId), loadGroupes<Groupe[]>()])
         .then(([users, groups]) => {
-          if (users.length) setPlatformUsers(users);
+          if (users.length) {
+            // The authenticated profile already carries all of its own shop
+            // assignments from the login bootstrap. Preserve them while the
+            // scoped request supplies only colleagues of this boutique.
+            const authenticatedUser = currentUserRef.current;
+            setPlatformUsers(users.map((user) => user.id === authenticatedUser?.id
+              ? { ...user, assignments: authenticatedUser.assignments }
+              : user));
+          }
           setGroupes(groups);
         }).catch(() => undefined);
     } catch (error) {
@@ -9110,9 +9118,17 @@ export default function App() {
         void pullRemote();
       });
     };
+    const onRealtimeAuthorizationDenied = () => {
+      // A rejected private channel means the server app-session is locked or
+      // expired. Stop the socket now; successful PIN authentication clears
+      // `locked` and this effect then creates one fresh channel.
+      try { sessionStorage.setItem(APP_LOCK_KEY, "1"); } catch {}
+      setLocked(true);
+      toast.message("Session verrouillée. Déverrouillez-la pour reprendre la synchronisation.");
+    };
     const useSyncV2 = boutiqueSyncProtocol?.boutiqueId === activeBoutiqueId && boutiqueSyncProtocol.version === "v2";
     const unsubscribe = useSyncV2
-      ? subscribeToBoutiqueSync(activeBoutiqueId ?? "", (events, reason) => { void processBoutiqueSyncEvents(events, reason); })
+      ? subscribeToBoutiqueSync(activeBoutiqueId ?? "", (events, reason) => { void processBoutiqueSyncEvents(events, reason); }, onRealtimeAuthorizationDenied)
       : subscribeToBoutiqueChanges(activeBoutiqueId ?? "", (changes, reason) => { void processLegacyBoutiqueChanges(changes, reason); });
     document.addEventListener("visibilitychange", onVisible);
     return () => { unsubscribe(); document.removeEventListener("visibilitychange", onVisible); };
