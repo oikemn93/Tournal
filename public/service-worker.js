@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tournal-shell-v3';
+const CACHE_NAME = 'tournal-shell-v4';
 const APP_SHELL = ['/', '/manifest.webmanifest'];
 
 self.addEventListener('install', (event) => {
@@ -53,8 +53,8 @@ self.addEventListener('push', (event) => {
   const title = payload.title || 'Tournal';
   const options = {
     body: payload.body || 'Nouvelle notification',
-    icon: payload.icon || '/icon-192.png',
-    badge: payload.badge || '/icon-192.png',
+    icon: payload.icon || '/brand/tournal-mark-dark.jpg',
+    badge: payload.badge || '/brand/tournal-mark-dark.jpg',
     tag: payload.tag || `tournal-${Date.now()}`,
     data: payload.data || { url: '/' },
     renotify: false,
