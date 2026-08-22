@@ -17,14 +17,17 @@ function normalizePhone(value?: string): string {
   return (value ?? "").replace(/\D/g, "");
 }
 
-export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser, onUpdate, logAction, initialTab, onOpenInvoice, onCreateInvoice }: {
+export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser, onUpdate, logAction, initialTab, canCreateOrder = false, canCollectPayment = false, canOpenInvoice = false, onOpenInvoice, onCreateOrder }: {
   boutique: Boutique; allBoutiques: Boutique[]; platformUsers: PlatformUser[];
   currentUser: PlatformUser;
   onUpdate: (u: Partial<Boutique>) => void;
   logAction: (action: string, detail: string, icon: string) => void;
   initialTab?: ClientType;
+  canCreateOrder?: boolean;
+  canCollectPayment?: boolean;
+  canOpenInvoice?: boolean;
   onOpenInvoice: (invoiceId: string) => void;
-  onCreateInvoice: (client: Client) => void;
+  onCreateOrder: (client: Client) => void;
 }) {
   const { clients } = boutique;
   const canCreateB2B = currentUser.isSuperAdmin;
@@ -185,14 +188,14 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
               <span className="text-xs px-2 py-0.5 rounded-full font-bold mt-1 inline-block" style={{ background:CC+"22",color:CC }}>{c.type}</span>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-2 mt-4">
-            <button onClick={()=>onCreateInvoice(c)} className="py-3 rounded-xl text-xs font-black flex items-center justify-center gap-2" style={{ background:CC, color:"#fff" }}>
-              <FilePlus size={15}/> Nouvelle facture
-            </button>
-            <button onClick={()=>{setPaymentAmount(String(totalImpayé));setPaymentModal(true);}} disabled={totalImpayé<=0} className="py-3 rounded-xl text-xs font-black flex items-center justify-center gap-2 disabled:opacity-40" style={{ background:SEM.success.bg, color:SEM.success.accent }}>
+          {(canCreateOrder || canCollectPayment) && <div className={`grid gap-2 mt-4 ${canCreateOrder && canCollectPayment ? "grid-cols-2" : "grid-cols-1"}`}>
+            {canCreateOrder && <button onClick={()=>onCreateOrder(c)} className="py-3 rounded-xl text-xs font-black flex items-center justify-center gap-2" style={{ background:CC, color:"#fff" }}>
+              <FilePlus size={15}/> Nouvelle commande
+            </button>}
+            {canCollectPayment && <button onClick={()=>{setPaymentAmount(String(totalImpayé));setPaymentModal(true);}} disabled={totalImpayé<=0} className="py-3 rounded-xl text-xs font-black flex items-center justify-center gap-2 disabled:opacity-40" style={{ background:SEM.success.bg, color:SEM.success.accent }}>
               <Wallet size={15}/> Versement
-            </button>
-          </div>
+            </button>}
+          </div>}
         </div>
         {/* KPIs */}
         <div className="grid grid-cols-2 gap-2">
@@ -251,7 +254,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
               const isReturn=inv.type==="Retour";
               const paid = invoicePaidAmount(inv);
               const remaining = invoiceRemainingAmount(inv);
-              return <button type="button" onClick={()=>onOpenInvoice(inv.id)} key={inv.id} className="w-full bg-card rounded-2xl p-3.5 border border-border flex items-center gap-3 text-left active:scale-[0.99]">
+              const content = <>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <p className="text-xs font-black text-muted-foreground">{inv.id}</p>
@@ -266,8 +269,11 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
                   {paid>0&&<p className="text-xs font-semibold" style={{ color:SEM.success.accent }}>✓ {fmt(paid)}</p>}
                   {remaining>0&&<p className="text-xs font-semibold" style={{ color:SEM.warning.accent }}>⏳ {fmt(remaining)}</p>}
                 </div>
-                <ChevronRight size={15} className="text-muted-foreground"/>
-              </button>;
+                {canOpenInvoice&&<ChevronRight size={15} className="text-muted-foreground"/>}
+              </>;
+              return canOpenInvoice
+                ? <button type="button" onClick={()=>onOpenInvoice(inv.id)} key={inv.id} className="w-full bg-card rounded-2xl p-3.5 border border-border flex items-center gap-3 text-left active:scale-[0.99]">{content}</button>
+                : <div key={inv.id} className="w-full bg-card rounded-2xl p-3.5 border border-border flex items-center gap-3 text-left">{content}</div>;
             })}
           </div>
         </div>

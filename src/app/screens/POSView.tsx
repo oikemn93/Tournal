@@ -11,9 +11,11 @@ import { SubmitBtn } from "../components/SubmitBtn";
 import { createSale, recordPayment, cancelPendingInvoice } from "../../lib/api";
 import { getDefaultSaleUnit, getLastSalePrice, getSaleUnitOptions, toBaseSaleQty } from "../utils/sales";
 
-export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente = false, onUpdate, logAction }: {
+export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente = false, initialClientId, onInitialClientPrepared, onUpdate, logAction }: {
   boutique: Boutique; allBoutiques: Boutique[]; currentUser: PlatformUser;
   canEncaissVente?: boolean;
+  initialClientId?: number;
+  onInitialClientPrepared?: () => void;
   onUpdate: (u: Partial<Boutique>) => void;
   logAction: (action: string, detail: string, icon: string) => void;
 }) {
@@ -62,12 +64,27 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [clientNom, setClientNom] = useState("");
   const [clientTel, setClientTel] = useState("+221 ");
+  const [selectedClientId, setSelectedClientId] = useState<number|undefined>();
   const [done, setDone] = useState(false);
   const [lastInv, setLastInv] = useState<Invoice|null>(null);
   const [posTab, setPosTab] = useState<"produits"|"commandes">("produits");
   const [submittingOrder, setSubmittingOrder] = useState(false);
   const [printJob, setPrintJob] = useState<{status:"printing"|"ok"|"fail"|"fallback";html:string;label:string}|null>(null);
   const [cancelBusy, setCancelBusy] = useState<string|null>(null); // invoiceId en cours d'annulation
+
+  // A known client can start a command from their card without opening the
+  // invoice screen. Keep the canonical ID so the command is attached to the
+  // correct client even if another customer has the same name.
+  useEffect(() => {
+    if (initialClientId == null) return;
+    const client = boutique.clients.find(item => item.id === initialClientId);
+    if (client) {
+      setClientNom(client.nom);
+      setClientTel(client.tel || "+221 ");
+      setSelectedClientId(client.id);
+    }
+    onInitialClientPrepared?.();
+  }, [initialClientId, boutique.clients, onInitialClientPrepared]);
 
   // Auto-connect QZ Tray if configured
   useEffect(()=>{ if (boutique.autoPrint && boutique.printerName && PA.status==="idle") connectQZ(boutique.printerName); },[]);
@@ -257,7 +274,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
   }
 
   function resetCheckout() {
-    setCart([]); setClientNom(""); setClientTel("+221 ");
+    setCart([]); setClientNom(""); setClientTel("+221 "); setSelectedClientId(undefined);
     setCheckoutOpen(false); setDone(false); setLastInv(null);
   }
 
@@ -267,9 +284,9 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
     const orderLines = cart.map(i => ({ productId: i.productId, nom: i.nom, qty: i.qty, unit: i.unit, prixUnit: i.prixUnit, sellUnit: i.sellUnit, sellQty: i.sellQty }));
     setSubmittingOrder(true);
     try {
-      const saved = await createSale({ boutiqueId:boutique.id, client, clientTel:clientTel.trim() || undefined, lines:orderLines });
+      const saved = await createSale({ boutiqueId:boutique.id, clientId:selectedClientId, client, clientTel:clientTel.trim() || undefined, lines:orderLines });
       const newInv: Invoice = {
-        id:saved.invoice_id, client, clientTel:clientTel.trim() || undefined, lines:orderLines,
+        id:saved.invoice_id, clientId:saved.client_id ?? selectedClientId, client, clientTel:clientTel.trim() || undefined, lines:orderLines,
         montant:saved.total, acompte:0, date:today(), dateRaw:new Date().toISOString(),
         status:"en attente", type:"vente", operatorNom:currentUser.nom, operatorColor:currentUser.color,
       };
@@ -570,10 +587,10 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
               <span className="text-xs text-muted-foreground">Opérateur : <span className="font-semibold text-foreground">{currentUser.nom}</span></span>
             </div>
             <Field label="NOM DU CLIENT (optionnel)" color={POS_COLOR}>
-              <input value={clientNom} onChange={e=>setClientNom(e.target.value)} placeholder="Client comptoir" className={inputCls} onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();(e.currentTarget.closest("div")?.nextElementSibling?.querySelector("input") as HTMLInputElement|null)?.focus();}}}/>
+              <input value={clientNom} onChange={e=>{setClientNom(e.target.value);setSelectedClientId(undefined);}} placeholder="Client comptoir" className={inputCls} onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();(e.currentTarget.closest("div")?.nextElementSibling?.querySelector("input") as HTMLInputElement|null)?.focus();}}}/>
             </Field>
             <Field label="TÉLÉPHONE (optionnel)" color={POS_COLOR}>
-              <input value={clientTel} onChange={e=>{ const v=e.target.value; setClientTel(v.startsWith("+221 ")?v:"+221 "); }} placeholder="+221 77 000 0000" className={inputCls} onKeyDown={e=>e.key==="Enter"&&checkout()}/>
+              <input value={clientTel} onChange={e=>{ const v=e.target.value; setClientTel(v.startsWith("+221 ")?v:"+221 "); setSelectedClientId(undefined); }} placeholder="+221 77 000 0000" className={inputCls} onKeyDown={e=>e.key==="Enter"&&checkout()}/>
             </Field>
             <button disabled={submittingOrder || cart.length===0} onClick={checkout} className="w-full py-4 rounded-2xl font-black text-base flex items-center justify-center gap-2 active:scale-95 disabled:opacity-60" style={{ background:POS_COLOR, color:"#fff", fontFamily:"'Nunito', sans-serif" }}>
               <ClipboardList size={18}/> {submittingOrder ? "Enregistrement…" : "Enregistrer la commande"}
