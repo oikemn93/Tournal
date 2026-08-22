@@ -1104,8 +1104,9 @@ const LOGIN_MAX_ATTEMPTS = 5;      // failed tries before the device locks
 const LOGIN_LOCK_MS = 2 * 60_000;  // lockout duration (mirrors auth_settings.lock_minutes default)
 const LOGIN_LOCK_KEY = "tournal:login_lock";
 
-function TournalLogo({ className = "w-20 h-20", decorative = true }: { className?: string; decorative?: boolean }) {
-  return <img src="/brand/tournal-mark-gold.jpg" alt={decorative ? "" : "Tournal"} aria-hidden={decorative || undefined}
+function TournalLogo({ className = "w-20 h-20", decorative = true, variant = "gold" }: { className?: string; decorative?: boolean; variant?: "gold" | "dark" }) {
+  const src = variant === "dark" ? "/brand/tournal-mark-dark.jpg" : "/brand/tournal-mark-gold.jpg";
+  return <img src={src} alt={decorative ? "" : "Tournal"} aria-hidden={decorative || undefined}
     draggable={false} className={className} style={{ objectFit:"contain" }} />;
 }
 
@@ -9464,7 +9465,7 @@ export default function App() {
     return createPortal(
       <div className="fixed inset-0 z-[500] flex flex-col items-center justify-center" style={{ background:"rgba(0,0,0,0.92)", backdropFilter:"blur(12px)" }}>
         <div className="flex flex-col items-center gap-6 px-8 py-10 rounded-3xl" style={{ background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)", maxWidth:"340px", width:"100%" }}>
-          <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-2xl font-black" style={{ background:currentUser.color+"22", color:currentUser.color, fontFamily:"'Nunito', sans-serif" }}>{currentUser.initials}</div>
+          <TournalLogo variant="dark" className="w-16 h-16 rounded-2xl" decorative={false}/>
           <div className="text-center">
             <p className="text-white font-black text-xl" style={{ fontFamily:"'Nunito', sans-serif" }}>{currentUser.nom}</p>
             <p className="text-sm mt-1" style={{ color:"rgba(255,255,255,0.55)" }}>Session verrouillée · Saisissez votre PIN rapide</p>
