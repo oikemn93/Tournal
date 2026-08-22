@@ -94,6 +94,7 @@ export function buildInvoicePDFHtml(inv: Invoice, boutique: Boutique, clients: C
   const invoiceBoutiqueAdresse = inv.boutiqueAdresseSnapshot ?? boutique.adresse;
   const invoiceBoutiqueTel = inv.boutiqueTelSnapshot ?? boutique.tel;
   const invoiceBoutiqueEmail = inv.boutiqueEmailSnapshot ?? boutique.email;
+  const invoiceBoutiqueLogo = /^data:image\/(?:png|jpeg|webp);base64,/i.test(boutique.logo ?? "") ? boutique.logo : null;
   const invoiceClientAdresse = inv.clientAdresseSnapshot ?? clientRecord?.adresse;
   const invoiceClientEmail = inv.clientEmailSnapshot ?? clientRecord?.email;
   const invoiceClientVille = inv.clientVilleSnapshot ?? clientRecord?.ville;
@@ -114,6 +115,8 @@ export function buildInvoicePDFHtml(inv: Invoice, boutique: Boutique, clients: C
   body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 9.5pt; color: #1a1a1a; background: #fff; line-height: 1.5; }
   .page { width: 100%; }
   .header { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 8mm; border-bottom: 2px solid ${accent}; margin-bottom: 8mm; }
+  .brand { display: flex; align-items: center; gap: 4mm; }
+  .brand-logo { display: block; width: 21mm; height: 21mm; object-fit: contain; flex: 0 0 auto; }
   .brand-name { font-size: 18pt; font-weight: 900; color: ${accent}; letter-spacing: -0.5px; }
   .brand-meta { font-size: 8pt; color: #555; margin-top: 3px; line-height: 1.6; }
   .inv-meta { text-align: right; }
@@ -162,12 +165,15 @@ export function buildInvoicePDFHtml(inv: Invoice, boutique: Boutique, clients: C
 <body>
 <div class="page">
   <div class="header">
-    <div>
-      <div class="brand-name">${invoiceBoutiqueNom}</div>
-      <div class="brand-meta">
-        ${invoiceBoutiqueAdresse ? invoiceBoutiqueAdresse + "<br/>" : ""}
-        ${invoiceBoutiqueTel ? "Tél : " + invoiceBoutiqueTel + "<br/>" : ""}
-        ${invoiceBoutiqueEmail ? invoiceBoutiqueEmail : ""}
+    <div class="brand">
+      ${invoiceBoutiqueLogo ? `<img class="brand-logo" src="${invoiceBoutiqueLogo}" alt=""/>` : ""}
+      <div>
+        <div class="brand-name">${invoiceBoutiqueNom}</div>
+        <div class="brand-meta">
+          ${invoiceBoutiqueAdresse ? invoiceBoutiqueAdresse + "<br/>" : ""}
+          ${invoiceBoutiqueTel ? "Tél : " + invoiceBoutiqueTel + "<br/>" : ""}
+          ${invoiceBoutiqueEmail ? invoiceBoutiqueEmail : ""}
+        </div>
       </div>
     </div>
     <div class="inv-meta">
@@ -267,6 +273,17 @@ export async function generateInvoicePDFBlob(inv: Invoice, boutique: Boutique, c
     doc.write(hardenGeneratedHtml(buildInvoicePDFHtml(inv, boutique, clients)));
     doc.close();
     await new Promise(resolve => setTimeout(resolve, 120));
+    await Promise.all(Array.from(doc.images).map((image) => image.complete
+      ? Promise.resolve()
+      : new Promise<void>((resolve) => {
+        const timeout = window.setTimeout(resolve, 1000);
+        const settle = () => {
+          window.clearTimeout(timeout);
+          resolve();
+        };
+        image.addEventListener("load", settle, { once:true });
+        image.addEventListener("error", settle, { once:true });
+      })));
     if (doc.fonts?.ready) await doc.fonts.ready;
     doc.body.style.width = "794px";
     doc.body.style.minHeight = "1123px";

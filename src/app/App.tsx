@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { checkBackend, signQZ, sendInvoiceEmail, storePDFForSMS, getCurrentAuthUser, hasAuthenticatedSession, validateServerSession, refreshSessionIfNeeded, getAuthBootstrap, signInWithPhone, changeOwnPassword, getPinStatus, setQuickPin, verifyQuickPin, startAppSession, validateAppSession, lockAppSession, setAppSessionRecoveryHandler, signOut as signOutFromSupabase, createBoutique, createUser, resetUserPassword, subscribeToBoutiqueChanges, subscribeToBoutiqueSync, isBoutiqueSyncV2Enabled, assignUserToBoutique, unassignUserFromBoutique, upsertAssignmentDirect, deleteAssignmentDirect, recordAuditLog, loadBoutiqueSnapshot, loadBoutiqueSyncPatch, loadPlatformUsers, loadGroupes, saveGroupes, loadAuthSettings as loadStoredAuthSettings, saveAuthSettings, type BoutiqueSyncEvent, type BoutiqueSyncPatch, type LegacyBoutiqueChange } from "../lib/api";
+import { checkBackend, signQZ, sendInvoiceEmail, storePDFForSMS, getCurrentAuthUser, hasAuthenticatedSession, validateServerSession, refreshSessionIfNeeded, getAuthBootstrap, signInWithPhone, changeOwnPassword, getPinStatus, setQuickPin, verifyQuickPin, startAppSession, validateAppSession, lockAppSession, setAppSessionRecoveryHandler, signOut as signOutFromSupabase, createBoutique, createUser, resetUserPassword, subscribeToBoutiqueChanges, subscribeToBoutiqueSync, isBoutiqueSyncV2Enabled, assignUserToBoutique, unassignUserFromBoutique, upsertAssignmentDirect, deleteAssignmentDirect, recordAuditLog, loadBoutiqueSnapshot, loadBoutiqueSyncPatch, loadPlatformUsers, loadGroupes, saveGroupes, loadAuthSettings as loadStoredAuthSettings, saveAuthSettings, updateBoutiqueProfile, type BoutiqueSyncEvent, type BoutiqueSyncPatch, type LegacyBoutiqueChange } from "../lib/api";
 import { getNotifications, markNotificationRead, markAllNotificationsRead, dismissAllNotifications, subscribeToNotifications, getPushState, enableWebPush, disableWebPush, syncWebPushBoutique, type PushState } from "../lib/notifications";
 import { toast, Toaster } from "sonner";
 import {
@@ -1104,22 +1104,9 @@ const LOGIN_MAX_ATTEMPTS = 5;      // failed tries before the device locks
 const LOGIN_LOCK_MS = 2 * 60_000;  // lockout duration (mirrors auth_settings.lock_minutes default)
 const LOGIN_LOCK_KEY = "tournal:login_lock";
 
-const TOURNAL_BRAND = {
-  wordmark: "/brand/tournal-wordmark.jpg",
-  softMark: "/brand/tournal-mark-soft.jpg",
-  goldMark: "/brand/tournal-mark-gold.jpg",
-  darkMark: "/brand/tournal-mark-dark.jpg",
-} as const;
-
-function TournalWordmark({ className = "w-48 h-12" }: { className?: string }) {
-  return <div role="img" aria-label="Tournal" className={`${className} overflow-hidden`}
-    style={{ backgroundImage:`url(${TOURNAL_BRAND.wordmark})`, backgroundRepeat:"no-repeat", backgroundSize:"115% auto", backgroundPosition:"center 50%" }} />;
-}
-
-function TournalMark({ variant, className = "w-16 h-16" }: { variant: "soft"|"gold"|"dark"; className?: string }) {
-  const src = variant === "soft" ? TOURNAL_BRAND.softMark : variant === "gold" ? TOURNAL_BRAND.goldMark : TOURNAL_BRAND.darkMark;
-  return <img src={src} alt="" aria-hidden="true" draggable={false} className={className}
-    style={{ objectFit:"cover" }} />;
+function TournalLogo({ className = "w-20 h-20", decorative = true }: { className?: string; decorative?: boolean }) {
+  return <img src="/brand/tournal-mark-gold.jpg" alt={decorative ? "" : "Tournal"} aria-hidden={decorative || undefined}
+    draggable={false} className={className} style={{ objectFit:"contain" }} />;
 }
 
 function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void | Promise<void> }) {
@@ -1170,8 +1157,8 @@ function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void | Promis
 
   return <div className="bg-background text-foreground min-h-screen flex items-center justify-center px-6" style={{fontFamily:"'Inter', sans-serif"}}>
     <div className="w-full max-w-md rounded-3xl border bg-card p-6 space-y-5 shadow-sm">
-      <div className="flex flex-col items-center gap-1"><TournalWordmark className="w-52 h-14"/><p className="text-xs font-black tracking-[0.2em] uppercase" style={{color:"#C9A227"}}>Connexion sécurisée</p></div>
-      <div className="text-center"><h1 className="text-2xl font-black">Bienvenue</h1><p className="text-sm text-muted-foreground mt-2">Utilisez votre mot de passe. Le PIN sert uniquement au déverrouillage rapide d’une session déjà ouverte.</p></div>
+      <div className="flex justify-center"><TournalLogo className="w-24 h-24" decorative={false}/></div>
+      <div className="text-center"><h1 className="text-2xl font-black">Connexion Tournal</h1><p className="text-sm text-muted-foreground mt-2">Utilisez votre mot de passe. Le PIN sert uniquement au déverrouillage rapide d’une session déjà ouverte.</p></div>
       <div><label className="text-xs font-black mb-2 block tracking-wider" style={{color:"#C9A227"}}>NUMÉRO DE TÉLÉPHONE</label>
         <div className="relative"><Smartphone size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground"/><input value={phone} onChange={e=>{const v=e.target.value;setPhone(v.startsWith("+221 ")?v:"+221 ");setErr("");}} placeholder="+221 77 000 0000" type="tel" inputMode="tel" autoComplete="tel" enterKeyHint="next" disabled={isLocked||loading} className={inputCls+" pl-11"} onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();passwordRef.current?.focus();}}}/></div>
       </div>
@@ -1203,7 +1190,7 @@ function RequiredPasswordChangeScreen({ onComplete }: { onComplete: () => void |
 
   return <div className="bg-background text-foreground min-h-screen flex items-center justify-center px-6" style={{fontFamily:"'Inter', sans-serif"}}>
     <div className="w-full max-w-md rounded-3xl border bg-card p-6 space-y-5 shadow-sm">
-      <div className="w-16 h-16 rounded-2xl overflow-hidden flex items-center justify-center mx-auto" style={{background:"#fff"}}><TournalMark variant="soft" className="w-full h-full"/></div>
+      <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto" style={{background:"#C9A22722"}}><ShieldCheck size={32} style={{color:"#C9A227"}}/></div>
       <div className="text-center"><h1 className="text-2xl font-black">Créez votre mot de passe</h1><p className="text-sm text-muted-foreground mt-2">Le mot de passe transmis lors de la création du compte est temporaire. Remplacez-le avant de configurer votre PIN rapide.</p></div>
       <Field label="NOUVEAU MOT DE PASSE (12 CARACTÈRES MIN.)" color="#C9A227"><input value={password} onChange={e=>{setPassword(e.target.value);setError("");}} type={show?"text":"password"} className={inputCls} autoComplete="new-password" autoFocus/></Field>
       <Field label="CONFIRMER LE MOT DE PASSE" color="#C9A227"><input value={confirm} onChange={e=>{setConfirm(e.target.value);setError("");}} type={show?"text":"password"} className={inputCls} autoComplete="new-password" onKeyDown={e=>e.key==="Enter"&&submit()}/></Field>
@@ -1230,7 +1217,7 @@ function PinSetupScreen({ onComplete }: { onComplete: () => void | Promise<void>
   }
   return <div className="bg-background text-foreground min-h-screen flex items-center justify-center px-6" style={{fontFamily:"'Inter', sans-serif"}}>
     <div className="w-full max-w-md rounded-3xl border bg-card p-6 space-y-5 shadow-sm">
-      <div className="w-16 h-16 rounded-2xl overflow-hidden flex items-center justify-center mx-auto" style={{background:"#fff"}}><TournalMark variant="gold" className="w-full h-full"/></div>
+      <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto" style={{background:"#C9A22722"}}><Lock size={30} style={{color:"#C9A227"}}/></div>
       <div className="text-center"><h1 className="text-2xl font-black">Créez votre PIN rapide</h1><p className="text-sm text-muted-foreground mt-2">Choisissez 6 chiffres faciles à retenir pour déverrouiller rapidement cette session. Ce PIN ne remplace pas votre mot de passe.</p></div>
       <Field label="PIN (6 CHIFFRES)" color="#C9A227"><input value={pin} onChange={e=>{setPin(onlyDigits(e.target.value));setError("");}} type="password" inputMode="numeric" maxLength={6} className={inputCls+" text-center tracking-[0.5em] text-xl font-black"} autoFocus/></Field>
       <Field label="CONFIRMER LE PIN" color="#C9A227"><input value={confirm} onChange={e=>{setConfirm(onlyDigits(e.target.value));setError("");}} type="password" inputMode="numeric" maxLength={6} className={inputCls+" text-center tracking-[0.5em] text-xl font-black"} onKeyDown={e=>e.key==="Enter"&&submit()}/></Field>
@@ -1320,8 +1307,8 @@ function SuperAdminScreen({ boutiques, platformUsers, groupes, onEnterBoutique, 
   return (
     <div className="bg-background text-foreground h-screen flex flex-col overflow-hidden" style={{ fontFamily:"'Inter', sans-serif" }}>
       <header className="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
-        <div><div className="flex items-center gap-2 mb-1"><Shield size={14} style={{ color:"#C9A227" }}/><span className="text-xs text-muted-foreground font-semibold">Super Admin</span></div>
-          <TournalWordmark className="w-32 h-8"/></div>
+        <div><div className="flex items-center gap-2 mb-0.5"><Shield size={14} style={{ color:"#C9A227" }}/><span className="text-xs text-muted-foreground font-semibold">Super Admin</span></div>
+          <h1 className="text-2xl font-black" style={{ fontFamily:"'Nunito', sans-serif", color:"#C9A227" }}>Tournal</h1></div>
         <div className="flex items-center gap-2">
           <button onClick={onLogout} className="flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background:"#EEE9D8" }}>
             <LogOut size={16} className="text-muted-foreground"/><span className="text-sm text-muted-foreground">Quitter</span></button>
@@ -1653,11 +1640,7 @@ function BoutiqueSelectScreen({ user, boutiques, assignments, groupes, allUsers,
     : [];
   return (
     <div className="bg-background text-foreground min-h-screen flex flex-col" style={{ fontFamily:"'Inter', sans-serif" }}>
-      <div className="px-4 pt-7 pb-6 space-y-5">
-        <div className="flex items-center justify-between">
-          <TournalWordmark className="w-36 h-9"/>
-          <button onClick={onLogout} aria-label="Se déconnecter" className="p-2.5 rounded-xl" style={{ background:"#EEE9D8" }}><LogOut size={18} className="text-muted-foreground"/></button>
-        </div>
+      <div className="flex items-center justify-between px-4 pt-10 pb-6">
         <div className="flex items-center gap-3">
           {onBack && (
             <button onClick={onBack} className="w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0" style={{ background:"#EEE9D8" }}>
@@ -1667,6 +1650,7 @@ function BoutiqueSelectScreen({ user, boutiques, assignments, groupes, allUsers,
           <div className="w-12 h-12 rounded-2xl flex-shrink-0 flex items-center justify-center text-base font-black" style={{ background:user.color+"22", color:user.color, fontFamily:"'Nunito', sans-serif" }}>{user.initials}</div>
           <div><p className="font-bold">{user.nom}</p><p className="text-xs text-muted-foreground">{onBack ? "Changer de boutique" : "Choisissez votre boutique"}</p></div>
         </div>
+        <button onClick={onLogout} className="p-2.5 rounded-xl" style={{ background:"#EEE9D8" }}><LogOut size={18} className="text-muted-foreground"/></button>
       </div>
       <div className="flex-1 px-4 space-y-3 pb-6">
         {available.length === 0 && groupeBoutiques.length === 0 && (
@@ -6200,7 +6184,7 @@ function CatalogueSection({ boutique, onUpdate, logAction }: {
 
 // ─── PRINTER SECTION ─────────────────────────────────────────────────────────
 
-function BoutiqueInfoSection({ boutique, onUpdate }: { boutique: Boutique; onUpdate: (u: Partial<Boutique>) => void }) {
+function BoutiqueInfoSection({ boutique, onUpdate, logAction }: { boutique: Boutique; onUpdate: (u: Partial<Boutique>) => void; logAction: (action: string, detail: string, icon: string) => void }) {
   const [nom, setNom] = useState(boutique.nom);
   const [ville, setVille] = useState(boutique.ville ?? "");
   const [adresse, setAdresse] = useState(boutique.adresse ?? "");
@@ -6209,13 +6193,26 @@ function BoutiqueInfoSection({ boutique, onUpdate }: { boutique: Boutique; onUpd
   const [logo, setLogo] = useState<string | undefined>(boutique.logo);
   const [logoError, setLogoError] = useState("");
   const [logoUploading, setLogoUploading] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const logoInputRef = useRef<HTMLInputElement>(null);
 
-  function save() {
-    if (!nom.trim()) return;
-    onUpdate({ nom: nom.trim(), ville: ville.trim(), adresse: adresse.trim()||undefined, email: email.trim()||undefined, tel: tel.trim()||undefined, logo: logo ?? undefined });
-    setSaved(true); setTimeout(()=>setSaved(false), 2000);
+  async function save() {
+    if (!nom.trim() || saving) return;
+    setSaving(true);
+    setLogoError("");
+    const update = { nom: nom.trim(), ville: ville.trim(), adresse: adresse.trim() || undefined, email: email.trim() || undefined, tel: tel.trim() || undefined };
+    try {
+      await updateBoutiqueProfile({ boutiqueId:boutique.id, ...update, logo: logo ?? null });
+      onUpdate({ ...update, logo });
+      logAction("Profil boutique modifié", logo ? "Informations et logo enregistrés" : "Informations enregistrées", "🏪");
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (error) {
+      setLogoError(error instanceof Error ? error.message : "Enregistrement impossible. Réessayez.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function handleLogoFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -6271,8 +6268,8 @@ function BoutiqueInfoSection({ boutique, onUpdate }: { boutique: Boutique; onUpd
       <Field label="ADRESSE"><input value={adresse} onChange={e=>setAdresse(e.target.value)} placeholder="Ex: 12 Rue Vincens, Plateau" className={inputCls}/></Field>
       <Field label="E-MAIL (expéditeur factures)"><input value={email} onChange={e=>setEmail(e.target.value)} placeholder="boutique@email.com" type="email" className={inputCls}/></Field>
       <Field label="TÉLÉPHONE"><input value={tel} onChange={e=>setTel(e.target.value)} placeholder="+221 77 000 0000" type="tel" className={inputCls}/></Field>
-      <button onClick={save} className="w-full py-4 rounded-2xl text-base font-black active:scale-95 transition-all" style={{ background: saved ? SEM.success.accent : boutique.color, color:"#fff", fontFamily:"'Nunito',sans-serif" }}>
-        {saved ? "✓ Enregistré" : "Enregistrer les informations"}
+      <button onClick={()=>void save()} disabled={saving || !nom.trim()} className="w-full py-4 rounded-2xl text-base font-black active:scale-95 transition-all disabled:opacity-60" style={{ background: saved ? SEM.success.accent : boutique.color, color:"#fff", fontFamily:"'Nunito',sans-serif" }}>
+        {saving ? "Enregistrement…" : saved ? "✓ Enregistré" : "Enregistrer les informations"}
       </button>
     </div>
   );
@@ -7132,7 +7129,7 @@ function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdat
         {section==="stock-params"&&<CatalogueSection boutique={boutique} onUpdate={onUpdate} logAction={logAction}/>}
 
         {/* ── BOUTIQUE ───────────────────────────────────────────────────── */}
-        {section==="boutique"&&<BoutiqueInfoSection boutique={boutique} onUpdate={onUpdate}/>}
+        {section==="boutique"&&<BoutiqueInfoSection boutique={boutique} onUpdate={onUpdate} logAction={logAction}/>}
 
         {/* ── IMPRIMANTE ─────────────────────────────────────────────────── */}
         {section==="imprimante"&&<PrinterSection boutique={boutique} onUpdate={onUpdate}/>}
@@ -9450,9 +9447,8 @@ export default function App() {
     };
     return createPortal(
       <div className="fixed inset-0 z-[500] flex flex-col items-center justify-center" style={{ background:"rgba(0,0,0,0.92)", backdropFilter:"blur(12px)" }}>
-        <div className="flex flex-col items-center gap-5 px-8 py-10 rounded-3xl" style={{ background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)", maxWidth:"340px", width:"100%" }}>
-          <TournalMark variant="dark" className="w-16 h-16 rounded-2xl"/>
-          <div className="w-10 h-10 rounded-xl flex items-center justify-center text-sm font-black" style={{ background:currentUser.color+"22", color:currentUser.color, fontFamily:"'Nunito', sans-serif" }}>{currentUser.initials}</div>
+        <div className="flex flex-col items-center gap-6 px-8 py-10 rounded-3xl" style={{ background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)", maxWidth:"340px", width:"100%" }}>
+          <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-2xl font-black" style={{ background:currentUser.color+"22", color:currentUser.color, fontFamily:"'Nunito', sans-serif" }}>{currentUser.initials}</div>
           <div className="text-center">
             <p className="text-white font-black text-xl" style={{ fontFamily:"'Nunito', sans-serif" }}>{currentUser.nom}</p>
             <p className="text-sm mt-1" style={{ color:"rgba(255,255,255,0.55)" }}>Session verrouillée · Saisissez votre PIN rapide</p>
@@ -9492,10 +9488,15 @@ export default function App() {
     <ReadOnlyCtx.Provider value={isReadOnly}>
     <div className="bg-background text-foreground h-screen flex flex-col overflow-hidden" style={{ fontFamily:"'Inter', sans-serif" }}>
       <Toaster position="top-center" theme="light" toastOptions={{ style: { background:"#fff", border:"1px solid rgba(0,0,0,0.08)", borderRadius:"16px", boxShadow:"0 4px 24px rgba(0,0,0,0.08)" }}} />
-      <header className="flex items-center justify-between px-4 py-3 flex-shrink-0" style={{ borderBottom:"1px solid rgba(0,0,0,0.07)" }}>
+      <header className="relative flex items-center justify-between px-4 py-3 flex-shrink-0" style={{ borderBottom:"1px solid rgba(0,0,0,0.07)" }}>
+        <div className="pointer-events-none absolute left-1/2 top-1 -translate-x-1/2">
+          <TournalLogo className="w-12 h-12" decorative={false}/>
+        </div>
         <div>
           <button onClick={()=>setScreen("boutique-select")} className="flex items-center gap-2 mb-0.5 active:opacity-70">
-            <div className="w-5 h-5 rounded overflow-hidden flex items-center justify-center" style={{ background:"#fff" }}><TournalMark variant="gold" className="w-full h-full"/></div>
+            <div className="w-5 h-5 rounded overflow-hidden flex items-center justify-center text-xs font-black" style={{ background:boutique.color+"22",color:boutique.color,fontFamily:"'Nunito', sans-serif" }}>
+              {boutique.logo ? <img src={boutique.logo} alt="" className="w-full h-full object-contain"/> : boutique.initials}
+            </div>
             <p className="text-xs text-muted-foreground">{boutique.nom}</p>
             <ChevronRight size={11} className="text-muted-foreground" style={{ transform:"rotate(90deg)" }}/>
           </button>

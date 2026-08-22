@@ -1260,11 +1260,19 @@ export async function updateProduct(params:{ boutiqueId:string; productId:number
   if (updated.length !== 1) throw new Error("Modification refusée ou produit introuvable");
 }
 
-export async function updateBoutiqueProfile(params: { boutiqueId:string; nom:string; ville:string; adresse?:string; email?:string; tel?:string }) {
+export async function updateBoutiqueProfile(params: { boutiqueId:string; nom:string; ville:string; adresse?:string; email?:string; tel?:string; logo?:string|null }) {
+  const body: Record<string, string|null> = {
+    nom: params.nom,
+    ville: params.ville,
+    adresse: params.adresse ?? null,
+    email: params.email ?? null,
+    tel: params.tel ?? null,
+  };
+  if (params.logo !== undefined) body.logo_url = params.logo;
   await dataRequest(`boutiques?id=eq.${encodeURIComponent(params.boutiqueId)}`, {
     method: "PATCH",
     headers: { Prefer: "return=minimal" },
-    body: JSON.stringify({ nom: params.nom, ville: params.ville, adresse: params.adresse ?? null, email: params.email ?? null, tel: params.tel ?? null }),
+    body: JSON.stringify(body),
   });
 }
 
