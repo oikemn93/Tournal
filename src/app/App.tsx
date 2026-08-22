@@ -91,9 +91,10 @@ type Product    = { id: number; nom: string; img: string; unit: string; fourniss
 type StockEntry = { id: number; productId: number; qty: number; unit: string; montantDu: number; date: string; fournisseur: string; movementType?: "achat"|"ajustement"|"retour"|"inventaire"|string; invoiceId?: string; nbLots?: number; nbPieces?: number; longueurPiece?: number; sku?: string; isTransfertInterne?: boolean };
 type Supplier   = { id: number; nom: string; ville: string; lastDelivery: string; tel: string; initials: string; color: string; email?: string; contact?: string };
 type Client     = { id: number; nom: string; type: ClientType; tel: string; total: number; last: string; ville: string; adresse?: string; email?: string; contact?: string };
+type ClientAdvance = { id:number; clientId:number; amount:number; paymentMethod:PaymentMethod; paidAt:string; recordedAt?:string; operatorId?:string; operatorName:string; note?:string };
 type PaymentEntry = { method: PaymentMethod; amount: number };
 type InvoicePayment = { id:number; amount:number; paymentMethod:PaymentMethod; paidAt:string; recordedAt?:string; operatorId?:string; operatorName:string; batchId:string; source:"invoice"|"client_fifo"|"legacy_backfill" };
-type Invoice    = { id: string; clientId?:number; client: string; clientTel?: string; clientType?:ClientType; lines?: InvoiceLine[]; payments?:InvoicePayment[]; montant: number; acompte: number; date: string; dateRaw?: string; status: InvoiceStatus; type: string; operatorNom?: string; operatorColor?: string; paymentMethod?: PaymentMethod; paymentSplit?: PaymentEntry[] };
+type Invoice    = { id: string; clientId?:number; client: string; clientTel?: string; clientType?:ClientType; lines?: InvoiceLine[]; payments?:InvoicePayment[]; montant: number; acompte: number; date: string; dateRaw?: string; status: InvoiceStatus; type: string; operatorId?:string; operatorNom?: string; operatorColor?: string; paymentMethod?: PaymentMethod; paymentSplit?: PaymentEntry[] };
 type ProductParam = { productId: number; nbPiecesParLot: number; longueurParPiece: number; unitVente: string };
 type Category   = { id: string; nom: string; unitVente: string; nbPiecesParLot: number; longueurParPiece: number };
 type TransferItem = { productId: number; nom: string; qty: number; unit: string; montantDu: number; img?: string; prixCession?: number; remise?: number; nbLots?: number; nbPieces?: number };
@@ -101,7 +102,7 @@ type PendingTransfer = { id: string; fromBoutiqueId: string; fromBoutiqueNom: st
 type Boutique   = {
   id: string; nom: string; ville: string; color: string; initials: string; logo?: string; adresse?: string; email?: string; tel?: string;
   products: Product[]; entries: StockEntry[]; suppliers: Supplier[];
-  clients: Client[]; invoices: Invoice[]; auditLog: AuditEntry[]; charges: Charge[];
+  clients: Client[]; clientAdvances?: ClientAdvance[]; invoices: Invoice[]; auditLog: AuditEntry[]; charges: Charge[];
   productParams?: ProductParam[];
   categories?: Category[];
   pendingTransfers?: PendingTransfer[];
@@ -8698,6 +8699,7 @@ export default function App() {
       const entries = mergeById(shop.entries, patch.entries, patch.deleted.stock_entry);
       const invoices = mergeById(shop.invoices, patch.invoices, patch.deleted.invoice);
       const clients = mergeById(shop.clients, patch.clients, patch.deleted.client);
+      const clientAdvances = mergeById(shop.clientAdvances, patch.clientAdvances, patch.deleted.client_advance);
       const suppliers = mergeById(shop.suppliers, patch.suppliers, patch.deleted.supplier);
       const charges = mergeById(shop.charges, patch.charges, patch.deleted.charge);
       const caisseHistory = mergeById(shop.caisseHistory, patch.caisseSessions, patch.deleted.caisse_session)
@@ -8723,7 +8725,7 @@ export default function App() {
           caisseSession = { id:session.id, openedAt:session.openedAt, fondDeCaisse:session.fondDeCaisse, openedBy:session.openedBy };
         }
       }
-      return { ...shop, products, categories, entries, invoices, clients, suppliers, charges, caisseHistory, caisseSession, auditLog, productParams };
+      return { ...shop, products, categories, entries, invoices, clients, clientAdvances, suppliers, charges, caisseHistory, caisseSession, auditLog, productParams };
     }));
   }, []);
 

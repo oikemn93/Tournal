@@ -38,6 +38,18 @@ export type InvoicePayment = {
   source: "invoice" | "client_fifo" | "legacy_backfill";
 };
 
+export type ClientAdvance = {
+  id: number;
+  clientId: number;
+  amount: number;
+  paymentMethod: PaymentMethod;
+  paidAt: string;
+  recordedAt?: string;
+  operatorId?: string;
+  operatorName: string;
+  note?: string;
+};
+
 export type PaymentEntry = { method: PaymentMethod; amount: number };
 
 export type AuditEntry = {
@@ -68,7 +80,7 @@ export type Invoice    = {
   lines?: InvoiceLine[]; payments?: InvoicePayment[];
   montant: number; acompte: number; date: string; dateRaw?: string;
   status: InvoiceStatus; type: string; returnOfInvoiceId?: string;
-  operatorNom?: string; operatorColor?: string;
+  operatorId?: string; operatorNom?: string; operatorColor?: string;
   paymentMethod?: PaymentMethod; paymentSplit?: PaymentEntry[];
 };
 
@@ -103,6 +115,7 @@ export type Boutique = {
   id: string; nom: string; ville: string; color: string; initials: string; logo?: string; adresse?: string; email?: string; tel?: string;
   products: Product[]; entries: StockEntry[]; suppliers: Supplier[];
   clients: Client[]; invoices: Invoice[]; auditLog: AuditEntry[]; charges: Charge[];
+  clientAdvances?: ClientAdvance[];
   productParams?: ProductParam[];
   categories?: Category[];
   pendingTransfers?: PendingTransfer[];

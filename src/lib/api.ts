@@ -415,7 +415,7 @@ export function subscribeToBoutiqueChanges(
     let channel = realtimeClient.channel(`tournal:${boutiqueId}`);
     // Each subscription is scoped to one boutique and only to relational tables.
     // This deliberately avoids both the former global JSON blob and polling.
-    for (const table of ["products", "stock_entries", "invoices", "invoice_lines", "invoice_payments", "clients", "charges", "caisse_sessions", "suppliers", "categories", "boutique_partners", "boutique_assignments", "audit_log"]) {
+    for (const table of ["products", "stock_entries", "invoices", "invoice_lines", "invoice_payments", "clients", "client_advances", "charges", "caisse_sessions", "suppliers", "categories", "boutique_partners", "boutique_assignments", "audit_log"]) {
       channel = channel.on("postgres_changes", { event: "*", schema: "public", table, filter }, (payload: any) => {
         const operation = payload?.eventType;
         if (operation !== "INSERT" && operation !== "UPDATE" && operation !== "DELETE") return;
@@ -642,7 +642,7 @@ export async function getAuthBootstrap() {
       adresse:b.adresse ?? undefined,
       email:b.email ?? undefined,
       tel:b.tel ?? undefined,
-      products:[], entries:[], suppliers:[], clients:[], invoices:[], auditLog:[], charges:[], categories:[], productParams:[], caisseHistory:[],
+      products:[], entries:[], suppliers:[], clients:[], clientAdvances:[], invoices:[], auditLog:[], charges:[], categories:[], productParams:[], caisseHistory:[],
     })),
     groupes,
   };
@@ -657,13 +657,13 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string): Promise<T | n
     const bid = encodeURIComponent(boutiqueId);
     const boutiqueFilter = `&id=eq.${bid}`;
     const scoped = (column = "boutique_id") => `&${column}=eq.${bid}`;
-    const [boutiques, categories, products, entries, clients, suppliers, invoices, payments, charges, sessions, users, auditLogs] = await Promise.all([
+    const [boutiques, categories, products, entries, clients, suppliers, invoices, payments, advances, charges, sessions, users, auditLogs] = await Promise.all([
       dataRequest<any[]>(`boutiques?select=*${boutiqueFilter}&order=nom.asc`),
       dataRequest<any[]>(`categories?select=*${scoped()}`), dataRequest<any[]>(`products?select=*${scoped()}`),
       dataRequestAll<any>(`stock_entries?select=*${scoped()}`, "entry_date.desc,id.desc"), dataRequest<any[]>(`clients?select=*${scoped()}`),
       dataRequest<any[]>(`suppliers?select=*${scoped()}`),
       dataRequest<any[]>(`invoices?select=*,invoice_lines(*)${scoped()}`),
-      dataRequest<any[]>(`invoice_payments?select=*${scoped()}&order=paid_at.asc`), dataRequest<any[]>(`charges?select=*${scoped()}`),
+      dataRequest<any[]>(`invoice_payments?select=*${scoped()}&order=paid_at.asc`), dataRequest<any[]>(`client_advances?select=*${scoped()}&order=paid_at.desc,id.desc`), dataRequest<any[]>(`charges?select=*${scoped()}`),
       dataRequest<any[]>(`caisse_sessions?select=*${scoped()}`),
       dataRequest<any[]>("platform_users?select=id,nom,initials,color"),
       // The administration view presents recent activity. Loading the entire
@@ -708,6 +708,11 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string): Promise<T | n
         const cleanContact = isWholesale ? c.contact.replace(WHOLESALE_MARKER, "").trim() : c.contact;
         return { id:c.id, nom:c.nom, type:effectiveType, tel:c.tel ?? "", total:c.total ?? 0, last:day(c.last_invoice_at), ville:c.ville ?? "", adresse:c.adresse ?? undefined, email:c.email ?? undefined, contact:cleanContact || undefined };
       }),
+      clientAdvances: advances.filter(a => a.boutique_id === b.id).map(a => ({
+        id:Number(a.id), clientId:Number(a.client_id), amount:Number(a.amount),
+        paymentMethod:a.payment_method, paidAt:a.paid_at, recordedAt:a.recorded_at,
+        operatorId:a.operator_id ?? undefined, operatorName:a.operator_name, note:a.note ?? undefined,
+      })),
       suppliers: suppliers.filter(s => s.boutique_id === b.id).map(s => ({ id:s.id, nom:s.nom, ville:s.ville ?? "", lastDelivery:day(s.last_delivery_at), tel:s.tel ?? "", initials:s.initials ?? "", color:s.color ?? "#C9A227", email:s.email ?? undefined, contact:s.contact ?? undefined })),
       invoices: invoices.filter(i => i.boutique_id === b.id).map(i => {
         const invoicePayments = paymentsByInvoice.get(i.id) ?? [];
@@ -739,6 +744,7 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string): Promise<T | n
           status:paid >= Number(i.montant) ? "payé" : paid > 0 ? "acompte" : i.status === "en_attente" ? "en attente" : i.status,
           type:i.type,
           returnOfInvoiceId:i.return_of_invoice_id ?? undefined,
+          operatorId:i.operator_id ?? undefined,
           operatorNom:i.operator_nom_snapshot ?? operator.nom ?? undefined,
           operatorColor:operator.color ?? undefined,
           paymentMethod:i.payment_method ?? undefined,
@@ -804,7 +810,7 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string): Promise<T | n
 export type BoutiqueSyncEntity =
   | "product" | "category" | "stock_entry" | "invoice" | "invoice_line"
   | "invoice_payment" | "client" | "supplier" | "charge" | "caisse_session"
-  | "audit_log" | "assignment" | "stock_transfer";
+  | "audit_log" | "assignment" | "stock_transfer" | "client_advance";
 
 export type BoutiqueSyncEvent = {
   event_id: string;
@@ -822,6 +828,7 @@ export type BoutiqueSyncPatch = {
   productParams?: any[];
   entries?: any[];
   clients?: any[];
+  clientAdvances?: any[];
   suppliers?: any[];
   invoices?: any[];
   charges?: any[];
@@ -846,7 +853,7 @@ const syncDomains = new Set<BoutiqueSyncEvent["domain"]>([
   "catalogue", "stock", "sales", "clients", "suppliers", "charges", "caisse", "audit", "access", "transfers",
 ]);
 const syncEntities = new Set<BoutiqueSyncEntity>([
-  "product", "category", "stock_entry", "invoice", "invoice_line", "invoice_payment", "client", "supplier", "charge", "caisse_session", "audit_log", "assignment", "stock_transfer",
+  "product", "category", "stock_entry", "invoice", "invoice_line", "invoice_payment", "client", "supplier", "charge", "caisse_session", "audit_log", "assignment", "stock_transfer", "client_advance",
 ]);
 
 function parseBoutiqueSyncEvent(value: unknown): BoutiqueSyncEvent | null {
@@ -933,7 +940,7 @@ export async function loadBoutiqueSyncPatch(boutiqueId: string, sourceEvents: Bo
   const ids = (entity: BoutiqueSyncEntity, includeDeleted = false) => {
     const relevant = events.filter(event => event.entity_type === entity);
     const removed = relevant.filter(event => event.operation === "DELETE");
-    if (removed.length) deleted[entity] = removed.map(event => entity === "stock_entry" ? String(event.record_id ?? event.entity_id) : event.entity_id);
+    if (removed.length) deleted[entity] = removed.map(event => entity === "stock_entry" || entity === "client_advance" ? String(event.record_id ?? event.entity_id) : event.entity_id);
     return [...new Set(relevant.filter(event => includeDeleted || event.operation !== "DELETE").map(event => event.entity_id))];
   };
   const records = (entity: BoutiqueSyncEntity) => [...new Set(events.filter(event => event.entity_type === entity && event.operation !== "DELETE" && event.record_id).map(event => String(event.record_id)))];
@@ -943,13 +950,14 @@ export async function loadBoutiqueSyncPatch(boutiqueId: string, sourceEvents: Bo
   const categoryIds = ids("category");
   const invoiceIds = [...new Set([...ids("invoice"), ...ids("invoice_line"), ...ids("invoice_payment")])];
   const clientIds = ids("client");
+  const advanceIds = records("client_advance");
   const supplierIds = ids("supplier");
   const chargeIds = ids("charge");
   const caisseIds = ids("caisse_session");
   const auditIds = ids("audit_log");
   const entryIds = records("stock_entry");
 
-  const [directProducts, categoryProducts, categories, entries, invoices, payments, clients, suppliers, charges, sessions, logs] = await Promise.all([
+  const [directProducts, categoryProducts, categories, entries, invoices, payments, clients, advances, suppliers, charges, sessions, logs] = await Promise.all([
     productIds.length ? dataRequest<any[]>(`products?select=*${scoped}${syncInFilter("id", productIds)}`) : Promise.resolve([]),
     categoryIds.length ? dataRequest<any[]>(`products?select=*${scoped}${syncInFilter("category_id", categoryIds)}`) : Promise.resolve([]),
     categoryIds.length ? dataRequest<any[]>(`categories?select=*${scoped}${syncInFilter("id", categoryIds)}`) : Promise.resolve([]),
@@ -957,6 +965,7 @@ export async function loadBoutiqueSyncPatch(boutiqueId: string, sourceEvents: Bo
     invoiceIds.length ? dataRequest<any[]>(`invoices?select=*,invoice_lines(*)${scoped}${syncInFilter("id", invoiceIds)}`) : Promise.resolve([]),
     invoiceIds.length ? dataRequest<any[]>(`invoice_payments?select=*${scoped}${syncInFilter("invoice_id", invoiceIds)}&order=paid_at.asc`) : Promise.resolve([]),
     clientIds.length ? dataRequest<any[]>(`clients?select=*${scoped}${syncInFilter("id", clientIds)}`) : Promise.resolve([]),
+    advanceIds.length ? dataRequest<any[]>(`client_advances?select=*${scoped}${syncInFilter("id", advanceIds)}&order=paid_at.desc,id.desc`) : Promise.resolve([]),
     supplierIds.length ? dataRequest<any[]>(`suppliers?select=*${scoped}${syncInFilter("id", supplierIds)}`) : Promise.resolve([]),
     chargeIds.length ? dataRequest<any[]>(`charges?select=*${scoped}${syncInFilter("id", chargeIds)}`) : Promise.resolve([]),
     caisseIds.length ? dataRequest<any[]>(`caisse_sessions?select=*${scoped}${syncInFilter("id", caisseIds)}`) : Promise.resolve([]),
@@ -990,13 +999,18 @@ export async function loadBoutiqueSyncPatch(boutiqueId: string, sourceEvents: Bo
     const wholesale = typeof row.contact === "string" && row.contact.includes(WHOLESALE_MARKER);
     return { id:row.id, nom:row.nom, type:wholesale ? "Grossiste" : row.type, tel:row.tel ?? "", total:Number(row.total ?? 0), last:syncDate(row.last_invoice_at), ville:row.ville ?? "", adresse:row.adresse ?? undefined, email:row.email ?? undefined, contact:wholesale ? row.contact.replace(WHOLESALE_MARKER, "").trim() || undefined : row.contact ?? undefined };
   });
+  if (advances.length) patch.clientAdvances = advances.map(row => ({
+    id:Number(row.id), clientId:Number(row.client_id), amount:Number(row.amount),
+    paymentMethod:row.payment_method, paidAt:row.paid_at, recordedAt:row.recorded_at,
+    operatorId:row.operator_id ?? undefined, operatorName:row.operator_name, note:row.note ?? undefined,
+  }));
   if (suppliers.length) patch.suppliers = suppliers.map(row => ({ id:row.id, nom:row.nom, ville:row.ville ?? "", lastDelivery:syncDate(row.last_delivery_at), tel:row.tel ?? "", initials:row.initials ?? "", color:row.color ?? "#C9A227", email:row.email ?? undefined, contact:row.contact ?? undefined }));
   if (invoices.length) patch.invoices = invoices.map(row => {
     const invoicePayments = paymentsByInvoice.get(row.id) ?? [];
     const paid = invoicePayments.length ? invoicePayments.reduce((sum, payment) => sum + Number(payment.amount), 0) : Number(row.acompte);
     const operator = userById.get(row.operator_id) ?? {};
     const client = clientById.get(row.client_id);
-    return { id:row.id, clientId:row.client_id ?? undefined, client:row.client_nom ?? "Client comptoir", clientTel:row.client_tel ?? undefined, clientType:row.client_type_snapshot ?? client?.type ?? undefined, clientEmailSnapshot:row.client_email_snapshot ?? undefined, clientAdresseSnapshot:row.client_adresse_snapshot ?? undefined, clientVilleSnapshot:row.client_ville_snapshot ?? undefined, clientTypeSnapshot:row.client_type_snapshot ?? undefined, boutiqueNomSnapshot:row.boutique_nom_snapshot ?? undefined, boutiqueVilleSnapshot:row.boutique_ville_snapshot ?? undefined, boutiqueAdresseSnapshot:row.boutique_adresse_snapshot ?? undefined, boutiqueTelSnapshot:row.boutique_tel_snapshot ?? undefined, boutiqueEmailSnapshot:row.boutique_email_snapshot ?? undefined, boutiqueLogoSnapshot:row.boutique_logo_snapshot ?? undefined, montant:Number(row.montant), acompte:paid, date:syncDate(row.invoice_date), dateRaw:row.invoice_date, status:paid >= Number(row.montant) ? "payé" : paid > 0 ? "acompte" : row.status === "en_attente" ? "en attente" : row.status, type:row.type, returnOfInvoiceId:row.return_of_invoice_id ?? undefined, operatorNom:row.operator_nom_snapshot ?? operator.nom ?? undefined, operatorColor:operator.color ?? undefined, paymentMethod:row.payment_method ?? undefined, payments:invoicePayments.map(payment => ({ id:payment.id, amount:Number(payment.amount), paymentMethod:payment.payment_method, paidAt:payment.paid_at, recordedAt:payment.recorded_at, operatorId:payment.operator_id ?? undefined, operatorName:payment.operator_name, batchId:payment.batch_id, source:payment.source })), lines:(row.invoice_lines ?? []).map((line:any) => ({ productId:line.product_id, nom:line.nom, qty:Number(line.qty), unit:line.unit ?? "unité", prixUnit:Number(line.prix_unit), prixAchat:line.prix_achat != null ? Number(line.prix_achat) : undefined, sellUnit:line.sell_unit ?? undefined, sellQty:line.sell_qty ? Number(line.sell_qty) : undefined })) };
+    return { id:row.id, clientId:row.client_id ?? undefined, client:row.client_nom ?? "Client comptoir", clientTel:row.client_tel ?? undefined, clientType:row.client_type_snapshot ?? client?.type ?? undefined, clientEmailSnapshot:row.client_email_snapshot ?? undefined, clientAdresseSnapshot:row.client_adresse_snapshot ?? undefined, clientVilleSnapshot:row.client_ville_snapshot ?? undefined, clientTypeSnapshot:row.client_type_snapshot ?? undefined, boutiqueNomSnapshot:row.boutique_nom_snapshot ?? undefined, boutiqueVilleSnapshot:row.boutique_ville_snapshot ?? undefined, boutiqueAdresseSnapshot:row.boutique_adresse_snapshot ?? undefined, boutiqueTelSnapshot:row.boutique_tel_snapshot ?? undefined, boutiqueEmailSnapshot:row.boutique_email_snapshot ?? undefined, boutiqueLogoSnapshot:row.boutique_logo_snapshot ?? undefined, montant:Number(row.montant), acompte:paid, date:syncDate(row.invoice_date), dateRaw:row.invoice_date, status:paid >= Number(row.montant) ? "payé" : paid > 0 ? "acompte" : row.status === "en_attente" ? "en attente" : row.status, type:row.type, returnOfInvoiceId:row.return_of_invoice_id ?? undefined, operatorId:row.operator_id ?? undefined, operatorNom:row.operator_nom_snapshot ?? operator.nom ?? undefined, operatorColor:operator.color ?? undefined, paymentMethod:row.payment_method ?? undefined, payments:invoicePayments.map(payment => ({ id:payment.id, amount:Number(payment.amount), paymentMethod:payment.payment_method, paidAt:payment.paid_at, recordedAt:payment.recorded_at, operatorId:payment.operator_id ?? undefined, operatorName:payment.operator_name, batchId:payment.batch_id, source:payment.source })), lines:(row.invoice_lines ?? []).map((line:any) => ({ productId:line.product_id, nom:line.nom, qty:Number(line.qty), unit:line.unit ?? "unité", prixUnit:Number(line.prix_unit), prixAchat:line.prix_achat != null ? Number(line.prix_achat) : undefined, sellUnit:line.sell_unit ?? undefined, sellQty:line.sell_qty ? Number(line.sell_qty) : undefined })) };
   });
   if (charges.length) patch.charges = charges.map(row => ({ id:row.id, label:row.label, montant:Number(row.montant), date:syncDate(row.charge_date), dateRaw:row.charge_date, categorie:row.categorie ?? "Autre", recurrence:row.recurrence ?? "unique", note:row.note ?? undefined, fournisseur:row.fournisseur ?? undefined, supplierId:row.supplier_id ?? undefined, paymentMethod:row.payment_method ?? undefined, status:row.status ?? "paid", paidAmount:Number(row.paid_amount ?? row.montant), transferId:row.transfer_id ?? undefined, source:row.source ?? "manual" }));
   if (sessions.length) patch.caisseSessions = sessions.map(row => ({ id:row.id, openedAt:row.opened_at, closedAt:row.closed_at ?? undefined, fondDeCaisse:Number(row.fond_ouverture ?? 0), openedBy:row.opened_by ?? "", closedBy:row.closed_by ?? "" }));
@@ -1120,6 +1134,21 @@ export async function recordClientPayment(params: { boutiqueId:string; clientId:
       p_amount:params.amount,
       p_payment_method:params.paymentMethod,
       p_payment_date:params.paymentDate,
+    }),
+  });
+}
+
+export async function recordClientAdvance(params: { boutiqueId:string; clientId:number; amount:number; paymentMethod:string; paymentDate:string; note?:string }) {
+  return dataRequest<{ advance_id:number; client_id:number; amount:number; payment_method:string; paid_at:string; recorded_at:string; operator_id:string; operator_name:string; note?:string|null }>("rpc/record_client_advance", {
+    method:"POST", headers:{ Prefer:"return=representation" },
+    body:JSON.stringify({
+      p_boutique_id:params.boutiqueId,
+      p_client_id:params.clientId,
+      p_idempotency_key:crypto.randomUUID(),
+      p_amount:params.amount,
+      p_payment_method:params.paymentMethod,
+      p_payment_date:params.paymentDate,
+      p_note:params.note ?? null,
     }),
   });
 }

@@ -23,6 +23,9 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
   const POS_COLOR = boutique.color;
   const { products, entries, invoices } = boutique;
   const pa = usePAStatus();
+  const activeAssignment = currentUser.assignments.find(assignment => assignment.boutiqueId === boutique.id);
+  const canManageAnyPendingOrder = currentUser.isSuperAdmin || activeAssignment?.role === "Propriétaire";
+  const canManagePendingOrder = (invoice: Invoice) => canManageAnyPendingOrder || invoice.operatorId === currentUser.id;
 
   // Order taking
   const [search, setSearch] = useState("");
@@ -169,7 +172,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
         const newInv: Invoice = {
           id:saved.invoice_id, client:"Client comptoir", lines:[line], montant:saved.total, acompte:0,
           date:today(), dateRaw:new Date().toISOString(), status:"en attente", type:"vente",
-          operatorNom:currentUser.nom, operatorColor:currentUser.color,
+          operatorId:currentUser.id, operatorNom:currentUser.nom, operatorColor:currentUser.color,
         };
         onUpdate({ invoices:[...invoices, newInv] });
         logAction("Commande express", `${newInv.id} · ${expressModal.nom} · ${fmt(saved.total)} · en attente`, "🛒");
@@ -181,7 +184,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
       const newInv: Invoice = {
         id:saved.invoice_id, client:"Client comptoir", lines:[line], montant:saved.total, acompte:paid.acompte,
         date:today(), dateRaw:new Date().toISOString(), status:"payé", type:"vente",
-        operatorNom:currentUser.nom, operatorColor:currentUser.color, paymentMethod:expMethod,
+        operatorId:currentUser.id, operatorNom:currentUser.nom, operatorColor:currentUser.color, paymentMethod:expMethod,
         payments:[{ id:paid.payment.id, amount:paid.payment.amount, paymentMethod:paid.payment.payment_method as PaymentMethod, paidAt:paid.payment.paid_at, operatorId:paid.payment.operator_id, operatorName:paid.payment.operator_name, batchId:paid.payment.batch_id, source:paid.payment.source }],
       };
       const saleEntries: StockEntry[] = paid.stock_deducted
@@ -240,6 +243,10 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
 
   async function handleCancelOrder(inv: Invoice): Promise<boolean> {
     if (cancelBusy) return false;
+    if (!canManagePendingOrder(inv)) {
+      alert("Vous pouvez uniquement annuler les commandes que vous avez créées.");
+      return false;
+    }
     setCancelBusy(inv.id);
     try {
       const result = await cancelPendingInvoice({ boutiqueId:boutique.id, invoiceId:inv.id });
@@ -256,6 +263,10 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
   }
 
   function handleEditOrder(inv: Invoice) {
+    if (!canManagePendingOrder(inv)) {
+      alert("Vous pouvez uniquement modifier les commandes que vous avez créées.");
+      return;
+    }
     if (!inv.lines?.length) return;
     const cartItems: CartItem[] = inv.lines.map(l => ({
       productId: l.productId, nom: l.nom,
@@ -290,7 +301,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
       const newInv: Invoice = {
         id:saved.invoice_id, clientId:saved.client_id ?? selectedClientId, client, clientTel:clientTel.trim() || undefined, lines:orderLines,
         montant:saved.total, acompte:0, date:today(), dateRaw:new Date().toISOString(),
-        status:"en attente", type:"vente", operatorNom:currentUser.nom, operatorColor:currentUser.color,
+        status:"en attente", type:"vente", operatorId:currentUser.id, operatorNom:currentUser.nom, operatorColor:currentUser.color,
       };
       onUpdate({ invoices:[...invoices, newInv] });
       logAction("Commande PDV", `${newInv.id} · ${client} · ${fmt(saved.total)}`, "🛒");
@@ -499,14 +510,20 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
                     className="flex-1 flex items-center justify-center gap-1.5 py-3 font-bold text-sm active:scale-95" style={{ color:"#6b7280" }}>
                     🖨 Réimprimer
                   </button>
-                  <button onClick={()=>handleEditOrder(inv)} disabled={!!cancelBusy}
-                    className="flex-1 flex items-center justify-center gap-1.5 py-3 font-bold text-sm active:scale-95" style={{ color:POS_COLOR }}>
-                    <Pencil size={14}/> Modifier
-                  </button>
-                  <button onClick={()=>handleCancelOrder(inv)} disabled={cancelBusy===inv.id}
-                    className="flex-1 flex items-center justify-center gap-1.5 py-3 font-bold text-sm active:scale-95" style={{ color:"#ef4444" }}>
-                    {cancelBusy===inv.id ? "…" : <><Trash2 size={14}/> Annuler</>}
-                  </button>
+                  {canManagePendingOrder(inv) ? <>
+                    <button onClick={()=>handleEditOrder(inv)} disabled={!!cancelBusy}
+                      className="flex-1 flex items-center justify-center gap-1.5 py-3 font-bold text-sm active:scale-95" style={{ color:POS_COLOR }}>
+                      <Pencil size={14}/> Modifier
+                    </button>
+                    <button onClick={()=>handleCancelOrder(inv)} disabled={cancelBusy===inv.id}
+                      className="flex-1 flex items-center justify-center gap-1.5 py-3 font-bold text-sm active:scale-95" style={{ color:"#ef4444" }}>
+                      {cancelBusy===inv.id ? "…" : <><Trash2 size={14}/> Annuler</>}
+                    </button>
+                  </> : (
+                    <div className="flex-[2] flex items-center justify-center px-3 text-center text-xs font-medium text-muted-foreground">
+                      Créée par {inv.operatorNom ?? "un autre utilisateur"}
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
