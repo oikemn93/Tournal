@@ -17,7 +17,7 @@ function normalizePhone(value?: string): string {
   return (value ?? "").replace(/\D/g, "");
 }
 
-export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser, onUpdate, logAction, initialTab, initialClientId, initialInvoiceId, onInitialClientOpened, canCreateOrder = false, canCollectPayment = false, canOpenInvoice = false, onOpenInvoice, onCreateOrder }: {
+export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser, onUpdate, logAction, initialTab, initialClientId, initialInvoiceId, initialInvoiceNotice = "order", onInitialClientOpened, canCreateOrder = false, canCollectPayment = false, canOpenInvoice = false, onOpenInvoice, onCreateOrder }: {
   boutique: Boutique; allBoutiques: Boutique[]; platformUsers: PlatformUser[];
   currentUser: PlatformUser;
   onUpdate: (u: Partial<Boutique>) => void;
@@ -25,6 +25,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
   initialTab?: ClientType;
   initialClientId?: number;
   initialInvoiceId?: string;
+  initialInvoiceNotice?: "order" | "payment";
   onInitialClientOpened?: () => void;
   canCreateOrder?: boolean;
   canCollectPayment?: boolean;
@@ -40,6 +41,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
   const [detailClient, setDetailClient] = useState<Client|null>(null);
   const [showAllTransactions, setShowAllTransactions] = useState(false);
   const [highlightedInvoiceId, setHighlightedInvoiceId] = useState<string|null>(null);
+  const [highlightedInvoiceNotice, setHighlightedInvoiceNotice] = useState<"order" | "payment">("order");
   const [nom,setNom]=useState(""); const [dialCode,setDialCode]=useState("+221"); const [tel,setTel]=useState(""); const [ville,setVille]=useState(""); const [type,setType]=useState<ClientType>("B2C");
   const [adresse,setAdresse]=useState(""); const [email,setEmail]=useState(""); const [contact,setContact]=useState("");
   const siblings = getSiblings(boutique.id, allBoutiques, platformUsers);
@@ -57,14 +59,16 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
       setDetailClient(client);
       setShowAllTransactions(true);
       setHighlightedInvoiceId(initialInvoiceId ?? null);
+      setHighlightedInvoiceNotice(initialInvoiceNotice);
     }
     onInitialClientOpened?.();
-  }, [initialClientId, initialInvoiceId, clients, onInitialClientOpened]);
+  }, [initialClientId, initialInvoiceId, initialInvoiceNotice, clients, onInitialClientOpened]);
 
   function openClientDetail(client: Client) {
     setDetailClient(client);
     setShowAllTransactions(false);
     setHighlightedInvoiceId(null);
+    setHighlightedInvoiceNotice("order");
   }
 
   async function submit() {
@@ -229,7 +233,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
             <div><p className="text-xs font-black tracking-wider text-muted-foreground">FACTURES & COMMANDES</p><p className="text-xs text-muted-foreground mt-0.5">Les plus récentes sont affichées en premier.</p></div>
             <span className="rounded-lg px-2 py-1 text-xs font-black" style={{background:CC+"18",color:CC}}>{clientInvoices.length}</span>
           </div>
-          {highlightedInvoiceId && <div className="mb-2 rounded-xl px-3 py-2 text-xs font-bold" style={{background:SEM.success.bg,color:SEM.success.accent}}>✓ Nouvelle commande enregistrée : {highlightedInvoiceId}</div>}
+          {highlightedInvoiceId && <div className="mb-2 rounded-xl px-3 py-2 text-xs font-bold" style={{background:SEM.success.bg,color:SEM.success.accent}}>{highlightedInvoiceNotice === "payment" ? `✓ Encaissement enregistré : ${highlightedInvoiceId}` : `✓ Nouvelle commande enregistrée : ${highlightedInvoiceId}`}</div>}
           <div className="space-y-2">
             {clientInvoices.length===0&&<p className="text-sm text-muted-foreground text-center py-5">Aucune transaction</p>}
             {visibleTransactions.map(inv=>{

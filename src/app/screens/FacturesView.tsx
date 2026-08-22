@@ -153,7 +153,7 @@ function ShareInvoiceModal({ inv, boutique, clients, onClose }: { inv: Invoice; 
 
 // ─── FACTURES VIEW ────────────────────────────────────────────────────────────
 
-export function FacturesView({ boutique, allBoutiques, platformUsers, currentUser, canReturn, canCollectPayment = false, canSeeMargin = false, onUpdate, onUpdateOtherBoutique, logAction, initialStatus, initialInvoiceId, initialClientId }: {
+export function FacturesView({ boutique, allBoutiques, platformUsers, currentUser, canReturn, canCollectPayment = false, canSeeMargin = false, onUpdate, onUpdateOtherBoutique, logAction, initialStatus, initialInvoiceId, initialClientId, onPaymentRecorded }: {
   boutique: Boutique; allBoutiques: Boutique[]; platformUsers: PlatformUser[]; currentUser: PlatformUser;
   canReturn: boolean;
   canCollectPayment?: boolean;
@@ -164,6 +164,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
   initialStatus?: InvoiceStatus | "all" | "impayé";
   initialInvoiceId?: string;
   initialClientId?: number;
+  onPaymentRecorded?: (clientId: number, invoiceId: string) => void;
 }) {
   const { invoices, clients, products, entries } = boutique;
   const siblings = getSiblings(boutique.id, allBoutiques, platformUsers);
@@ -419,6 +420,13 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
       : `${validSplit[0].method}`;
     logAction("Encaissement", `${encaissInv.id} · +${fmt(totalSplit)} · ${methodLabel}`, "💵");
     setTimeout(() => agentPrint(buildReceiptHtml(updatedInv, boutique, currentUser.nom)), 200);
+    // Registered clients, including wholesale clients, return to their own
+    // transaction history. The canonical client ID keeps this scoped to the
+    // exact record instead of relying on a potentially duplicated name.
+    if (updatedInv.clientId != null && onPaymentRecorded) {
+      onPaymentRecorded(updatedInv.clientId, updatedInv.id);
+      return;
+    }
     setEncaissDone(true);
     setTimeout(() => { setEncaissInv(null); setEncaissSplit([{ method:"Espèces", amount:0 }]); setEncaissDone(false); setSubmittingPayment(false); }, 1400);
   }
