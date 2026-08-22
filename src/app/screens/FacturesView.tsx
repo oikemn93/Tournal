@@ -168,9 +168,9 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
 }) {
   const { invoices, clients, products, entries } = boutique;
   const siblings = getSiblings(boutique.id, allBoutiques, platformUsers);
-  // Registered retail and business customers keep their full history on their
-  // client record.  The general invoice desk is reserved for counter sales,
-  // wholesale flows and inter-boutique documents.
+  // Every registered customer, including wholesalers, keeps their complete
+  // history on their own record. The general invoice desk is reserved for
+  // counter sales and inter-boutique documents.
   const registeredClientTypes = useMemo(
     () => new Map(clients.map(client => [client.id, client.type])),
     [clients],
@@ -178,7 +178,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
   const isClientRecordOnlyInvoice = (invoice: Invoice) => {
     if (invoice.clientId == null) return false;
     const clientType = registeredClientTypes.get(invoice.clientId) ?? invoice.clientType ?? invoice.clientTypeSnapshot;
-    return clientType === "B2C" || clientType === "B2B";
+    return clientType === "B2C" || clientType === "B2B" || clientType === "Grossiste";
   };
 
   // Quantities already returned, per source invoice and product. Every return
