@@ -63,7 +63,7 @@ function RelationalMigrationNotice({ title }: { title: string }) {
 }
 type CartItem   = { productId: number; nom: string; img: string; unit: string; qty: number; prixUnit: number; sellUnit?: string; sellQty?: number };
 type InvoiceStatus = "payé" | "acompte" | "en attente" | "en retard";
-type PaymentMethod = "Espèces" | "Wave" | "Orange Money" | "Autre";
+type PaymentMethod = "Espèces" | "Wave" | "Orange Money" | "Autre" | "Avoir client";
 type Permission = "dashboard" | "stock" | "fournisseurs" | "clients" | "factures" | "remboursement" | "charges" | "compta" | "vente" | "encaissement_vente" | "inventaire" | "marges";
 type InventaireLine = { productId: number; nom: string; unit: string; categorie?: string; theorique: number; compte?: number };
 type InventaireSession = { id: string; date: string; dateRaw: string; userId: string; userNom: string; userColor: string; statut: "en_cours" | "terminé"; perimetre: "tout" | string[]; lines: InventaireLine[]; valeurEcart?: number; chiffreAffaires?: number; benefice?: number };
@@ -91,9 +91,9 @@ type Product    = { id: number; nom: string; img: string; unit: string; fourniss
 type StockEntry = { id: number; productId: number; qty: number; unit: string; montantDu: number; date: string; fournisseur: string; movementType?: "achat"|"ajustement"|"retour"|"inventaire"|string; invoiceId?: string; nbLots?: number; nbPieces?: number; longueurPiece?: number; sku?: string; isTransfertInterne?: boolean };
 type Supplier   = { id: number; nom: string; ville: string; lastDelivery: string; tel: string; initials: string; color: string; email?: string; contact?: string };
 type Client     = { id: number; nom: string; type: ClientType; tel: string; total: number; last: string; ville: string; adresse?: string; email?: string; contact?: string };
-type ClientAdvance = { id:number; clientId:number; amount:number; paymentMethod:PaymentMethod; paidAt:string; recordedAt?:string; operatorId?:string; operatorName:string; note?:string };
+type ClientAdvance = { id:number; clientId:number; amount:number; allocatedAmount?:number; paymentMethod:PaymentMethod; paidAt:string; recordedAt?:string; operatorId?:string; operatorName:string; note?:string };
 type PaymentEntry = { method: PaymentMethod; amount: number };
-type InvoicePayment = { id:number; amount:number; paymentMethod:PaymentMethod; paidAt:string; recordedAt?:string; operatorId?:string; operatorName:string; batchId:string; source:"invoice"|"client_fifo"|"legacy_backfill" };
+type InvoicePayment = { id:number; amount:number; paymentMethod:PaymentMethod; paidAt:string; recordedAt?:string; operatorId?:string; operatorName:string; batchId:string; source:"invoice"|"client_fifo"|"legacy_backfill"|"transfer"|"client_advance" };
 type Invoice    = { id: string; clientId?:number; client: string; clientTel?: string; clientType?:ClientType; lines?: InvoiceLine[]; payments?:InvoicePayment[]; montant: number; acompte: number; date: string; dateRaw?: string; status: InvoiceStatus; type: string; operatorId?:string; operatorNom?: string; operatorColor?: string; paymentMethod?: PaymentMethod; paymentSplit?: PaymentEntry[] };
 type ProductParam = { productId: number; nbPiecesParLot: number; longueurParPiece: number; unitVente: string };
 type Category   = { id: string; nom: string; unitVente: string; nbPiecesParLot: number; longueurParPiece: number };
@@ -4627,8 +4627,8 @@ function FournisseursView({ boutique, onUpdate, logAction }: {
 }
 
 const PAYMENT_METHODS: PaymentMethod[] = ["Espèces", "Wave", "Orange Money", "Autre"];
-const PM_ICON: Record<PaymentMethod, string> = { "Espèces":"💵", "Wave":"📱", "Orange Money":"🔶", "Autre":"💳" };
-const PM_COLOR: Record<PaymentMethod, string> = { "Espèces":"#1E9B1E", "Wave":"#3b82f6", "Orange Money":"#f97316", "Autre":"#a855f7" };
+const PM_ICON: Record<PaymentMethod, string> = { "Espèces":"💵", "Wave":"📱", "Orange Money":"🔶", "Autre":"💳", "Avoir client":"🎟️" };
+const PM_COLOR: Record<PaymentMethod, string> = { "Espèces":"#1E9B1E", "Wave":"#3b82f6", "Orange Money":"#f97316", "Autre":"#a855f7", "Avoir client":"#0f766e" };
 
 // ─── VIEW: CLIENTS ────────────────────────────────────────────────────────────
 

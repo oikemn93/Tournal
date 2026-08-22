@@ -4,7 +4,7 @@ export type Screen         = "login" | "superadmin" | "boutique-select" | "app";
 export type Tab            = "dashboard" | "stock" | "fournisseurs" | "clients" | "factures" | "pos" | "charges" | "compta" | "admin" | "inventaire" | "transferts";
 export type CartItem       = { productId: number; nom: string; img: string; unit: string; qty: number; prixUnit: number; sellUnit?: string; sellQty?: number };
 export type InvoiceStatus  = "payé" | "acompte" | "en attente" | "en retard";
-export type PaymentMethod  = "Espèces" | "Wave" | "Orange Money" | "Autre";
+export type PaymentMethod  = "Espèces" | "Wave" | "Orange Money" | "Autre" | "Avoir client";
 export type Permission     = "dashboard" | "stock" | "fournisseurs" | "clients" | "factures" | "remboursement" | "charges" | "compta" | "vente" | "inventaire" | "marges" | "encaissement_vente";
 export type ChargeCategorie = "Loyer" | "Salaires" | "Électricité" | "Transport" | "Achat stock" | "Marketing" | "Taxes" | "Autre";
 export type ClientType     = "B2C" | "B2B" | "Grossiste";
@@ -35,13 +35,14 @@ export type InvoicePayment = {
   operatorId?: string;
   operatorName: string;
   batchId: string;
-  source: "invoice" | "client_fifo" | "legacy_backfill";
+  source: "invoice" | "client_fifo" | "legacy_backfill" | "transfer" | "client_advance";
 };
 
 export type ClientAdvance = {
   id: number;
   clientId: number;
   amount: number;
+  allocatedAmount?: number;
   paymentMethod: PaymentMethod;
   paidAt: string;
   recordedAt?: string;

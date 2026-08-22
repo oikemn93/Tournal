@@ -46,8 +46,8 @@ export const CATEGORIES_DEF = ["Wax","Bazin","Soie","Dentelle","Velours","Coton"
 export const NOW = Date.now();
 
 export const PAYMENT_METHODS = ["Espèces", "Wave", "Orange Money", "Autre"] as const;
-export const PM_ICON: Record<string, string> = { "Espèces":"💵", "Wave":"📱", "Orange Money":"🔶", "Autre":"💳" };
-export const PM_COLOR: Record<string, string> = { "Espèces":"#1E9B1E", "Wave":"#3b82f6", "Orange Money":"#f97316", "Autre":"#a855f7" };
+export const PM_ICON: Record<string, string> = { "Espèces":"💵", "Wave":"📱", "Orange Money":"🔶", "Autre":"💳", "Avoir client":"🎟️" };
+export const PM_COLOR: Record<string, string> = { "Espèces":"#1E9B1E", "Wave":"#3b82f6", "Orange Money":"#f97316", "Autre":"#a855f7", "Avoir client":"#0f766e" };
 
 export const inputCls = "w-full bg-muted border border-border rounded-xl px-4 py-3.5 text-base focus:outline-none";
 

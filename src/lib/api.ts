@@ -710,6 +710,7 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string): Promise<T | n
       }),
       clientAdvances: advances.filter(a => a.boutique_id === b.id).map(a => ({
         id:Number(a.id), clientId:Number(a.client_id), amount:Number(a.amount),
+        allocatedAmount:Number(a.allocated_amount ?? 0),
         paymentMethod:a.payment_method, paidAt:a.paid_at, recordedAt:a.recorded_at,
         operatorId:a.operator_id ?? undefined, operatorName:a.operator_name, note:a.note ?? undefined,
       })),
@@ -1001,6 +1002,7 @@ export async function loadBoutiqueSyncPatch(boutiqueId: string, sourceEvents: Bo
   });
   if (advances.length) patch.clientAdvances = advances.map(row => ({
     id:Number(row.id), clientId:Number(row.client_id), amount:Number(row.amount),
+    allocatedAmount:Number(row.allocated_amount ?? 0),
     paymentMethod:row.payment_method, paidAt:row.paid_at, recordedAt:row.recorded_at,
     operatorId:row.operator_id ?? undefined, operatorName:row.operator_name, note:row.note ?? undefined,
   }));
@@ -1113,13 +1115,36 @@ export async function recordPayment(params: { boutiqueId:string; invoiceId:strin
 }
 
 export async function recordMultiPayment(params: { boutiqueId:string; invoiceId:string; payments:Array<{amount:number;paymentMethod:string}> }) {
-  return dataRequest<{ invoice_id:string; acompte:number; applied_amount:number; status:string; stock_deducted:boolean; batch_id:string; payments:Array<{ id:number; amount:number; payment_method:string; paid_at:string; operator_id:string; operator_name:string; batch_id:string; source:"invoice" }> }>("rpc/record_multi_payment", {
+  return dataRequest<{ invoice_id:string; acompte:number; applied_amount:number; status:string; stock_deducted:boolean; batch_id:string; payments:Array<{ id:number; amount:number; payment_method:string; paid_at:string; operator_id:string; operator_name:string; batch_id:string; source:"invoice"|"client_advance" }>; advance_allocations:Array<{advance_id:number;amount:number}> }>("rpc/record_multi_payment", {
     method:"POST", headers:{ Prefer:"return=representation" },
     body:JSON.stringify({
       p_boutique_id:params.boutiqueId,
       p_invoice_id:params.invoiceId,
       p_idempotency_key:crypto.randomUUID(),
       p_payments:params.payments,
+    }),
+  });
+}
+
+/** Apply already-received client credit to one registered client's invoice. */
+export async function applyClientAdvanceToInvoice(params: { boutiqueId:string; invoiceId:string; amount?:number }) {
+  return dataRequest<{
+    invoice_id:string;
+    client_id:number;
+    acompte:number;
+    applied_amount:number;
+    status:string;
+    stock_deducted:boolean;
+    payment:{ id:number; amount:number; payment_method:string; paid_at:string; operator_id:string; operator_name:string; batch_id:string; source:"client_advance" };
+    allocations:Array<{advance_id:number;amount:number}>;
+    remaining_advance:number;
+  }>("rpc/apply_client_advance_to_invoice", {
+    method:"POST", headers:{ Prefer:"return=representation" },
+    body:JSON.stringify({
+      p_boutique_id:params.boutiqueId,
+      p_invoice_id:params.invoiceId,
+      p_idempotency_key:crypto.randomUUID(),
+      p_amount:params.amount ?? null,
     }),
   });
 }

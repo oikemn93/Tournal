@@ -219,6 +219,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
   const [clientRef,setClientRef] = useState(clients[0] ? `client:${clients[0].id}` : siblings[0] ? `boutique:${siblings[0].id}` : "");
   const [lines, setLines]  = useState<InvoiceLine[]>([]);
   const [acompte,setAcompte]=useState("");
+  const [initialPaymentMethod,setInitialPaymentMethod] = useState<PaymentMethod>("Espèces");
   const [status,setStatus] = useState<InvoiceStatus>("en attente");
   // Line form
   const [lPid,setLPid]=useState<number>(products[0]?.id??0);
@@ -227,6 +228,34 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
   const [lSellUnit,setLSellUnit]=useState(""); // mirrors POS: "Lot" | "Pièce" | baseUnit
 
   const FCT_COLOR = boutique.color;
+
+  // An advance is cash already received.  It can settle a later invoice, but
+  // must never be treated as a second cash entry in the caisse.
+  function availableClientAdvance(clientId?: number): number {
+    if (clientId == null) return 0;
+    return (boutique.clientAdvances ?? [])
+      .filter(advance => advance.clientId === clientId)
+      .reduce((sum, advance) => sum + Math.max(0, advance.amount - (advance.allocatedAmount ?? 0)), 0);
+  }
+
+  function paymentMethodsForInvoice(invoice: Invoice): PaymentMethod[] {
+    return invoice.clientId != null && availableClientAdvance(invoice.clientId) > 0
+      ? [...PAYMENT_METHODS, "Avoir client"]
+      : [...PAYMENT_METHODS];
+  }
+
+  function applyAdvanceAllocations(allocations: Array<{ advance_id:number; amount:number }> | undefined) {
+    if (!allocations?.length) return undefined;
+    const allocatedByAdvance = new Map<number, number>();
+    allocations.forEach(allocation => allocatedByAdvance.set(
+      allocation.advance_id,
+      (allocatedByAdvance.get(allocation.advance_id) ?? 0) + allocation.amount,
+    ));
+    return (boutique.clientAdvances ?? []).map(advance => ({
+      ...advance,
+      allocatedAmount: (advance.allocatedAmount ?? 0) + (allocatedByAdvance.get(advance.id) ?? 0),
+    }));
+  }
 
   // ── Caisse (déplacée depuis Vente) : le caissier ouvre/ferme et encaisse ici ──
   const caisseSession = boutique.caisseSession;
@@ -238,7 +267,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
   // The session total is the sum of payments recorded since the caisse was opened,
   // so each encaissement below increments it correctly (the bug fixed by the move).
   const sessionEvents = isCaisseOpen && caisseSession
-    ? invoicePaymentEvents(invoices).filter(ev => ev.paidAt >= caisseSession.openedAt)
+    ? invoicePaymentEvents(invoices).filter(ev => ev.paidAt >= caisseSession.openedAt && ev.source !== "client_advance")
     : [];
   const sessionTotal = sessionEvents.reduce((s, ev) => s + ev.signedAmount, 0);
   const sessionByMethod = PAYMENT_METHODS.map(m => ({
@@ -301,6 +330,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
         setClientRef(`client:${selectedClient.id}`);
         setLines([]);
         setAcompte("");
+        setInitialPaymentMethod("Espèces");
         const firstProduct = products[0];
         if (firstProduct) {
           const unit = getDefaultSaleUnit(firstProduct, boutique);
@@ -330,14 +360,18 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
   }
 
   const montant = lines.reduce((s,l)=>s+lineTotal(l),0);
-  const aNum = canCollectPayment ? (Number(acompte)||0) : 0;
-  const pct  = montant>0?Math.min(100,Math.round(aNum/montant*100)):0;
   const selectedClient = clientRef.startsWith("client:")
     ? clients.find(c => c.id === Number(clientRef.slice("client:".length)))
     : undefined;
   const siblingClient = clientRef.startsWith("boutique:")
     ? siblings.find(s => s.id === clientRef.slice("boutique:".length))
     : undefined;
+  const selectedClientAdvance = availableClientAdvance(selectedClient?.id);
+  const rawAcompte = Number(acompte) || 0;
+  const aNum = canCollectPayment
+    ? Math.min(rawAcompte, montant || rawAcompte, initialPaymentMethod === "Avoir client" ? selectedClientAdvance : rawAcompte)
+    : 0;
+  const pct  = montant>0?Math.min(100,Math.round(aNum/montant*100)):0;
   const selectedClientName = siblingClient?.nom ?? selectedClient?.nom ?? "";
 
   function addLine() {
@@ -365,6 +399,13 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
     if (validSplit.length === 0 || totalSplit <= 0) return;
     if (totalSplit > invoiceRemainingAmount(encaissInv)) {
       alert("Le total des paiements dépasse le reste à encaisser.");
+      return;
+    }
+    const requestedAdvance = validSplit
+      .filter(entry => entry.method === "Avoir client")
+      .reduce((sum, entry) => sum + entry.amount, 0);
+    if (requestedAdvance > availableClientAdvance(encaissInv.clientId)) {
+      alert("L'avoir disponible a changé. Actualisez puis réessayez.");
       return;
     }
     setSubmittingPayment(true);
@@ -411,9 +452,11 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
       alert(error instanceof Error ? error.message : "Encaissement impossible");
       return;
     }
+    const updatedClientAdvances = applyAdvanceAllocations(persisted.advance_allocations);
     onUpdate({
       invoices: invoices.map(i => i.id === encaissInv.id ? updatedInv : i),
       ...(saleEntries.length ? { entries: [...entries, ...saleEntries] } : {}),
+      ...(updatedClientAdvances ? { clientAdvances: updatedClientAdvances } : {}),
     });
     const methodLabel = validSplit.length > 1
       ? validSplit.map(s => `${PM_ICON[s.method]} ${fmt(s.amount)}`).join(" + ")
@@ -520,10 +563,29 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
       return;
     }
     const id = persisted.invoice_id;
-    let initialPayment: Awaited<ReturnType<typeof recordPayment>> | null = null;
+    let initialPayment: {
+      acompte:number;
+      stock_deducted:boolean;
+      payment:{ id:number; amount:number; payment_method:string; paid_at:string; operator_id:string; operator_name:string; batch_id:string; source:"invoice"|"client_advance" };
+      advanceAllocations?: Array<{advance_id:number;amount:number}>;
+    } | null = null;
     if (aNum > 0) {
       try {
-        initialPayment = await recordPayment({ boutiqueId:boutique.id, invoiceId:id, amount:Math.min(aNum,montant), paymentMethod:"Espèces" });
+        if (initialPaymentMethod === "Avoir client") {
+          const payment = await recordMultiPayment({
+            boutiqueId:boutique.id,
+            invoiceId:id,
+            payments:[{ amount:Math.min(aNum,montant), paymentMethod:"Avoir client" }],
+          });
+          initialPayment = {
+            acompte:payment.acompte,
+            stock_deducted:payment.stock_deducted,
+            payment:payment.payments[0],
+            advanceAllocations:payment.advance_allocations,
+          };
+        } else {
+          initialPayment = await recordPayment({ boutiqueId:boutique.id, invoiceId:id, amount:Math.min(aNum,montant), paymentMethod:initialPaymentMethod });
+        }
       } catch (error) {
         setSubmittingInvoice(false);
         alert(`La facture ${id} a été créée, mais l'acompte n'a pas pu être enregistré : ${error instanceof Error ? error.message : "erreur inconnue"}`);
@@ -548,16 +610,18 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
       id, clientId:selectedClient?.id, client:selectedClientName, clientTel:cTel, clientType:selectedClient?.type,
       lines, montant, acompte:paidAtCreation, date:today(), dateRaw:new Date().toISOString(), status:s, type:ct,
       operatorNom:currentUser.nom, operatorColor:currentUser.color,
-      paymentMethod:initialPayment ? "Espèces" : undefined,
+      paymentMethod:initialPayment ? initialPayment.payment.payment_method as PaymentMethod : undefined,
       payments:initialPayment ? [{
         id:initialPayment.payment.id, amount:initialPayment.payment.amount, paymentMethod:initialPayment.payment.payment_method as PaymentMethod,
         paidAt:initialPayment.payment.paid_at, operatorId:initialPayment.payment.operator_id, operatorName:initialPayment.payment.operator_name,
         batchId:initialPayment.payment.batch_id, source:initialPayment.payment.source,
       }] : [],
     };
+    const updatedClientAdvances = applyAdvanceAllocations(initialPayment?.advanceAllocations);
     onUpdate({
       invoices:[...invoices, newInv],
       ...(saleEntries.length ? { entries:[...entries,...saleEntries] } : {}),
+      ...(updatedClientAdvances ? { clientAdvances: updatedClientAdvances } : {}),
     });
     // Inter-tenant: add incoming stock entries to sibling boutique
     if (isSiblingTransfer && siblingClient) {
@@ -576,7 +640,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
       onUpdateOtherBoutique(siblingClient.id, { products:sbProducts, entries:sbEntries });
     }
     logAction(isSiblingTransfer?"Transfert inter-tenant":"Nouvelle facture", `${id} · ${selectedClientName} · ${fmt(montant)}`, isSiblingTransfer?"🔄":"🧾");
-    setLines([]); setAcompte(""); setModal(false); setSubmittingInvoice(false);
+    setLines([]); setAcompte(""); setInitialPaymentMethod("Espèces"); setModal(false); setSubmittingInvoice(false);
   }
 
   const UNPAID: InvoiceStatus[] = ["en attente","acompte","en retard"];
@@ -820,13 +884,13 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
         )}
       </Modal>}
 
-      <button onClick={()=>{ setLines([]); setAcompte(""); const first=products[0]; if(first){ const unit=getDefaultSaleUnit(first,boutique); setLPid(first.id); setLSellUnit(unit); setLQty(""); const last=getLastSalePrice(first.id,invoices,unit); setLPrix(last!=null?String(last):""); } setModal(true); }} className="fixed bottom-20 right-4 w-14 h-14 rounded-full shadow-2xl flex items-center justify-center z-20 active:scale-95" style={{ background:"#a855f7", boxShadow:"0 0 24px #a855f760" }}>
+      <button onClick={()=>{ setLines([]); setAcompte(""); setInitialPaymentMethod("Espèces"); const first=products[0]; if(first){ const unit=getDefaultSaleUnit(first,boutique); setLPid(first.id); setLSellUnit(unit); setLQty(""); const last=getLastSalePrice(first.id,invoices,unit); setLPrix(last!=null?String(last):""); } setModal(true); }} className="fixed bottom-20 right-4 w-14 h-14 rounded-full shadow-2xl flex items-center justify-center z-20 active:scale-95" style={{ background:"#a855f7", boxShadow:"0 0 24px #a855f760" }}>
         <Plus size={28} color="white" strokeWidth={2.5}/>
       </button>
 
       {modal&&<Modal title="Nouvelle facture" color="#374151" onClose={()=>setModal(false)}>
         <Field label="CLIENT">
-          <select value={clientRef} onChange={e=>setClientRef(e.target.value)} className={inputCls} style={{ appearance:"none" }}>
+          <select value={clientRef} onChange={e=>{setClientRef(e.target.value);setInitialPaymentMethod("Espèces");setAcompte("");}} className={inputCls} style={{ appearance:"none" }}>
             {siblings.length>0&&<optgroup label="🏪 Mes autres boutiques">{siblings.map(sb=><option key={sb.id} value={`boutique:${sb.id}`}>{sb.nom} — {sb.ville} (inter-tenant)</option>)}</optgroup>}
             <optgroup label="Clients">{clients.map(c=><option key={c.id} value={`client:${c.id}`}>{c.nom} ({c.type})</option>)}</optgroup>
           </select>
@@ -877,9 +941,20 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
 
         {canCollectPayment ? (<>
           <Field label="ACOMPTE VERSÉ (F CFA)" color="#C9A227">
-            <input value={acompte} onChange={e=>setAcompte(e.target.value)} placeholder="Ex: 75 000" type="number" className={inputCls} onKeyDown={e=>e.key==="Enter"&&submit()}/>
+            <input value={acompte} onChange={e=>{const entered=Number(e.target.value)||0;setAcompte(e.target.value===""?"":String(initialPaymentMethod==="Avoir client"?Math.min(entered,selectedClientAdvance,montant||entered):entered));}} placeholder="Ex: 75 000" type="number" className={inputCls} onKeyDown={e=>e.key==="Enter"&&submit()}/>
             {aNum>0&&montant>0&&<div className="mt-2"><div className="h-2 bg-muted rounded-full overflow-hidden"><div className="h-full rounded-full" style={{ width:`${pct}%`, background:"#C9A227" }}/></div><div className="flex justify-between mt-1 text-xs"><span className="text-muted-foreground">Reste: {fmt(Math.max(0,montant-aNum))}</span><span style={{ color:"#C9A227",fontWeight:700 }}>{pct}%</span></div></div>}
           </Field>
+          {selectedClient && selectedClientAdvance>0&&montant>0&&<div className="rounded-2xl border p-3" style={{background:initialPaymentMethod==="Avoir client"?"#f0fdfa":"#f8fafc",borderColor:"#0f766e44"}}>
+            <div className="flex items-center justify-between gap-3">
+              <div><p className="text-xs font-black" style={{color:"#0f766e"}}>🎟️ AVOIR DISPONIBLE</p><p className="text-xs text-muted-foreground mt-1">{fmt(selectedClientAdvance)} peut régler cette facture.</p></div>
+              {initialPaymentMethod === "Avoir client" ? (
+                <button type="button" onClick={()=>{setInitialPaymentMethod("Espèces");setAcompte("");}} className="rounded-xl px-3 py-2 text-xs font-black" style={{background:"#e5e7eb",color:"#374151"}}>Ne pas utiliser</button>
+              ) : (
+                <button type="button" onClick={()=>{setInitialPaymentMethod("Avoir client");setAcompte(String(Math.min(montant,selectedClientAdvance)));}} className="rounded-xl px-3 py-2 text-xs font-black" style={{background:"#0f766e",color:"#fff"}}>Utiliser l'avoir</button>
+              )}
+            </div>
+            {initialPaymentMethod === "Avoir client"&&<p className="mt-2 text-xs font-semibold" style={{color:"#0f766e"}}>L'avoir sera déduit et tracé lors de la création de la facture.</p>}
+          </div>}
           {aNum===0&&<Field label="STATUT"><div className="grid grid-cols-2 gap-2">{(["en attente","acompte","payé","en retard"] as InvoiceStatus[]).map(s=>{const [tc]=invBadge(s);return<button key={s} onClick={()=>setStatus(s)} className="py-3 rounded-xl text-xs font-bold capitalize" style={{ background:status===s?tc:tc+"22", color:status===s?"#fff":tc }}>{s}</button>;})}</div></Field>}
         </>) : (
           <div className="flex items-center gap-2 px-4 py-3 rounded-2xl text-sm font-semibold" style={{ background:"#fffbeb", color:"#92400e" }}>
@@ -1010,7 +1085,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
                   const allocated = prev.reduce((sum,item)=>sum+item.amount,0);
                   const remaining = Math.max(0, invoiceRemainingAmount(encaissInv) - allocated);
                   if (remaining <= 0) return prev;
-                  const method = PAYMENT_METHODS.find(m=>!prev.some(item=>item.method===m)) ?? "Espèces";
+                  const method = paymentMethodsForInvoice(encaissInv).find(m=>!prev.some(item=>item.method===m)) ?? "Espèces";
                   return [...prev, {method, amount:remaining}];
                 })}
                 className="flex items-center gap-1.5 text-sm font-black px-3.5 py-2.5 rounded-xl disabled:opacity-40 disabled:cursor-not-allowed"
@@ -1022,11 +1097,18 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
               <div key={idx} className="space-y-1.5">
                 {/* Mode chips — horizontal row, always visible */}
                 <div className="flex gap-1.5 flex-wrap">
-                  {PAYMENT_METHODS.map(m => {
+                  {paymentMethodsForInvoice(encaissInv).map(m => {
                     const active = entry.method === m;
                     return (
                       <button key={m} type="button"
-                        onClick={()=>setEncaissSplit(prev=>prev.map((e,i)=>i===idx?{...e,method:m}:e))}
+                        onClick={()=>setEncaissSplit(prev=>prev.map((e,i)=>{
+                          if (i !== idx) return e;
+                          const otherTotal = prev.reduce((sum, current, currentIndex)=>currentIndex===idx?sum:sum+current.amount, 0);
+                          const maxForMethod = m === "Avoir client"
+                            ? Math.min(availableClientAdvance(encaissInv.clientId), Math.max(0, invoiceRemainingAmount(encaissInv) - otherTotal))
+                            : invoiceRemainingAmount(encaissInv);
+                          return {...e, method:m, amount:Math.min(e.amount, maxForMethod)};
+                        }))}
                         className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold transition-all"
                         style={{
                           background: active ? PM_COLOR[m] : "#EEE9D8",
@@ -1051,8 +1133,20 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
                 {idx < encaissSplit.length - 1 && <div className="border-t border-dashed" style={{borderColor:"#C9A22733"}}/>}
               </div>
             ))}
+            {encaissInv.clientId != null && availableClientAdvance(encaissInv.clientId)>0&&(
+              <button type="button" onClick={()=>setEncaissSplit(prev=>{
+                const due = invoiceRemainingAmount(encaissInv);
+                const advanceAmount = Math.min(availableClientAdvance(encaissInv.clientId), due);
+                const externalMethod = prev.find(entry=>entry.method!=="Avoir client")?.method ?? "Espèces";
+                const remainingCash = due - advanceAmount;
+                return [
+                  ...(remainingCash>0 ? [{method:externalMethod,amount:remainingCash}] : []),
+                  {method:"Avoir client" as PaymentMethod,amount:advanceAmount},
+                ];
+              })} className="w-full py-2.5 rounded-xl text-xs font-black" style={{background:"#ccfbf1",color:"#0f766e"}}>🎟️ Proposer l'avoir disponible · {fmt(Math.min(availableClientAdvance(encaissInv.clientId), invoiceRemainingAmount(encaissInv)))}</button>
+            )}
             {/* Quick-fill */}
-            <button type="button" onClick={()=>setEncaissSplit([{method:encaissSplit[0]?.method??"Espèces",amount:invoiceRemainingAmount(encaissInv)}])}
+            <button type="button" onClick={()=>{const method=encaissSplit[0]?.method??"Espèces";setEncaissSplit([{method,amount:method==="Avoir client"?Math.min(availableClientAdvance(encaissInv.clientId),invoiceRemainingAmount(encaissInv)):invoiceRemainingAmount(encaissInv)}]);}}
               className="w-full py-2 rounded-xl text-xs font-bold" style={{background:SEM.success.bg,color:SEM.success.accent}}>Solde total</button>
             {/* Total indicator */}
             {(() => {

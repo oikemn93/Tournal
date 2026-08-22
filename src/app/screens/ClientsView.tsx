@@ -9,7 +9,7 @@ import { getSiblings } from "../utils/inventory";
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
-import { createClient, recordClientAdvance, recordClientPayment, updateClientContact, WHOLESALE_MARKER } from "../../lib/api";
+import { applyClientAdvanceToInvoice, createClient, recordClientAdvance, recordClientPayment, updateClientContact, WHOLESALE_MARKER } from "../../lib/api";
 import { PhoneField } from "../components/PhoneField";
 import { formatPreciseDateTime, invoicePaidAmount, invoiceRemainingAmount } from "../utils/payments";
 
@@ -33,7 +33,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
   onOpenInvoice: (invoiceId: string) => void;
   onCreateOrder: (client: Client) => void;
 }) {
-  const { clients } = boutique;
+  const { clients, entries } = boutique;
   const canCreateB2B = currentUser.isSuperAdmin;
   const [tab, setTab] = useState<ClientType>(initialTab ?? "B2C");
   const [search, setSearch] = useState("");
@@ -121,6 +121,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
   const [paymentMode, setPaymentMode] = useState<"invoices"|"advance">("invoices");
   const [submittingPayment, setSubmittingPayment] = useState(false);
   const [paymentDone, setPaymentDone] = useState(false);
+  const [applyingAdvanceInvoiceId, setApplyingAdvanceInvoiceId] = useState<string|null>(null);
   const tabDefs: Array<{id:ClientType;label:string;color:string}> = [
     {id:"B2C",      label:"👤 Particuliers", color:"#374151"},
     {id:"B2B",      label:"🏢 Entreprises",  color:"#0e7490"},
@@ -144,7 +145,8 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
     const totalImpayé   = ventes.reduce((s,i)=>s+invoiceRemainingAmount(i),0);
     const clientAdvances = (boutique.clientAdvances ?? []).filter(advance => advance.clientId === c.id)
       .sort((a,b)=>b.paidAt.localeCompare(a.paidAt));
-    const totalAvoir = clientAdvances.reduce((sum, advance) => sum + advance.amount, 0);
+    const advanceRemaining = (advance: typeof clientAdvances[number]) => Math.max(0, advance.amount - (advance.allocatedAmount ?? 0));
+    const totalAvoir = clientAdvances.reduce((sum, advance) => sum + advanceRemaining(advance), 0);
     const nbVentes = ventes.filter(i=>invoicePaidAmount(i)>0).length;
     const panierMoyen = nbVentes>0?ventes.reduce((s,i)=>s+invoicePaidAmount(i),0)/nbVentes:0;
 
@@ -181,6 +183,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
               id:advance.advance_id,
               clientId:advance.client_id,
               amount:advance.amount,
+              allocatedAmount:0,
               paymentMethod:advance.payment_method as PaymentMethod,
               paidAt:advance.paid_at,
               recordedAt:advance.recorded_at,
@@ -237,6 +240,67 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
       }
     }
 
+    async function applyAdvanceToInvoice(invoice: Invoice) {
+      const amount = Math.min(totalAvoir, invoiceRemainingAmount(invoice));
+      if (amount <= 0 || applyingAdvanceInvoiceId) return;
+      setApplyingAdvanceInvoiceId(invoice.id);
+      try {
+        const result = await applyClientAdvanceToInvoice({
+          boutiqueId:boutique.id,
+          invoiceId:invoice.id,
+          amount,
+        });
+        const allocatedByAdvance = new Map<number, number>();
+        result.allocations.forEach(allocation => allocatedByAdvance.set(
+          allocation.advance_id,
+          (allocatedByAdvance.get(allocation.advance_id) ?? 0) + allocation.amount,
+        ));
+        const updatedInvoice: Invoice = {
+          ...invoice,
+          acompte:result.acompte,
+          status:result.status === "payée" ? "payé" : "acompte",
+          paymentMethod:"Avoir client",
+          payments:[...(invoice.payments ?? []), {
+            id:result.payment.id,
+            amount:result.payment.amount,
+            paymentMethod:"Avoir client",
+            paidAt:result.payment.paid_at,
+            operatorId:result.payment.operator_id,
+            operatorName:result.payment.operator_name,
+            batchId:result.payment.batch_id,
+            source:"client_advance",
+          }],
+        };
+        const stockEntries = result.stock_deducted
+          ? (invoice.lines ?? []).map((line, index) => ({
+              id:Date.now() + index,
+              productId:line.productId,
+              qty:-line.qty,
+              unit:line.unit,
+              montantDu:0,
+              date:today(),
+              fournisseur:`Vente ${invoice.id}`,
+              invoiceId:invoice.id,
+            }))
+          : [];
+        onUpdate({
+          invoices:boutique.invoices.map(item => item.id === invoice.id ? updatedInvoice : item),
+          clientAdvances:(boutique.clientAdvances ?? []).map(advance => ({
+            ...advance,
+            allocatedAmount:(advance.allocatedAmount ?? 0) + (allocatedByAdvance.get(advance.id) ?? 0),
+          })),
+          ...(stockEntries.length ? { entries:[...entries, ...stockEntries] } : {}),
+        });
+        setHighlightedInvoiceId(invoice.id);
+        setHighlightedInvoiceNotice("payment");
+        logAction("Avoir utilisé", `${invoice.id} · ${fmt(result.applied_amount)} · ${c.nom}`, "🎟️");
+      } catch (error) {
+        alert(error instanceof Error ? error.message : "Utilisation de l'avoir impossible");
+      } finally {
+        setApplyingAdvanceInvoiceId(null);
+      }
+    }
+
     return (
       <div className="space-y-4 pb-24">
         <button onClick={()=>{setDetailClient(null);setHighlightedInvoiceId(null);}} className="flex items-center gap-2 text-muted-foreground active:opacity-70">
@@ -286,6 +350,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
                 </div>
                 <div className="text-right flex-shrink-0"><p className="font-black text-sm" style={{ fontFamily:"'Nunito',sans-serif" }}>{fmt(inv.montant)}</p>{paid>0&&<p className="text-xs font-semibold" style={{ color:SEM.success.accent }}>✓ {fmt(paid)}</p>}{remaining>0&&<p className="text-xs font-semibold" style={{ color:SEM.warning.accent }}>⏳ {fmt(remaining)}</p>}</div>
                 {canOpenInvoice&&<ChevronRight size={15} className="text-muted-foreground"/>}
+                {!canOpenInvoice && canCollectPayment && !isReturn && remaining>0 && totalAvoir>0&&<button type="button" onClick={()=>applyAdvanceToInvoice(inv)} disabled={!!applyingAdvanceInvoiceId} className="rounded-lg px-2 py-2 text-[11px] font-black disabled:opacity-50" style={{background:"#ccfbf1",color:"#0f766e"}}>{applyingAdvanceInvoiceId===inv.id?"…":"🎟️ Utiliser"}</button>}
               </>;
               const className="w-full rounded-xl p-3 border flex items-center gap-3 text-left" + (isHighlighted ? " ring-2" : " bg-background") + (canOpenInvoice ? " active:scale-[0.99]" : "");
               const style = isHighlighted ? {borderColor:SEM.success.accent,background:SEM.success.bg,boxShadow:`0 0 0 2px ${SEM.success.accent}`} : undefined;
@@ -298,7 +363,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
         </section>
         {totalAvoir>0&&<section className="rounded-2xl p-3.5 border" style={{borderColor:SEM.success.accent+"44",background:SEM.success.bg}}>
           <div className="flex items-center justify-between gap-3">
-            <div><p className="text-xs font-black tracking-wider" style={{color:SEM.success.accent}}>AVOIR CLIENT ENREGISTRÉ</p><p className="text-xs text-muted-foreground mt-1">Versements reçus sans facture associée.</p></div>
+            <div><p className="text-xs font-black tracking-wider" style={{color:SEM.success.accent}}>AVOIR CLIENT DISPONIBLE</p><p className="text-xs text-muted-foreground mt-1">À proposer pour régler une prochaine facture.</p></div>
             <p className="text-xl font-black" style={{color:SEM.success.accent,fontFamily:"'Nunito',sans-serif"}}>{fmt(totalAvoir)}</p>
           </div>
         </section>}
@@ -354,7 +419,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
           <div className="space-y-2">
             {clientAdvances.slice(0,20).map(advance=><div key={advance.id} className="flex items-center justify-between gap-3 text-xs">
               <div><p className="font-bold">{PM_ICON[advance.paymentMethod]} {advance.paymentMethod} · Avoir</p><p className="text-muted-foreground">{formatPreciseDateTime(advance.paidAt)} · {advance.operatorName}</p></div>
-              <p className="font-black" style={{color:SEM.success.accent}}>{fmt(advance.amount)}</p>
+              <div className="text-right"><p className="font-black" style={{color:advanceRemaining(advance)>0?SEM.success.accent:SEM.neutral.accent}}>{fmt(advanceRemaining(advance))}</p><p className="text-[10px] text-muted-foreground">reçu {fmt(advance.amount)}</p></div>
             </div>)}
           </div>
         </div>}
