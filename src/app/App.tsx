@@ -10,7 +10,7 @@ import {
   Edit2, History, ArrowLeft, Delete, LogOut, UserPlus, Store,
   CheckCircle, Eye, EyeOff, MessageCircle, Send, Building2,
   Lock, Smartphone, Shield, MessageSquare, Activity, Trash2,
-  ClipboardList, RefreshCw, Tag, Palette, Receipt, ShoppingCart, ShoppingBag, Minus, RotateCcw, AlertCircle,
+  ClipboardList, RefreshCw, Tag, Palette, Receipt, ShoppingCart, ShoppingBag, Minus, RotateCcw, AlertCircle, AlertTriangle,
   Wallet, TrendingDown, PieChart as PieChartIcon, BookOpen, Download, Filter, Calendar, Mail,
   Printer, Settings, Check, ChevronLeft, ClipboardCheck,
 } from "lucide-react";
@@ -2336,6 +2336,7 @@ function DashboardView({ boutique, onNavigate }: { boutique: Boutique; onNavigat
   const totalImpayé = impayées.reduce((s,i)=>s+invoiceRemainingAmount(i),0);
   const totalQty    = products.reduce((s,p)=>s+productQty(p.id,entries),0);
   const rupture     = products.filter(p=>productQty(p.id,entries)<=0).length;
+  const negativeProducts = products.filter(p=>productQty(p.id,entries)<0);
   const grossistes  = clients.filter(c=>c.type==="Grossiste").length;
 
   // Pie: CA vs Charges vs Marge
@@ -2371,7 +2372,7 @@ function DashboardView({ boutique, onNavigate }: { boutique: Boutique; onNavigat
   })();
 
   const kpis: Array<{ label:string; value:string; icon:React.ElementType; color:string; sub:string; tab:Tab; filter?:Record<string,string> }> = [
-    { label:"Stock",   value:`${totalQty} pcs`, icon:Boxes,       color:SEM.neutral.accent, sub:`${rupture} en rupture`,        tab:"stock",    filter:{ stockFilter:"critical" } },
+    { label:"Stock",   value:`${totalQty} pcs`, icon:Boxes,       color:negativeProducts.length?SEM.danger.accent:SEM.neutral.accent, sub:negativeProducts.length?`${negativeProducts.length} écart${negativeProducts.length>1?"s":""} à vérifier`:`${rupture} en rupture`, tab:"stock", filter:{ stockFilter:negativeProducts.length?"negative":"critical" } },
     { label:"Clients", value:`${clients.length}`,icon:Users,       color:SEM.neutral.accent, sub:`${grossistes} grossistes`,     tab:"clients",  filter:{ clientTab:"Grossiste" } },
     { label:"Impayés", value:fmt(totalImpayé),   icon:CreditCard,  color:SEM.danger.accent,  sub:`${impayées.length} factures`,  tab:"factures", filter:{ statusFilter:"impayé" } },
     { label:"Charges", value:fmt(totalCharges),  icon:TrendingDown,color:SEM.neutral.accent, sub:`${filtCh.length} entrées`,     tab:"charges" },
@@ -2443,6 +2444,13 @@ function DashboardView({ boutique, onNavigate }: { boutique: Boutique; onNavigat
           </button>);
         })}
       </div>
+
+      {negativeProducts.length > 0 && (
+        <section className="rounded-2xl border border-red-200 bg-red-50 p-4">
+          <div className="flex items-start gap-3"><div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-red-100 text-red-700"><AlertTriangle size={19}/></div><div className="min-w-0 flex-1"><p className="font-black text-red-900">Stock négatif à vérifier</p><p className="mt-0.5 text-xs text-red-800">La vente reste possible. Lancez un inventaire ciblé pour corriger l’écart avec le stock réel.</p></div></div>
+          <div className="mt-3 flex flex-wrap gap-2">{negativeProducts.slice(0,4).map(product=><button key={product.id} type="button" onClick={()=>onNavigate("inventaire",{inventoryProductId:String(product.id)})} className="rounded-xl border border-red-200 bg-white px-3 py-2 text-left text-xs font-black text-red-800">Inventorier {product.nom} · {productQty(product.id,entries)} {product.unit}</button>)}{negativeProducts.length>4&&<button type="button" onClick={()=>onNavigate("stock",{stockFilter:"negative"})} className="rounded-xl px-3 py-2 text-xs font-black text-red-800">Voir les {negativeProducts.length} écarts →</button>}</div>
+        </section>
+      )}
 
       {/* Charts */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -3245,12 +3253,14 @@ function TransfertsView({ boutique, allBoutiques, platformUsers, groupes, curren
 
 // ─── VIEW: INVENTAIRE PHYSIQUE ───────────────────────────────────────────────
 
-function InventaireView({ boutique, currentUser, onUpdate, logAction, onClose }: {
+function InventaireView({ boutique, currentUser, onUpdate, logAction, onClose, initialProductId, onInitialProductPrepared }: {
   boutique: Boutique;
   currentUser: PlatformUser;
   onUpdate: (u: Partial<Boutique>) => void;
   logAction: (action: string, detail: string, icon: string) => void;
   onClose: () => void;
+  initialProductId?: number;
+  onInitialProductPrepared?: () => void;
 }) {
   const { products, entries } = boutique;
   const inventaires = boutique.inventaires ?? [];
@@ -3262,13 +3272,22 @@ function InventaireView({ boutique, currentUser, onUpdate, logAction, onClose }:
   const [search, setSearch] = useState("");
   const [blindMode, setBlindMode] = useState(false);
   const [viewSession, setViewSession] = useState<InventaireSession|null>(null);
+  const [preselectedProductId, setPreselectedProductId] = useState<number|null>(null);
 
   const allCats = [...new Set(products.map(p => p.categorie ?? "Sans catégorie"))];
   const inProgressSession = inventaires.find(s => s.statut === "en_cours");
 
+  useEffect(() => {
+    if (!initialProductId || !products.some(product => product.id === initialProductId)) return;
+    setPreselectedProductId(initialProductId);
+    setScopeAll(false); setScopeCats([]); setScreen("scope");
+    onInitialProductPrepared?.();
+  }, [initialProductId, products, onInitialProductPrepared]);
+
   function startSession() {
-    const perimetre: "tout"|string[] = scopeAll ? "tout" : scopeCats;
-    const filteredProds = products.filter(p => scopeAll || scopeCats.includes(p.categorie ?? "Sans catégorie"));
+    const selectedProduct = preselectedProductId ? products.find(product => product.id === preselectedProductId) : null;
+    const perimetre: "tout"|string[] = selectedProduct ? [selectedProduct.categorie ?? "Produit ciblé"] : scopeAll ? "tout" : scopeCats;
+    const filteredProds = selectedProduct ? [selectedProduct] : products.filter(p => scopeAll || scopeCats.includes(p.categorie ?? "Sans catégorie"));
     const lines: InventaireLine[] = filteredProds.map(p => ({
       productId: p.id, nom: p.nom, unit: p.unit, categorie: p.categorie,
       theorique: productQty(p.id, entries),
@@ -3280,7 +3299,7 @@ function InventaireView({ boutique, currentUser, onUpdate, logAction, onClose }:
     };
     const newInventaires = inventaires.filter(s => s.id !== inProgressSession?.id);
     onUpdate({ inventaires: [...newInventaires, sess] });
-    setSession(sess); setCountVals({}); setSearch(""); setScreen("count");
+    setSession(sess); setCountVals({}); setSearch(""); setScreen("count"); setPreselectedProductId(null);
   }
 
   function resumeSession() {
@@ -3445,6 +3464,10 @@ function InventaireView({ boutique, currentUser, onUpdate, logAction, onClose }:
         <h2 className="font-bold text-base">Périmètre de l'inventaire</h2>
       </header>
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        {preselectedProductId != null && (() => {
+          const product = products.find(item => item.id === preselectedProductId);
+          return product ? <div className="rounded-2xl border border-red-200 bg-red-50 p-4"><p className="text-xs font-black tracking-wider text-red-700">PRODUIT PRÉSÉLECTIONNÉ</p><p className="mt-1 font-black text-red-900">{product.nom}</p><p className="mt-1 text-xs text-red-800">Cet inventaire ne portera que sur ce produit afin de corriger l’écart signalé.</p></div> : null;
+        })()}
         {[{val:true,label:"Tout le catalogue",sub:`${products.length} produits`},{val:false,label:"Par catégorie",sub:"Sélectionner des catégories"}].map(opt => (
           <button key={String(opt.val)} onClick={()=>setScopeAll(opt.val)}
             className={`w-full p-4 rounded-2xl border-2 text-left flex items-center gap-3 transition-colors ${scopeAll===opt.val?"border-gray-800 bg-gray-50":"border-border"}`}>
@@ -3457,7 +3480,7 @@ function InventaireView({ boutique, currentUser, onUpdate, logAction, onClose }:
             </div>
           </button>
         ))}
-        {!scopeAll && (
+        {!scopeAll && preselectedProductId == null && (
           <div className="space-y-2 mt-1">
             {allCats.map(cat => (
               <button key={cat} onClick={()=>setScopeCats(prev=>prev.includes(cat)?prev.filter(c=>c!==cat):[...prev,cat])}
@@ -9590,8 +9613,8 @@ export default function App() {
       {isReadOnly && <div className="flex items-center gap-2 px-4 py-2 text-xs font-bold text-amber-800 bg-amber-50 border-b border-amber-200"><Lock size={12}/> Mode lecture seule — aucune modification possible</div>}
       <main className="flex-1 overflow-y-auto px-4 py-4 pb-20" style={{ scrollbarWidth:"none" }}>
         {safeTab==="dashboard"    && canAccess("dashboard") && <DashboardView boutique={boutique} onNavigate={(t,f)=>{setNavFilter(f??{});setTab(t);}}/>}
-        {safeTab==="stock"        && canAccess("stock")        && <RelationalStockView boutique={boutique} onUpdate={updateBoutique} logAction={logAction} initialFilter={navFilter.stockFilter}/>}
-        {safeTab==="fournisseurs" && canAccess("fournisseurs") && <RelationalFournisseursView boutique={boutique} onUpdate={updateBoutique} logAction={logAction} canPaySupplier={canAccess("charges")} defaultPaymentTermsDays={supplierPaymentTermsDays}/>}
+        {safeTab==="stock"        && canAccess("stock")        && <RelationalStockView boutique={boutique} onUpdate={updateBoutique} logAction={logAction} initialFilter={navFilter.stockFilter} initialSupplierId={navFilter.supplierId?Number(navFilter.supplierId):undefined} initialEntryId={navFilter.stockEntryId?Number(navFilter.stockEntryId):undefined} onInitialRoutePrepared={()=>setNavFilter({})}/>}
+        {safeTab==="fournisseurs" && canAccess("fournisseurs") && <RelationalFournisseursView boutique={boutique} onUpdate={updateBoutique} logAction={logAction} canPaySupplier={canAccess("charges")} canManageReceipts={canAccess("stock")} onStartReceipt={(supplierId)=>{setNavFilter({supplierId:String(supplierId)});setTab("stock");}} onCorrectReceipt={(entry,supplierId)=>{setNavFilter({supplierId:String(supplierId),stockEntryId:String(entry.id)});setTab("stock");}} defaultPaymentTermsDays={supplierPaymentTermsDays}/>}
         {safeTab==="clients"      && canAccess("clients")      && <RelationalClientsView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} currentUser={currentUser!} onUpdate={updateBoutique} logAction={logAction} initialTab={navFilter.clientTab as ClientType|undefined} initialClientId={navFilter.clientId?Number(navFilter.clientId):undefined} initialInvoiceId={navFilter.invoiceId} initialInvoiceNotice={navFilter.invoiceNotice === "payment" ? "payment" : "order"} onInitialClientOpened={()=>setNavFilter({})} canCreateOrder={canAccess("vente")} canCollectPayment={isOwner || !!(droits?.encaissement_vente)} canOpenInvoice={canAccess("factures")} defaultPaymentTermsDays={clientPaymentTermsDays} onOpenInvoice={(invoiceId)=>{setNavFilter({invoiceId});setTab("factures");}} onCreateOrder={(client)=>{setNavFilter({clientId:String(client.id)});setTab("pos");}}/>}
         {safeTab==="factures"     && canAccess("factures")     && <RelationalFacturesView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} currentUser={currentUser} canReturn={canAccess("remboursement")} canCollectPayment={isOwner || !!(droits?.encaissement_vente)} canSeeMargin={canSeeMargin} onUpdate={updateBoutique} onUpdateOtherBoutique={updateOtherBoutique} logAction={logAction} initialStatus={navFilter.statusFilter as InvoiceStatus|"all"|undefined} initialInvoiceId={navFilter.invoiceId} initialClientId={navFilter.clientId?Number(navFilter.clientId):undefined} onPaymentRecorded={canAccess("clients") ? (clientId,invoiceId)=>{setNavFilter({clientId:String(clientId),invoiceId,invoiceNotice:"payment"});setTab("clients");} : undefined}/>}
         {safeTab==="pos"          && canAccess("vente")        && <RelationalPOSView boutique={boutique} allBoutiques={boutiques} currentUser={currentUser} canEncaissVente={isOwner || !!(droits?.encaissement_vente)} initialClientId={navFilter.clientId?Number(navFilter.clientId):undefined} onInitialClientPrepared={()=>setNavFilter({})} onOrderCreated={(clientId,invoiceId,notice="order")=>{setNavFilter({clientId:String(clientId),invoiceId,...(notice==="payment"?{invoiceNotice:"payment"}:{})});setTab("clients");}} onUpdate={updateBoutique} logAction={logAction}/>}
@@ -9603,6 +9626,8 @@ export default function App() {
             currentUser={currentUser!}
             onUpdate={updateBoutique}
             logAction={logAction}
+            initialProductId={navFilter.inventoryProductId?Number(navFilter.inventoryProductId):undefined}
+            onInitialProductPrepared={()=>setNavFilter({})}
             onClose={()=>setTab("dashboard")}
           />
         )}

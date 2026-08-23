@@ -453,15 +453,15 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
             {filtered.map(p => {
               const inCart = cart.find(i => i.productId === p.id);
               const stock = productQty(p.id, entries);
-              const outOfStock = stock <= 0;
+              const isNegative = stock < 0;
               return (
                 <div key={p.id} className="relative">
-                <button onClick={() => !outOfStock && openAdd(p)}
+                <button onClick={() => openAdd(p)}
                   className="w-full bg-card rounded-2xl border text-left flex items-center gap-3 p-3 transition-transform active:scale-[0.98]"
-                  style={{ borderColor: inCart ? POS_COLOR+"66" : "var(--border)", opacity: outOfStock ? 0.5 : 1 }}>
+                  style={{ borderColor: inCart ? POS_COLOR+"66" : isNegative ? "#fecaca" : "var(--border)" }}>
                   <div className="w-14 h-14 rounded-xl overflow-hidden flex-shrink-0 relative">
                     <img src={imgSrc(p.img,120,120)} alt={p.nom} className="w-full h-full object-cover"/>
-                    {outOfStock && <div className="absolute inset-0 bg-black/55 flex items-center justify-center"><span className="text-white text-xs font-black" style={{fontSize:"8px"}}>RUPTURE</span></div>}
+                    {isNegative && <div className="absolute inset-0 bg-red-950/60 flex items-center justify-center"><span className="text-white text-xs font-black" style={{fontSize:"8px"}}>ÉCART À VÉRIFIER</span></div>}
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="font-black text-sm truncate">{p.nom}</p>
@@ -475,13 +475,11 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
                     </div>
                   )}
                 </button>
-                {!outOfStock && (
-                  <button onClick={(e)=>openExpress(e,p)} title={canEncaissVente ? "Vente express" : "Commande express"}
+                <button onClick={(e)=>openExpress(e,p)} title={canEncaissVente ? "Vente express" : "Commande express"}
                     className="absolute top-1/2 -translate-y-1/2 right-2.5 flex items-center gap-1 px-2.5 py-2 rounded-xl text-xs font-black active:scale-90"
                     style={{ background:SEM.success.accent, color:"#fff" }}>
                     <Zap size={14}/>
                   </button>
-                )}
                 </div>
               );
             })}
@@ -491,12 +489,12 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
           {filtered.map(p => {
             const inCart = cart.find(i => i.productId === p.id);
             const stock = productQty(p.id, entries);
-            const outOfStock = stock <= 0;
+            const isNegative = stock < 0;
             return (
               <div key={p.id} className="relative">
-              <button onClick={() => !outOfStock && openAdd(p)}
+              <button onClick={() => openAdd(p)}
                 className="w-full bg-card rounded-2xl overflow-hidden border text-left relative transition-transform active:scale-95"
-                style={{ borderColor: inCart ? POS_COLOR+"66" : "var(--border)", opacity: outOfStock ? 0.5 : 1 }}>
+                style={{ borderColor: inCart ? POS_COLOR+"66" : isNegative ? "#fecaca" : "var(--border)" }}>
                 <div className="w-full h-36 relative overflow-hidden">
                   <img src={imgSrc(p.img,300,300)} alt={p.nom} className="w-full h-full object-cover"/>
                   {inCart && (
@@ -505,14 +503,14 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
                       <div className="w-full rounded-xl py-1 px-2 text-center text-xs font-black text-white" style={{ background:POS_COLOR+"cc" }}>{fmt(inCart.qty * inCart.prixUnit)}</div>
                     </div>
                   )}
-                  {outOfStock && (<div className="absolute inset-0 bg-black/55 flex items-center justify-center"><span className="text-white text-xs font-black tracking-wide">RUPTURE</span></div>)}
+                  {isNegative && (<div className="absolute inset-0 bg-red-950/60 flex items-center justify-center"><span className="text-white text-xs font-black tracking-wide">ÉCART À VÉRIFIER</span></div>)}
                 </div>
                 <div className="p-2.5">
                   <p className="font-black text-base truncate leading-tight">{p.nom}</p>
                   <p className="text-sm font-semibold text-muted-foreground mt-0.5">Stock : {stock} {p.unit}</p>
                 </div>
               </button>
-              {!outOfStock && !inCart && (
+              {!inCart && (
                 <button onClick={(e)=>openExpress(e,p)} title={canEncaissVente ? "Vente express" : "Commande express"}
                   className="absolute bottom-2.5 right-2.5 flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-black active:scale-90 shadow-lg"
                   style={{ background:SEM.success.accent, color:"#fff" }}>
@@ -646,7 +644,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
             <div className="rounded-2xl border-2 border-dashed overflow-hidden" style={{ borderColor:POS_COLOR+"44" }}>
               <p className="text-xs font-black tracking-wider px-3 py-2" style={{ color:POS_COLOR }}>+ AJOUTER UN ARTICLE</p>
               <div className="grid grid-cols-2 gap-2 px-3 pb-3" style={{ maxHeight:"200px", overflowY:"auto", scrollbarWidth:"none" }}>
-                {products.filter(p=>productQty(p.id,entries)>0).map(p=>{
+                {products.map(p=>{
                   const inCart=cart.find(i=>i.productId===p.id);
                   return (
                     <button key={p.id} onClick={()=>openAdd(p)} className="flex items-center gap-2 rounded-xl p-2 text-left transition-colors active:scale-95"

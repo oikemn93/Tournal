@@ -26,18 +26,33 @@ export function productQty(pid: number, entries: StockEntry[]) { return entries.
 // not a new supplier purchase and must never increase the amount owed.
 const isSupplierDebtEntry = (entry: StockEntry) => entry.qty > 0 && entry.movementType !== "retour";
 export function productMontant(pid: number, entries: StockEntry[]) { return entries.filter(e => e.productId === pid && isSupplierDebtEntry(e)).reduce((s, e) => s + e.montantDu, 0); }
+/**
+ * The payable created for a supplier reception is the source of truth for
+ * its remaining debt. `montantDu` on a stock movement is its historical
+ * purchase value and must not be used as a live balance: payments never
+ * mutate that movement.
+ */
+export function stockEntrySupplierOutstanding(entry: StockEntry, charges: Charge[]) {
+  const receipt = charges.find(charge => charge.source === "supplier_receipt" && charge.stockEntryId === entry.id);
+  if (!receipt) return 0;
+  return Math.max(0, Number(receipt.montant) - Number(receipt.paidAmount ?? 0));
+}
+
+/**
+ * Outstanding supplier debt attributable to the product. Historical imports
+ * without a linked supplier receipt deliberately contribute zero: they have
+ * no reliable supplier ledger to reconcile against.
+ */
+export function productSupplierOutstanding(pid: number, entries: StockEntry[], charges: Charge[]) {
+  return Math.round(entries
+    .filter(entry => entry.productId === pid && entry.qty > 0 && entry.movementType === "achat")
+    .reduce((sum, entry) => sum + stockEntrySupplierOutstanding(entry, charges), 0));
+}
+
+// Kept as a compatibility alias for callers outside the Stock screen. The
+// implementation is now receipt-ledger based, never a proportional estimate.
 export function productMontantNet(pid: number, entries: StockEntry[], charges: Charge[]) {
-  const pEntries = entries.filter(e => e.productId === pid && isSupplierDebtEntry(e));
-  const sups = [...new Set(pEntries.map(e => e.fournisseur))];
-  let net = 0;
-  for (const sup of sups) {
-    const prodDû = pEntries.filter(e => e.fournisseur === sup).reduce((s, e) => s + e.montantDu, 0);
-    const totalDû = entries.filter(e => e.fournisseur === sup && isSupplierDebtEntry(e)).reduce((s, e) => s + e.montantDu, 0);
-    const totalPayé = charges.filter(c => c.fournisseur === sup).reduce((s, c) => s + c.montant, 0);
-    const ratio = totalDû > 0 ? Math.min(1, totalPayé / totalDû) : 0;
-    net += prodDû * (1 - ratio);
-  }
-  return Math.max(0, Math.round(net));
+  return productSupplierOutstanding(pid, entries, charges);
 }
 function matchesSupplier(record: { supplierId?: number; fournisseur?: string }, supplier: Pick<Supplier, "id"|"nom"> | string) {
   if (typeof supplier === "string") return record.fournisseur === supplier;

@@ -1,9 +1,9 @@
-import React, { useState, useRef } from "react";
-import { Search, Plus, Edit2, ArrowLeft, History, Camera, Trash2 } from "lucide-react";
+import React, { useState, useRef, useEffect } from "react";
+import { Search, Plus, Edit2, ArrowLeft, History, Camera, Trash2, AlertTriangle, PackageOpen } from "lucide-react";
 import type { Boutique, Product, StockEntry } from "../types";
 import { PLACEHOLDER_IMGS, inputCls } from "../constants";
 import { fmt, today, imgSrc, resizeImage } from "../utils/formatting";
-import { productQty, productMontant, productMontantNet, stockStatus, stockDot } from "../utils/inventory";
+import { productQty, productMontant, productSupplierOutstanding, stockEntrySupplierOutstanding, stockStatus, stockDot } from "../utils/inventory";
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
@@ -16,10 +16,13 @@ function sortStockEntriesNewestFirst(a: StockEntry, b: StockEntry) {
   return byTimestamp || b.id - a.id;
 }
 
-export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
+export function StockView({ boutique, onUpdate, logAction, initialFilter, initialSupplierId, initialEntryId, onInitialRoutePrepared }: {
   boutique: Boutique; onUpdate: (u: Partial<Boutique>) => void;
   logAction: (action: string, detail: string, icon: string) => void;
   initialFilter?: string;
+  initialSupplierId?: number;
+  initialEntryId?: number;
+  onInitialRoutePrepared?: () => void;
 }) {
   const { products, entries, suppliers } = boutique;
   const charges = boutique.charges ?? [];
@@ -33,6 +36,11 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
   const [addMode, setAddMode] = useState(false);
   const [editingProduct, setEditingProduct] = useState(false);
   const [showNew, setShowNew] = useState(false);
+  const [receiptSupplierId, setReceiptSupplierId] = useState<number|null>(null);
+  const initialRouteRef = useRef("");
+  const [editingEntryId, setEditingEntryId] = useState<number|null>(null);
+  const [editEntryQty, setEditEntryQty] = useState("");
+  const [stockCorrectionBusy, setStockCorrectionBusy] = useState<number|null>(null);
 
   // Entry form
   const [dUnit, setDUnit] = useState("yards");
@@ -117,10 +125,10 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
     const cat = cats.find(c => c.nom === p.categorie);
     const param = (boutique.productParams ?? []).find(x => x.productId === p.id);
     const eff = param ?? (cat && cat.nbPiecesParLot > 0 ? { nbPiecesParLot: cat.nbPiecesParLot, longueurParPiece: cat.longueurParPiece, unitVente: cat.unitVente } : null);
-    setDetail(p); setAddMode(false); setEditingProduct(false);
+    setDetail(p); setAddMode(receiptSupplierId != null); setEditingProduct(false);
     setDQty(""); setDMontant(""); setDPrixUnit("");
     setDUnit(eff?.unitVente ?? p.unit);
-    setDSupplierId(suppliers.find(s => s.nom === p.fournisseur)?.id ?? suppliers[0]?.id ?? null);
+    setDSupplierId(receiptSupplierId ?? suppliers.find(s => s.nom === p.fournisseur)?.id ?? suppliers[0]?.id ?? null);
     if (eff && eff.nbPiecesParLot > 0) {
       setDLotMode(true); setDLots("1");
       setDPieces(String(eff.nbPiecesParLot));
@@ -158,6 +166,7 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
     logAction("Entrée stock", `${detail.nom} · ${lab} · ${fmt(Number(dMontant) || 0)}`, "📦");
     setAddMode(false); setDQty(""); setDMontant(""); setDPrixUnit(""); setDSku("");
     setDLotMode(false); setDLots("1"); setDPieces(""); setDLongueur("");
+    setReceiptSupplierId(null);
   }
 
   async function submitNew() {
@@ -221,10 +230,29 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
     }
   }
 
-  // Stock correction
-  const [editingEntryId, setEditingEntryId] = useState<number|null>(null);
-  const [editEntryQty, setEditEntryQty] = useState("");
-  const [stockCorrectionBusy, setStockCorrectionBusy] = useState<number|null>(null);
+  useEffect(() => {
+    const routeKey = initialEntryId ? `entry:${initialEntryId}` : initialSupplierId ? `supplier:${initialSupplierId}` : "";
+    if (!routeKey || initialRouteRef.current === routeKey) return;
+    if (initialEntryId) {
+      const entry = entries.find(item => item.id === initialEntryId);
+      const product = entry && products.find(item => item.id === entry.productId);
+      if (!entry || !product) return;
+      initialRouteRef.current = routeKey;
+      setReceiptSupplierId(null);
+      openDetail(product);
+      setEditingEntryId(entry.id);
+      setEditEntryQty(String(entry.qty));
+      onInitialRoutePrepared?.();
+      return;
+    }
+    if (initialSupplierId && suppliers.some(item => item.id === initialSupplierId)) {
+      initialRouteRef.current = routeKey;
+      setReceiptSupplierId(initialSupplierId);
+      setSearch("");
+      setFilter("all");
+      onInitialRoutePrepared?.();
+    }
+  }, [initialEntryId, initialSupplierId, entries, products, suppliers, onInitialRoutePrepared]);
 
   async function saveEntryEdit(entryId: number) {
     const original = entries.find(e => e.id === entryId);
@@ -291,7 +319,7 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
   const filtered = products.filter(p => {
     const qty = productQty(p.id, entries);
     return p.nom.toLowerCase().includes(search.toLowerCase())
-      && (filter === "all" || stockStatus(qty) === filter)
+      && (filter === "all" || (filter === "negative" ? qty < 0 : stockStatus(qty) === filter))
       && (catFilter === "all" || p.categorie === catFilter);
   }).sort((a, b) => {
     if (sortBy === "qty") return productQty(b.id, entries) - productQty(a.id, entries);
@@ -307,7 +335,7 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
       </div>
 
       <div className="flex gap-2" style={{ overflowX: "auto", scrollbarWidth: "none" }}>
-        {[{ id: "all", label: "Tout", c: "#7A7055" }, { id: "ok", label: "✓ OK", c: "#1E9B1E" }, { id: "low", label: "⚠ Bas", c: "#C9A227" }, { id: "critical", label: "! Critique", c: "#ef4444" }].map(s => (
+        {[{ id: "all", label: "Tout", c: "#7A7055" }, { id: "ok", label: "✓ OK", c: "#1E9B1E" }, { id: "low", label: "⚠ Bas", c: "#C9A227" }, { id: "critical", label: "! Critique", c: "#ef4444" }, { id: "negative", label: "⛔ Écart", c: "#dc2626" }].map(s => (
           <button key={s.id} onClick={() => setFilter(s.id)} className="px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap flex-shrink-0"
             style={{ background: filter === s.id ? s.c : s.c + "22", color: filter === s.id ? "#fff" : s.c }}>{s.label}</button>
         ))}
@@ -337,12 +365,24 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
         ))}
       </div>
 
+      {receiptSupplierId != null && (() => {
+        const supplier = supplierById(receiptSupplierId);
+        if (!supplier) return null;
+        return <div className="flex items-center gap-3 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3">
+          <PackageOpen size={18} className="text-blue-700"/>
+          <div className="min-w-0 flex-1"><p className="text-sm font-black text-blue-900">Nouvelle réception pour {supplier.nom}</p><p className="text-xs text-blue-800">Choisissez un produit : le fournisseur est déjà sélectionné dans la réception.</p></div>
+          <button type="button" onClick={() => setReceiptSupplierId(null)} className="rounded-lg px-2 py-1 text-xs font-black text-blue-800 hover:bg-blue-100">Annuler</button>
+        </div>;
+      })()}
+
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
         {filtered.map(p => {
           const qty = productQty(p.id, entries);
           const dot = stockDot(stockStatus(qty));
+          const supplierDue = productSupplierOutstanding(p.id, entries, charges);
+          const isNegative = qty < 0;
           return (
-            <button key={p.id} onClick={() => openDetail(p)} className="bg-card rounded-2xl overflow-hidden border border-border text-left active:scale-[0.97] transition-transform">
+            <button key={p.id} onClick={() => openDetail(p)} className="bg-card rounded-2xl overflow-hidden border text-left active:scale-[0.97] transition-transform" style={{ borderColor:isNegative ? "#fecaca" : "var(--border)" }}>
               <div className="relative h-36 bg-muted">
                 <img src={imgSrc(p.img)} alt={p.nom} className="w-full h-full object-cover"/>
                 <div className="absolute inset-0" style={{ background: "linear-gradient(to top,rgba(22,27,36,.75) 0%,transparent 55%)" }}/>
@@ -360,7 +400,8 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
                   <span className="text-sm font-bold text-muted-foreground">{p.unit}</span>
                   <Edit2 size={14} className="ml-auto text-muted-foreground"/>
                 </div>
-                <p className="text-sm font-semibold text-muted-foreground mt-1">{fmt(productMontant(p.id, entries))} dû</p>
+                <p className="text-sm font-semibold text-muted-foreground mt-1">{fmt(supplierDue)} dû fourn.</p>
+                {isNegative && <p className="mt-2 flex items-start gap-1.5 text-xs font-black leading-snug text-red-700"><AlertTriangle size={14} className="mt-0.5 shrink-0"/>À vérifier — écart possible avec le stock réel</p>}
               </div>
             </button>
           );
@@ -388,7 +429,7 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
                       <p className="text-xs text-muted-foreground">{detail.unit}</p>
                     </div>
                     <div className="flex-1 bg-muted rounded-xl p-3 text-center">
-                      <p className="text-sm font-black" style={{ color: "#C9A227", fontFamily: "'Nunito', sans-serif" }}>{fmt(productMontantNet(detail.id, entries, charges))}</p>
+                      <p className="text-sm font-black" style={{ color: "#C9A227", fontFamily: "'Nunito', sans-serif" }}>{fmt(productSupplierOutstanding(detail.id, entries, charges))}</p>
                       <p className="text-xs text-muted-foreground">dû fourn.</p>
                     </div>
                   </div>
@@ -404,12 +445,14 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
                   + Recevoir
                 </button>
               </div>
+              {productQty(detail.id, entries) < 0 && <div className="mt-3 flex gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-xs text-red-800"><AlertTriangle size={15} className="mt-0.5 shrink-0"/><p><strong>À vérifier — écart possible avec le stock réel.</strong> Cette vente reste autorisée ; lancez un inventaire ciblé pour régulariser le produit sans modifier les ventes passées.</p></div>}
               <div>
                 <div className="flex items-center gap-2 mb-3"><History size={15} style={{ color: "#3b82f6" }}/><p className="text-xs font-black tracking-wider" style={{ color: "#3b82f6" }}>HISTORIQUE</p></div>
                 <div className="space-y-2">
                   {entries.filter(e => e.productId === detail.id).sort(sortStockEntriesNewestFirst).map(e => {
                     const isSale = e.qty < 0;
                     const isReturn = e.movementType === "retour";
+                    const remainingSupplierDue = stockEntrySupplierOutstanding(e, charges);
                     const entrySupplier = supplierById(e.supplierId) ?? suppliers.find(s => s.nom === e.fournisseur);
                     const sc = entrySupplier?.color ?? "#6b7280";
                     const isEditing = editingEntryId === e.id;
@@ -437,7 +480,7 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
                           </p>
                           <p className="text-xs text-muted-foreground">{isSale ? "Vente" : isReturn ? "Retour client" : e.nbPieces ? "Lot reçu" : "Achat"} · {(entrySupplier?.nom ?? e.fournisseur).replace("Vente → ", "")} · {e.date}{e.sku ? ` · SKU: ${e.sku}` : ""}</p>
                         </div>
-                        {!isSale && !isReturn && <p className="text-sm font-black" style={{ color: "#C9A227", fontFamily: "'Nunito', sans-serif" }}>{fmt(e.montantDu)}</p>}
+                        {!isSale && !isReturn && <div className="text-right"><p className="text-sm font-black" style={{ color: "#C9A227", fontFamily: "'Nunito', sans-serif" }}>{fmt(remainingSupplierDue)}</p><p className="text-[10px] text-muted-foreground">reste dû</p></div>}
                         {!isSale && !isReturn && (
                           <div className="flex gap-1 ml-1">
                             <button onClick={()=>{ setEditingEntryId(e.id); setEditEntryQty(String(e.qty)); }} className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background:"#3b82f615" }}><Edit2 size={12} style={{ color:"#3b82f6" }}/></button>
