@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { BookOpen, Wallet, FileText, Download } from "lucide-react";
-import type { Boutique, DashPeriod, ChargeCategorie } from "../types";
+import type { Boutique, DashPeriod, ChargeCategorie, PaymentMethod } from "../types";
 import { SEM, inputCls, PAYMENT_METHODS, PM_ICON, PM_COLOR, CHARGE_CATS, CHARGE_COLORS } from "../constants";
 import { fmt } from "../utils/formatting";
 import { invBadge, lineDispQty, lineDispUnit, lineTotal, filterByPeriod, invoiceMargin, supplierBalance } from "../utils/inventory";
@@ -57,7 +57,11 @@ export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique:
   const tauxMargeVentes= margeVentesData.ca !== 0 ? Math.round(margeVentes/Math.abs(margeVentesData.ca)*100) : 0;
   const resultatApresCharges = margeVentes - chargesExploitation;
 
-  const byMethode = PAYMENT_METHODS.map(m => ({
+  // Credits are created by an overpayment and become an "Avoir client" payment
+  // only when applied to a later invoice.  Keep it distinct from cash methods:
+  // it settles a sale but must not be mistaken for a new cash collection.
+  const reportPaymentMethods: PaymentMethod[] = [...PAYMENT_METHODS, "Avoir client"];
+  const byMethode = reportPaymentMethods.map(m => ({
     m, total: filtPayments.filter(payment=>payment.paymentMethod===m).reduce((sum,payment)=>sum + payment.signedAmount,0),
     count: filtPayments.filter(payment=>payment.paymentMethod===m).length,
   })).filter(r=>r.count>0);
@@ -111,7 +115,7 @@ h1{font-size:22px;font-weight:900;margin:0 0 2px}
 </div>
 ${byMethode.length>0?`<div class="section-title">Répartition par mode de paiement</div>
 ${byMethode.map(r=>`<div class="row"><span class="label">${PM_ICON[r.m]} ${r.m} <span class="muted">(${r.count})</span></span><span class="value">${fmt(r.total)}</span></div>`).join("")}
-<div class="row total-row"><span class="label">Total encaissé</span><span class="value green">${fmt(ca)}</span></div>`:""}
+<div class="row total-row"><span class="label">Total des règlements</span><span class="value green">${fmt(ca)}</span></div>${byMethode.some(r=>r.m === "Avoir client") ? `<p class="muted">Les avoirs règlent une facture avec un crédit déjà reçu ; ils ne constituent pas un nouvel encaissement.</p>` : ""}`:""}
 ${paidCharges.length>0?`<div class="section-title">Charges décaissées (${paidCharges.length})</div>
 ${byCategorie.map(r=>`<div class="row"><span class="label">${r.cat}</span><span class="value red">${fmt(r.montant)}</span></div>`).join("")}
 ${paidCharges.map(c=>`<div class="row"><span class="label" style="padding-left:12px;color:#888">· ${c.label} · ${formatPreciseDateTime(c.dateRaw) === "—" ? c.date : formatPreciseDateTime(c.dateRaw)}</span><span class="value muted">${fmt(chargeCashAmount(c))}</span></div>`).join("")}
@@ -304,10 +308,11 @@ ${invLines}
           </div>
           {byMethode.map((r,i)=>(
             <div key={i} className="flex items-center justify-between px-4 py-3 border-b border-border last:border-0">
-              <span className="text-sm flex items-center gap-2">{PM_ICON[r.m]} <span style={{color:PM_COLOR[r.m]}}>{r.m}</span><span className="text-xs text-muted-foreground">({r.count})</span></span>
+              <span className="text-sm flex items-center gap-2">{PM_ICON[r.m]} <span style={{color:PM_COLOR[r.m]}}>{r.m}</span><span className="text-xs text-muted-foreground">({r.count})</span>{r.m === "Avoir client"&&<span className="text-[10px] text-muted-foreground">crédit déjà reçu</span>}</span>
               <span className="font-black text-sm" style={{color:PM_COLOR[r.m],fontFamily:"'Nunito',sans-serif"}}>{fmt(r.total)}</span>
             </div>
           ))}
+          {byMethode.some(r=>r.m === "Avoir client")&&<p className="px-4 py-2.5 text-xs text-muted-foreground border-t border-border">Un avoir règle une facture avec un versement déjà reçu : il est affiché séparément pour éviter de le confondre avec un nouvel encaissement.</p>}
         </div>
       )}
 
