@@ -734,6 +734,14 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string): Promise<T | n
     const categoryById = new Map(categories.map((category: any) => [category.id, category]));
     const clientById = new Map(clients.map((client: any) => [client.id, client]));
     const supplierById = new Map(suppliers.map((supplier: any) => [supplier.id, supplier]));
+    // The supplier receipt document preserves the exact entered total. The
+    // stock unit price is stored with two decimals, so multiplying it back by
+    // a quantity must not replace that exact accounting amount.
+    const receiptAmountByEntryId = new Map(
+      charges
+        .filter((charge: any) => charge.source === "supplier_receipt" && charge.stock_entry_id != null)
+        .map((charge: any) => [charge.stock_entry_id, Number(charge.montant)]),
+    );
     const paymentsByInvoice = new Map<string, any[]>();
     for (const payment of payments) {
       const invoicePayments = paymentsByInvoice.get(payment.invoice_id) ?? [];
@@ -759,7 +767,7 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string): Promise<T | n
         longueurParPiece: Number(p.length_per_piece ?? 0),
         unitVente: p.unit,
       })),
-      entries: entries.filter(e => e.boutique_id === b.id).map(e => ({ id:e.id, productId:e.product_id, qty:Number(e.qty), unit:"unité", montantDu:Number(e.qty)*Number(e.prix_unit ?? 0), movementType:e.type ?? undefined, date:day(e.entry_date), recordedAt:e.entry_date, fournisseur:supplierById.get(e.supplier_id)?.nom ?? e.note ?? "", supplierId:e.supplier_id ?? undefined, reference:e.reference ?? undefined, operatorId:e.operator_id ?? undefined, operatorName:userById.get(e.operator_id)?.nom ?? undefined, invoiceId:undefined })),
+      entries: entries.filter(e => e.boutique_id === b.id).map(e => ({ id:e.id, productId:e.product_id, qty:Number(e.qty), unit:"unité", montantDu:receiptAmountByEntryId.get(e.id) ?? Number(e.qty)*Number(e.prix_unit ?? 0), movementType:e.type ?? undefined, date:day(e.entry_date), recordedAt:e.entry_date, fournisseur:supplierById.get(e.supplier_id)?.nom ?? e.note ?? "", supplierId:e.supplier_id ?? undefined, reference:e.reference ?? undefined, operatorId:e.operator_id ?? undefined, operatorName:userById.get(e.operator_id)?.nom ?? undefined, invoiceId:undefined })),
       clients: clients.filter(c => c.boutique_id === b.id).map(c => {
         // A wholesale client is stored as B2B with a marker in `contact`.
         const isWholesale = typeof c.contact === "string" && c.contact.includes(WHOLESALE_MARKER);
@@ -1072,7 +1080,7 @@ export async function loadBoutiqueSyncPatch(boutiqueId: string, sourceEvents: Bo
   const auditIds = ids("audit_log");
   const entryIds = records("stock_entry");
 
-  const [directProducts, categoryProducts, categories, entries, invoices, payments, clients, advances, suppliers, charges, sessions, logs] = await Promise.all([
+  const [directProducts, categoryProducts, categories, entries, invoices, payments, clients, advances, suppliers, charges, receiptCharges, sessions, logs] = await Promise.all([
     productIds.length ? dataRequest<any[]>(`products?select=*${scoped}${syncInFilter("id", productIds)}`) : Promise.resolve([]),
     categoryIds.length ? dataRequest<any[]>(`products?select=*${scoped}${syncInFilter("category_id", categoryIds)}`) : Promise.resolve([]),
     categoryIds.length ? dataRequest<any[]>(`categories?select=*${scoped}${syncInFilter("id", categoryIds)}`) : Promise.resolve([]),
@@ -1083,15 +1091,17 @@ export async function loadBoutiqueSyncPatch(boutiqueId: string, sourceEvents: Bo
     advanceIds.length ? dataRequest<any[]>(`client_advances?select=*${scoped}${syncInFilter("id", advanceIds)}&order=paid_at.desc,id.desc`) : Promise.resolve([]),
     supplierIds.length ? dataRequest<any[]>(`suppliers?select=*${scoped}${syncInFilter("id", supplierIds)}`) : Promise.resolve([]),
     chargeIds.length ? dataRequest<any[]>(`charges?select=*${scoped}${syncInFilter("id", chargeIds)}`) : Promise.resolve([]),
+    entryIds.length ? dataRequest<any[]>(`charges?select=*${scoped}&source=eq.supplier_receipt${syncInFilter("stock_entry_id", entryIds)}`) : Promise.resolve([]),
     caisseIds.length ? dataRequest<any[]>(`caisse_sessions?select=*${scoped}${syncInFilter("id", caisseIds)}`) : Promise.resolve([]),
     auditIds.length ? dataRequest<any[]>(`audit_log?select=*${scoped}${syncInFilter("id", auditIds)}&order=created_at.desc`) : Promise.resolve([]),
   ]);
   // A category rename changes the denormalized category label displayed on
   // every product in that category, so refresh that small product slice too.
   const products = [...new Map([...directProducts, ...categoryProducts].map(row => [row.id, row])).values()];
+  const allCharges = [...new Map([...charges, ...receiptCharges].map(row => [row.id, row])).values()];
   const extraCategoryIds = products.map(row => row.category_id).filter(Boolean);
   const invoiceClientIds = invoices.map(row => row.client_id).filter(Boolean);
-  const userIds = [...new Set([...invoices.map(row => row.operator_id), ...entries.map(row => row.operator_id), ...charges.map(row => row.operator_id), ...logs.map(row => row.user_id)].filter(Boolean))];
+  const userIds = [...new Set([...invoices.map(row => row.operator_id), ...entries.map(row => row.operator_id), ...allCharges.map(row => row.operator_id), ...logs.map(row => row.user_id)].filter(Boolean))];
   const [extraCategories, invoiceClients, users] = await Promise.all([
     extraCategoryIds.length ? dataRequest<any[]>(`categories?select=id,nom${scoped}${syncInFilter("id", extraCategoryIds)}`) : Promise.resolve([]),
     invoiceClientIds.length ? dataRequest<any[]>(`clients?select=id,type,contact${scoped}${syncInFilter("id", invoiceClientIds)}`) : Promise.resolve([]),
@@ -1100,6 +1110,11 @@ export async function loadBoutiqueSyncPatch(boutiqueId: string, sourceEvents: Bo
   const categoryById = new Map([...categories, ...extraCategories].map(row => [row.id, row]));
   const clientById = new Map([...clients, ...invoiceClients].map(row => [row.id, row]));
   const userById = new Map(users.map(row => [row.id, row]));
+  const receiptAmountByEntryId = new Map(
+    allCharges
+      .filter(row => row.source === "supplier_receipt" && row.stock_entry_id != null)
+      .map(row => [row.stock_entry_id, Number(row.montant)]),
+  );
   const paymentsByInvoice = new Map<string, any[]>();
   payments.forEach(row => paymentsByInvoice.set(row.invoice_id, [...(paymentsByInvoice.get(row.invoice_id) ?? []), row]));
 
@@ -1109,7 +1124,7 @@ export async function loadBoutiqueSyncPatch(boutiqueId: string, sourceEvents: Bo
     patch.products = products.map(row => ({ id:row.id, nom:row.nom, img:row.image_url ?? "", unit:row.unit, fournisseur:row.supplier_name ?? "", categorie:categoryById.get(row.category_id)?.nom, prixVente:Number(row.prix_vente ?? 0), prixAchat:Number(row.prix_achat ?? 0) }));
     patch.productParams = products.filter(row => row.pieces_per_lot != null || row.length_per_piece != null).map(row => ({ productId:row.id, nbPiecesParLot:Number(row.pieces_per_lot ?? 0), longueurParPiece:Number(row.length_per_piece ?? 0), unitVente:row.unit }));
   }
-  if (entries.length) patch.entries = entries.map(row => ({ id:row.id, productId:row.product_id, qty:Number(row.qty), unit:"unité", montantDu:Number(row.qty) * Number(row.prix_unit ?? 0), movementType:row.type ?? undefined, date:syncDate(row.entry_date), recordedAt:row.entry_date, fournisseur:row.note ?? "", supplierId:row.supplier_id ?? undefined, reference:row.reference ?? undefined, operatorId:row.operator_id ?? undefined, operatorName:userById.get(row.operator_id)?.nom ?? undefined, invoiceId:undefined }));
+  if (entries.length) patch.entries = entries.map(row => ({ id:row.id, productId:row.product_id, qty:Number(row.qty), unit:"unité", montantDu:receiptAmountByEntryId.get(row.id) ?? Number(row.qty) * Number(row.prix_unit ?? 0), movementType:row.type ?? undefined, date:syncDate(row.entry_date), recordedAt:row.entry_date, fournisseur:row.note ?? "", supplierId:row.supplier_id ?? undefined, reference:row.reference ?? undefined, operatorId:row.operator_id ?? undefined, operatorName:userById.get(row.operator_id)?.nom ?? undefined, invoiceId:undefined }));
   if (clients.length) patch.clients = clients.map(row => {
     const wholesale = typeof row.contact === "string" && row.contact.includes(WHOLESALE_MARKER);
     return { id:row.id, nom:row.nom, type:wholesale ? "Grossiste" : row.type, tel:row.tel ?? "", total:Number(row.total ?? 0), last:syncDate(row.last_invoice_at), ville:row.ville ?? "", adresse:row.adresse ?? undefined, email:row.email ?? undefined, contact:wholesale ? row.contact.replace(WHOLESALE_MARKER, "").trim() || undefined : row.contact ?? undefined, paymentTermsDays:row.payment_terms_days ?? undefined, linkedBoutiqueId:row.linked_boutique_id ?? undefined };
@@ -1128,7 +1143,7 @@ export async function loadBoutiqueSyncPatch(boutiqueId: string, sourceEvents: Bo
     const client = clientById.get(row.client_id);
     return { id:row.id, clientId:row.client_id ?? undefined, client:row.client_nom ?? "Client comptoir", clientTel:row.client_tel ?? undefined, clientType:row.client_type_snapshot ?? client?.type ?? undefined, clientEmailSnapshot:row.client_email_snapshot ?? undefined, clientAdresseSnapshot:row.client_adresse_snapshot ?? undefined, clientVilleSnapshot:row.client_ville_snapshot ?? undefined, clientTypeSnapshot:row.client_type_snapshot ?? undefined, boutiqueNomSnapshot:row.boutique_nom_snapshot ?? undefined, boutiqueVilleSnapshot:row.boutique_ville_snapshot ?? undefined, boutiqueAdresseSnapshot:row.boutique_adresse_snapshot ?? undefined, boutiqueTelSnapshot:row.boutique_tel_snapshot ?? undefined, boutiqueEmailSnapshot:row.boutique_email_snapshot ?? undefined, boutiqueLogoSnapshot:row.boutique_logo_snapshot ?? undefined, montant:Number(row.montant), acompte:paid, date:syncDate(row.invoice_date), dateRaw:row.invoice_date, dueDate:row.due_date ?? undefined, status:paid >= Number(row.montant) ? "payé" : paid > 0 ? "acompte" : row.status === "en_attente" ? "en attente" : row.status, type:row.type, returnOfInvoiceId:row.return_of_invoice_id ?? undefined, operatorId:row.operator_id ?? undefined, operatorNom:row.operator_nom_snapshot ?? operator.nom ?? undefined, operatorColor:operator.color ?? undefined, paymentMethod:row.payment_method ?? undefined, payments:invoicePayments.map(payment => ({ id:payment.id, amount:Number(payment.amount), paymentMethod:payment.payment_method, paidAt:payment.paid_at, recordedAt:payment.recorded_at, operatorId:payment.operator_id ?? undefined, operatorName:payment.operator_name, batchId:payment.batch_id, source:payment.source })), lines:(row.invoice_lines ?? []).map((line:any) => ({ productId:line.product_id, nom:line.nom, qty:Number(line.qty), unit:line.unit ?? "unité", prixUnit:Number(line.prix_unit), prixAchat:line.prix_achat != null ? Number(line.prix_achat) : undefined, sellUnit:line.sell_unit ?? undefined, sellQty:line.sell_qty ? Number(line.sell_qty) : undefined })) };
   });
-  if (charges.length) patch.charges = charges.map(row => ({ id:row.id, label:row.label, montant:Number(row.montant), date:syncDate(row.charge_date), dateRaw:row.charge_date, categorie:row.categorie ?? "Autre", recurrence:row.recurrence ?? "unique", note:row.note ?? undefined, fournisseur:row.fournisseur ?? undefined, supplierId:row.supplier_id ?? undefined, paymentMethod:row.payment_method ?? undefined, operatorId:row.operator_id ?? undefined, operatorName:userById.get(row.operator_id)?.nom ?? undefined, status:row.status ?? "paid", paidAmount:Number(row.paid_amount ?? row.montant), transferId:row.transfer_id ?? undefined, source:row.source ?? "manual", dueDate:row.due_date ?? undefined, stockEntryId:row.stock_entry_id ?? undefined }));
+  if (allCharges.length) patch.charges = allCharges.map(row => ({ id:row.id, label:row.label, montant:Number(row.montant), date:syncDate(row.charge_date), dateRaw:row.charge_date, categorie:row.categorie ?? "Autre", recurrence:row.recurrence ?? "unique", note:row.note ?? undefined, fournisseur:row.fournisseur ?? undefined, supplierId:row.supplier_id ?? undefined, paymentMethod:row.payment_method ?? undefined, operatorId:row.operator_id ?? undefined, operatorName:userById.get(row.operator_id)?.nom ?? undefined, status:row.status ?? "paid", paidAmount:Number(row.paid_amount ?? row.montant), transferId:row.transfer_id ?? undefined, source:row.source ?? "manual", dueDate:row.due_date ?? undefined, stockEntryId:row.stock_entry_id ?? undefined }));
   if (sessions.length) patch.caisseSessions = sessions.map(row => ({ id:row.id, openedAt:row.opened_at, closedAt:row.closed_at ?? undefined, fondDeCaisse:Number(row.fond_ouverture ?? 0), openedBy:row.opened_by ?? "", closedBy:row.closed_by ?? "" }));
   if (logs.length) patch.auditLog = logs.map(row => {
     const timestamp = new Date(row.created_at).getTime(); const user = userById.get(row.user_id) ?? {};
@@ -1335,6 +1350,23 @@ export async function recordStockMovement(params:{ boutiqueId:string; productId:
   return dataRequest<{ entry_id:number; product_id:number; stock:number; supplier_id?:number; charge_id?:number|null; due_date?:string|null }>("rpc/record_stock_movement", {
     method:"POST", headers:{ Prefer:"return=representation" },
     body:JSON.stringify({ p_boutique_id:params.boutiqueId, p_product_id:params.productId, p_idempotency_key:crypto.randomUUID(), p_qty:params.qty, p_type:params.type, p_prix_unit:params.prixUnit ?? 0, p_note:params.note ?? null, p_supplier_id:params.supplierId ?? null, p_reference:params.reference ?? null }),
+  });
+}
+
+/** Corrects the original receipt and its linked supplier payable atomically. */
+export async function correctSupplierReceipt(params:{ boutiqueId:string; entryId:number; quantity:number; amount:number }) {
+  return dataRequest<{
+    entry_id:number; product_id:number; qty:number; amount:number; unit_price:number; stock:number;
+    charge_id:number|null; paid_amount:number; remaining_due:number|null; charge_status:"pending"|"partial"|"paid"|null;
+  }>("rpc/correct_supplier_receipt", {
+    method:"POST", headers:{ Prefer:"return=representation" },
+    body:JSON.stringify({
+      p_boutique_id:params.boutiqueId,
+      p_stock_entry_id:params.entryId,
+      p_idempotency_key:crypto.randomUUID(),
+      p_new_qty:params.quantity,
+      p_new_amount:params.amount,
+    }),
   });
 }
 

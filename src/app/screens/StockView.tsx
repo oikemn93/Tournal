@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { Search, Plus, Edit2, ArrowLeft, History, Camera, Trash2, AlertTriangle, PackageOpen } from "lucide-react";
+import { Search, Plus, Edit2, ArrowLeft, History, Camera, AlertTriangle, PackageOpen } from "lucide-react";
 import type { Boutique, Product, StockEntry } from "../types";
 import { PLACEHOLDER_IMGS, inputCls } from "../constants";
 import { fmt, today, imgSrc, resizeImage } from "../utils/formatting";
@@ -7,7 +7,7 @@ import { productQty, productMontant, productSupplierOutstanding, stockEntrySuppl
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
-import { createProduct, recordStockMovement, updateProduct } from "../../lib/api";
+import { correctSupplierReceipt, createProduct, recordStockMovement, updateProduct } from "../../lib/api";
 
 function sortStockEntriesNewestFirst(a: StockEntry, b: StockEntry) {
   const aTime = a.recordedAt ? Date.parse(a.recordedAt) : Number.NaN;
@@ -40,6 +40,7 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter, initia
   const initialRouteRef = useRef("");
   const [editingEntryId, setEditingEntryId] = useState<number|null>(null);
   const [editEntryQty, setEditEntryQty] = useState("");
+  const [editEntryAmount, setEditEntryAmount] = useState("");
   const [stockCorrectionBusy, setStockCorrectionBusy] = useState<number|null>(null);
 
   // Entry form
@@ -240,8 +241,11 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter, initia
       initialRouteRef.current = routeKey;
       setReceiptSupplierId(null);
       openDetail(product);
-      setEditingEntryId(entry.id);
-      setEditEntryQty(String(entry.qty));
+      if (entry.movementType === "achat" && entry.qty > 0) {
+        setEditingEntryId(entry.id);
+        setEditEntryQty(String(entry.qty));
+        setEditEntryAmount(String(entry.montantDu));
+      }
       onInitialRoutePrepared?.();
       return;
     }
@@ -257,60 +261,33 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter, initia
   async function saveEntryEdit(entryId: number) {
     const original = entries.find(e => e.id === entryId);
     const desiredQty = Number(editEntryQty);
-    if (!original || !Number.isFinite(desiredQty) || desiredQty <= 0 || stockCorrectionBusy != null) return;
-    const delta = desiredQty - original.qty;
-    if (Math.abs(delta) < 0.000001) { setEditingEntryId(null); return; }
-    const originalUnitCost = original.qty !== 0 ? Math.abs(original.montantDu / original.qty) : 0;
-    setStockCorrectionBusy(entryId);
-    try {
-      await recordStockMovement({
-        boutiqueId:boutique.id,
-        productId:original.productId,
-        qty:delta,
-        type:"ajustement",
-        prixUnit:originalUnitCost,
-        note:`Correction entrée #${entryId}`,
-        supplierId:original.supplierId,
-      });
-      const adjustment = {
-        id:Date.now(), productId:original.productId, qty:delta, unit:original.unit,
-        montantDu:delta * originalUnitCost, date:today(), recordedAt:new Date().toISOString(), fournisseur:original.supplierId ? (supplierById(original.supplierId)?.nom ?? original.fournisseur) : `Correction entrée #${entryId}`, supplierId:original.supplierId, movementType:"ajustement" as const,
-      };
-      onUpdate({ entries:[...entries, adjustment] });
-      logAction("Correction stock", `Entrée #${entryId} · ajustement ${delta > 0 ? "+" : ""}${delta} ${original.unit}`, "✏️");
-      setEditingEntryId(null);
-    } catch (error) {
-      alert(error instanceof Error ? error.message : "Correction de stock impossible");
-    } finally {
-      setStockCorrectionBusy(null);
+    const desiredAmount = Number(editEntryAmount);
+    if (!original || original.movementType !== "achat" || original.qty <= 0 || !Number.isFinite(desiredQty) || desiredQty <= 0 || !Number.isFinite(desiredAmount) || desiredAmount < 0 || stockCorrectionBusy != null) return;
+    const linkedReceipt = charges.find(charge => charge.source === "supplier_receipt" && charge.stockEntryId === entryId);
+    const alreadyPaid = Number(linkedReceipt?.paidAmount ?? 0);
+    if (desiredAmount < alreadyPaid) {
+      alert(`Le montant ne peut pas être inférieur aux ${fmt(alreadyPaid)} déjà versés au fournisseur.`);
+      return;
     }
-  }
-
-  async function deleteEntry(entryId: number) {
-    const original = entries.find(e => e.id === entryId);
-    if (!original || original.qty <= 0 || stockCorrectionBusy != null) return;
-    if (!window.confirm("Annuler cette réception ? L'entrée d'origine restera dans l'historique et un mouvement inverse sera ajouté.")) return;
-    const unitCost = original.qty !== 0 ? Math.abs(original.montantDu / original.qty) : 0;
+    if (Math.abs(desiredQty - original.qty) < 0.000001 && Math.abs(desiredAmount - original.montantDu) < 0.000001) { setEditingEntryId(null); return; }
     setStockCorrectionBusy(entryId);
     try {
-      await recordStockMovement({
-        boutiqueId:boutique.id,
-        productId:original.productId,
-        qty:-original.qty,
-        type:"ajustement",
-        prixUnit:unitCost,
-        note:`Annulation entrée #${entryId}`,
-        supplierId:original.supplierId,
+      const persisted = await correctSupplierReceipt({ boutiqueId:boutique.id, entryId, quantity:desiredQty, amount:desiredAmount });
+      onUpdate({
+        entries:entries.map(entry => entry.id === entryId ? { ...entry, qty:persisted.qty, montantDu:persisted.amount } : entry),
+        ...(persisted.charge_id == null ? {} : {
+          charges:charges.map(charge => charge.id === persisted.charge_id ? {
+            ...charge,
+            montant:persisted.amount,
+            paidAmount:persisted.paid_amount,
+            status:persisted.charge_status ?? charge.status,
+          } : charge),
+        }),
       });
-      const reversal = {
-        id:Date.now(), productId:original.productId, qty:-original.qty, unit:original.unit,
-        montantDu:-Math.abs(original.montantDu), date:today(), recordedAt:new Date().toISOString(), fournisseur:original.supplierId ? (supplierById(original.supplierId)?.nom ?? original.fournisseur) : `Annulation entrée #${entryId}`, supplierId:original.supplierId, movementType:"ajustement" as const,
-      };
-      onUpdate({ entries:[...entries, reversal] });
-      logAction("Annulation réception", `Entrée #${entryId} · mouvement inverse ${-original.qty} ${original.unit}`, "↩️");
+      logAction("Réception corrigée", `Entrée #${entryId} · ${original.qty} → ${desiredQty} ${original.unit} · ${fmt(original.montantDu)} → ${fmt(desiredAmount)}`, "✏️");
       setEditingEntryId(null);
     } catch (error) {
-      alert(error instanceof Error ? error.message : "Annulation de la réception impossible");
+      alert(error instanceof Error ? error.message : "Modification de la réception impossible");
     } finally {
       setStockCorrectionBusy(null);
     }
@@ -452,6 +429,7 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter, initia
                   {entries.filter(e => e.productId === detail.id).sort(sortStockEntriesNewestFirst).map(e => {
                     const isSale = e.qty < 0;
                     const isReturn = e.movementType === "retour";
+                    const isReceipt = e.movementType === "achat" && e.qty > 0;
                     const remainingSupplierDue = stockEntrySupplierOutstanding(e, charges);
                     const entrySupplier = supplierById(e.supplierId) ?? suppliers.find(s => s.nom === e.fournisseur);
                     const sc = entrySupplier?.color ?? "#6b7280";
@@ -460,13 +438,19 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter, initia
                     const hasDownstreamConsumption = entries.some(candidate => candidate.productId === e.productId && candidate.qty < 0 && ((Number.isFinite(entryTime) && candidate.recordedAt ? Date.parse(candidate.recordedAt) > entryTime : candidate.id > e.id)));
                     if (isEditing) return (
                       <div key={e.id} className="rounded-xl px-3 py-3 space-y-2 border-2" style={{ borderColor:"#3b82f6", background:"#3b82f608" }}>
-                        <p className="text-xs font-bold" style={{ color:"#3b82f6" }}>Corriger la quantité</p>
-                        <p className="text-xs text-muted-foreground">L'entrée d'origine restera intacte. Tournal ajoutera uniquement le mouvement d'ajustement nécessaire.</p>
-                        {hasDownstreamConsumption&&<p className="rounded-lg px-2.5 py-2 text-xs font-semibold" style={{background:"#fef3c7",color:"#92400e"}}>Attention : ce produit a déjà eu des sorties après cette réception. L’ajustement modifie le stock actuel ; les marges des ventes déjà encaissées restent volontairement figées.</p>}
-                        <input value={editEntryQty} onChange={e2=>setEditEntryQty(e2.target.value)} placeholder="Nouvelle quantité" type="number" min="0.0001" className={inputCls} autoFocus onKeyDown={ev=>ev.key==="Enter"&&saveEntryEdit(e.id)}/>
+                        <p className="text-xs font-bold" style={{ color:"#3b82f6" }}>Modifier la réception</p>
+                        <p className="text-xs text-muted-foreground">La quantité, le montant d'achat et le restant dû fournisseur seront mis à jour ensemble. La modification sera conservée dans le Journal d’activité.</p>
+                        {hasDownstreamConsumption&&<p className="rounded-lg px-2.5 py-2 text-xs font-semibold" style={{background:"#fef3c7",color:"#92400e"}}>Attention : ce produit a déjà eu des sorties après cette réception. Le stock et le montant dû sont corrigés ; les marges des ventes déjà encaissées restent volontairement figées.</p>}
+                        <Field label="NOUVELLE QUANTITÉ">
+                          <input value={editEntryQty} onChange={e2=>setEditEntryQty(e2.target.value)} placeholder="0" type="number" min="0.0001" className={inputCls} autoFocus onKeyDown={ev=>ev.key==="Enter"&&saveEntryEdit(e.id)}/>
+                        </Field>
+                        <Field label="MONTANT TOTAL DE LA RÉCEPTION">
+                          <input value={editEntryAmount} onChange={e2=>setEditEntryAmount(e2.target.value)} placeholder="0 F" type="number" min="0" step="0.01" inputMode="decimal" className={inputCls} onKeyDown={ev=>ev.key==="Enter"&&saveEntryEdit(e.id)}/>
+                        </Field>
+                        {Number.isFinite(Number(editEntryQty)) && Number(editEntryQty) > 0 && Number.isFinite(Number(editEntryAmount)) && <p className="text-xs text-muted-foreground">Prix unitaire recalculé : {fmt(Number(editEntryAmount) / Number(editEntryQty))}</p>}
                         <div className="flex gap-2">
                           <button disabled={stockCorrectionBusy===e.id} onClick={()=>setEditingEntryId(null)} className="flex-1 py-2 rounded-xl text-xs font-bold disabled:opacity-40" style={{ background:"#EEE9D8", color:"#7A7055" }}>Annuler</button>
-                          <button disabled={stockCorrectionBusy===e.id} onClick={()=>saveEntryEdit(e.id)} className="flex-1 py-2 rounded-xl text-xs font-bold text-white disabled:opacity-40" style={{ background:"#3b82f6" }}>{stockCorrectionBusy===e.id?"Ajustement…":"Ajouter l'ajustement"}</button>
+                          <button disabled={stockCorrectionBusy===e.id} onClick={()=>saveEntryEdit(e.id)} className="flex-1 py-2 rounded-xl text-xs font-bold text-white disabled:opacity-40" style={{ background:"#3b82f6" }}>{stockCorrectionBusy===e.id?"Enregistrement…":"Enregistrer"}</button>
                         </div>
                       </div>
                     );
@@ -478,14 +462,11 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter, initia
                             {isSale ? "−" : "+"}{Math.abs(e.qty)} <span className="text-muted-foreground font-normal">{e.unit}</span>
                             {e.nbPieces ? <span className="text-xs text-muted-foreground font-normal ml-1">({e.nbLots && e.nbLots > 1 ? `${e.nbLots}lots×` : ""}{e.nbPieces}p{e.longueurPiece ? `×${e.longueurPiece}` : ""})</span> : null}
                           </p>
-                          <p className="text-xs text-muted-foreground">{isSale ? "Vente" : isReturn ? "Retour client" : e.nbPieces ? "Lot reçu" : "Achat"} · {(entrySupplier?.nom ?? e.fournisseur).replace("Vente → ", "")} · {e.date}{e.sku ? ` · SKU: ${e.sku}` : ""}</p>
+                          <p className="text-xs text-muted-foreground">{isSale ? "Vente" : isReturn ? "Retour client" : e.movementType === "inventaire" ? "Inventaire" : e.movementType === "ajustement" ? "Ajustement" : e.nbPieces ? "Lot reçu" : "Achat"} · {(entrySupplier?.nom ?? e.fournisseur).replace("Vente → ", "")} · {e.date}{e.sku ? ` · SKU: ${e.sku}` : ""}</p>
                         </div>
-                        {!isSale && !isReturn && <div className="text-right"><p className="text-sm font-black" style={{ color: "#C9A227", fontFamily: "'Nunito', sans-serif" }}>{fmt(remainingSupplierDue)}</p><p className="text-[10px] text-muted-foreground">reste dû</p></div>}
-                        {!isSale && !isReturn && (
-                          <div className="flex gap-1 ml-1">
-                            <button onClick={()=>{ setEditingEntryId(e.id); setEditEntryQty(String(e.qty)); }} className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background:"#3b82f615" }}><Edit2 size={12} style={{ color:"#3b82f6" }}/></button>
-                            <button onClick={()=>deleteEntry(e.id)} className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background:"#ef444415" }}><Trash2 size={12} style={{ color:"#ef4444" }}/></button>
-                          </div>
+                        {isReceipt && <div className="text-right"><p className="text-sm font-black" style={{ color: "#C9A227", fontFamily: "'Nunito', sans-serif" }}>{fmt(remainingSupplierDue)}</p><p className="text-[10px] text-muted-foreground">reste dû</p></div>}
+                        {isReceipt && (
+                          <button onClick={()=>{ setEditingEntryId(e.id); setEditEntryQty(String(e.qty)); setEditEntryAmount(String(e.montantDu)); }} className="w-7 h-7 rounded-lg flex items-center justify-center ml-1" style={{ background:"#3b82f615" }} aria-label="Modifier la réception"><Edit2 size={12} style={{ color:"#3b82f6" }}/></button>
                         )}
                       </div>
                     );

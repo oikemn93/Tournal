@@ -1,9 +1,9 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { BookOpen, Wallet, FileText, Download } from "lucide-react";
 import type { Boutique, DashPeriod, ChargeCategorie } from "../types";
 import { SEM, inputCls, PAYMENT_METHODS, PM_ICON, PM_COLOR, CHARGE_CATS, CHARGE_COLORS } from "../constants";
 import { fmt } from "../utils/formatting";
-import { invBadge, lineDispQty, lineDispUnit, lineTotal, filterByPeriod, invoiceMargin } from "../utils/inventory";
+import { invBadge, lineDispQty, lineDispUnit, lineTotal, filterByPeriod, invoiceMargin, supplierBalance } from "../utils/inventory";
 import { Modal } from "../components/Modal";
 import { filterPaymentEventsByPeriod, invoicePaidAmount, invoiceRemainingAmount } from "../utils/payments";
 
@@ -27,9 +27,24 @@ export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique:
   const nbVentes     = new Set(filtPayments.filter(payment=>payment.signedAmount>0).map(payment=>payment.invoiceId)).size;
   const panierMoyen  = nbVentes > 0 ? ca / nbVentes : 0;
   const impayé       = filtInv.filter(i=>invoiceSign(i)>0).reduce((s,i)=>s+invoiceRemainingAmount(i),0);
-  const chargeCashAmount = (charge: typeof charges[number]) => charge.source === "transfer" ? Number(charge.paidAmount ?? 0) : charge.montant;
-  const totalCharges = filtCh.reduce((s,c)=>s+chargeCashAmount(c),0);
-  const chargesExploitation = filtCh.filter(c=>c.categorie!=="Achat stock").reduce((s,c)=>s+chargeCashAmount(c),0);
+  // A supplier receipt is a payable commitment, not money that has already
+  // left the cash desk. The later supplier-payment charge is the actual cash
+  // outflow, so counting both would double-count supplier spending.
+  const chargeCashAmount = (charge: typeof charges[number]) =>
+    charge.source === "transfer" ? Number(charge.paidAmount ?? 0)
+    : charge.source === "supplier_receipt" ? 0
+    : Number(charge.montant);
+  const paidCharges = filtCh.filter(charge => charge.source !== "supplier_receipt");
+  const supplierReceipts = filtCh.filter(charge => charge.source === "supplier_receipt");
+  const supplierReceiptAmount = supplierReceipts.reduce((sum, charge) => sum + Number(charge.montant), 0);
+  const supplierReceiptPaid = supplierReceipts.reduce((sum, charge) => sum + Number(charge.paidAmount ?? 0), 0);
+  const supplierReceiptDue = Math.max(0, supplierReceiptAmount - supplierReceiptPaid);
+  const supplierOutstanding = useMemo(
+    () => (boutique.suppliers ?? []).reduce((sum, supplier) => sum + supplierBalance(supplier, entries, charges), 0),
+    [boutique.suppliers, entries, charges],
+  );
+  const totalCharges = paidCharges.reduce((s,c)=>s+chargeCashAmount(c),0);
+  const chargesExploitation = paidCharges.filter(c=>c.categorie!=="Achat stock").reduce((s,c)=>s+chargeCashAmount(c),0);
 
   // Product margin (sale price − FIFO cost of goods), returns counted negatively.
   // Only computed/shown for users with the "Voir les marges" right.
@@ -48,7 +63,7 @@ export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique:
   })).filter(r=>r.count>0);
 
   const byCategorie = CHARGE_CATS.map(cat=>({
-    cat, montant: filtCh.filter(c=>c.categorie===cat).reduce((s,c)=>s+chargeCashAmount(c),0)
+    cat, montant: paidCharges.filter(c=>c.categorie===cat).reduce((s,c)=>s+chargeCashAmount(c),0)
   })).filter(r=>r.montant>0);
 
   const periodLabel: Record<DashPeriod,string> = { jour:"Aujourd'hui", semaine:"Cette semaine", mois:"Ce mois", annee:"Cette année", custom:"Période personnalisée" };
@@ -97,20 +112,30 @@ h1{font-size:22px;font-weight:900;margin:0 0 2px}
 ${byMethode.length>0?`<div class="section-title">Répartition par mode de paiement</div>
 ${byMethode.map(r=>`<div class="row"><span class="label">${PM_ICON[r.m]} ${r.m} <span class="muted">(${r.count})</span></span><span class="value">${fmt(r.total)}</span></div>`).join("")}
 <div class="row total-row"><span class="label">Total encaissé</span><span class="value green">${fmt(ca)}</span></div>`:""}
-${filtCh.length>0?`<div class="section-title">Charges (${filtCh.length})</div>
+${paidCharges.length>0?`<div class="section-title">Charges décaissées (${paidCharges.length})</div>
 ${byCategorie.map(r=>`<div class="row"><span class="label">${r.cat}</span><span class="value red">${fmt(r.montant)}</span></div>`).join("")}
-${filtCh.map(c=>`<div class="row"><span class="label" style="padding-left:12px;color:#888">· ${c.label}</span><span class="value muted">${fmt(chargeCashAmount(c))}</span></div>`).join("")}
+${paidCharges.map(c=>`<div class="row"><span class="label" style="padding-left:12px;color:#888">· ${c.label}</span><span class="value muted">${fmt(chargeCashAmount(c))}</span></div>`).join("")}
 <div class="row total-row"><span class="label">Total charges</span><span class="value red">${fmt(totalCharges)}</span></div>
 ${canSeeMargin && margeVentesData.has ? `<div class="row total-row" style="border-top:2px solid ${resultatApresCharges>=0?"#1E9B1E":"#ef4444"}"><span class="label" style="color:${resultatApresCharges>=0?"#1E9B1E":"#ef4444"}">Résultat après charges</span><span class="value" style="color:${resultatApresCharges>=0?"#1E9B1E":"#ef4444"}">${fmt(resultatApresCharges)}</span></div>` : ""}`:""}
+${supplierReceipts.length>0?`<div class="section-title">Réceptions fournisseur — engagement non décaissé</div>
+${supplierReceipts.map(c=>`<div class="row"><span class="label">· ${c.label}</span><span class="value muted">Reçu ${fmt(c.montant)} · réglé ${fmt(Number(c.paidAmount ?? 0))} · reste ${fmt(Math.max(0, Number(c.montant)-Number(c.paidAmount ?? 0)))}</span></div>`).join("")}
+<div class="row total-row"><span class="label">Reste à payer sur la période</span><span class="value orange">${fmt(supplierReceiptDue)}</span></div>`:""}
+<div class="row"><span class="label">Solde fournisseurs actuel</span><span class="value orange">${fmt(supplierOutstanding)}</span></div>
 </body></html>`;
   }
 
   function buildFullHtml() {
-    const chargesBlock = filtCh.length > 0 ? `
-<div class="section-title">Charges (${filtCh.length})</div>
+    const chargesBlock = paidCharges.length > 0 ? `
+<div class="section-title">Charges décaissées (${paidCharges.length})</div>
 <table><thead><tr><th>Libellé</th><th>Catégorie</th><th>Date</th><th class="val">Montant</th></tr></thead><tbody>
-${filtCh.map(c=>`<tr><td>${c.label}</td><td>${c.categorie}</td><td>${c.date}</td><td class="val">${fmt(chargeCashAmount(c))}</td></tr>`).join("")}
+${paidCharges.map(c=>`<tr><td>${c.label}</td><td>${c.categorie}</td><td>${c.date}</td><td class="val">${fmt(chargeCashAmount(c))}</td></tr>`).join("")}
 <tr class="total-row"><td colspan="3"><b>TOTAL CHARGES</b></td><td class="val red"><b>${fmt(totalCharges)}</b></td></tr>
+</tbody></table>` : "";
+    const supplierReceiptsBlock = supplierReceipts.length > 0 ? `
+<div class="section-title">Réceptions fournisseur — engagement non décaissé</div>
+<table><thead><tr><th>Libellé</th><th>Date</th><th class="val">Réception</th><th class="val">Réglé</th><th class="val">Reste dû</th></tr></thead><tbody>
+${supplierReceipts.map(c=>`<tr><td>${c.label}</td><td>${c.date}</td><td class="val">${fmt(c.montant)}</td><td class="val">${fmt(Number(c.paidAmount ?? 0))}</td><td class="val red">${fmt(Math.max(0, Number(c.montant)-Number(c.paidAmount ?? 0)))}</td></tr>`).join("")}
+<tr class="total-row"><td colspan="2"><b>TOTAL RÉCEPTIONS</b></td><td class="val"><b>${fmt(supplierReceiptAmount)}</b></td><td class="val"><b>${fmt(supplierReceiptPaid)}</b></td><td class="val red"><b>${fmt(supplierReceiptDue)}</b></td></tr>
 </tbody></table>` : "";
     const invLines = filtInv.map(inv=>{
       const linesHtml = (inv.lines??[]).map(l=>`<tr style="background:#fafafa"><td style="padding-left:24px;color:#888">↳ ${l.nom}</td><td></td><td></td><td class="val muted">${lineDispQty(l)} ${lineDispUnit(l)} × ${fmt(l.prixUnit)}</td><td class="val muted">${fmt(lineTotal(l))}</td><td></td></tr>`).join("");
@@ -142,9 +167,11 @@ th{font-weight:700;color:#666;font-size:10px;text-transform:uppercase}
   <div class="kpi"><div class="label">Panier moyen</div><div class="value">${fmt(panierMoyen)}</div></div>
   <div class="kpi"><div class="label">CA facturé (date de facture)</div><div class="value">${fmt(caTotal)}</div></div>
   <div class="kpi"><div class="label">Impayé</div><div class="value muted">${fmt(impayé)}</div></div>
+  <div class="kpi"><div class="label">Solde fournisseurs actuel</div><div class="value orange">${fmt(supplierOutstanding)}</div></div>
   ${canSeeMargin && margeVentesData.has ? `<div class="kpi"><div class="label">Marge commerciale (${tauxMargeVentes}%)</div><div class="value ${margeVentes>=0?"green":"red"}">${fmt(margeVentes)}</div></div><div class="kpi"><div class="label">Résultat après charges</div><div class="value ${resultatApresCharges>=0?"green":"red"}">${fmt(resultatApresCharges)}</div></div>` : ""}
 </div>
 ${chargesBlock}
+${supplierReceiptsBlock}
 <div id="transactions" class="section-title">Transactions (${filtInv.length})</div>
 <table><thead><tr><th>Réf</th><th>Client</th><th>Date</th><th>Statut</th><th class="val">Facturé</th><th class="val">Encaissé</th></tr></thead><tbody>
 ${invLines}
@@ -209,7 +236,8 @@ ${invLines}
     { label:"Nb ventes",     value:-1,            color:"#6b7280", txt:`${nbVentes}`     },
     { label:"Panier moyen",  value:panierMoyen,   color:"#a855f7"                        },
     { label:"Impayé",        value:impayé,        color:SEM.warning.accent                        },
-    { label:"Charges",       value:totalCharges,  color:"#ef4444"                        },
+    { label:"Charges décaissées", value:totalCharges, color:"#ef4444"                    },
+    { label:"À régler fournisseurs · solde actuel", value:supplierOutstanding, color:SEM.warning.accent },
     ...(canSeeMargin && margeVentesData.has ? [
       { label:"Marge commerciale", value:margeVentes, color:margeVentes>=0?SEM.success.accent:SEM.danger.accent, bold:true },
       { label:"Taux de marge commerciale", value:-1, color:"#a855f7", txt:`${tauxMargeVentes}%` },
@@ -240,6 +268,7 @@ ${invLines}
           { label:"CA encaissé (paiements)", value:fmt(ca), color:RC },
           { label:"Ventes", value:`${nbVentes}`, color:"#6b7280" },
           { label:"Panier moyen", value:fmt(panierMoyen), color:"#a855f7" },
+          { label:"À régler fournisseurs (solde actuel)", value:fmt(supplierOutstanding), color:SEM.warning.accent },
           ...(canSeeMargin && margeVentesData.has ? [
             { label:`Marge commerciale (${tauxMargeVentes}%)`, value:fmt(margeVentes), color:margeVentes>=0?SEM.success.accent:SEM.danger.accent },
             { label:"Résultat après charges", value:fmt(resultatApresCharges), color:resultatApresCharges>=0?SEM.success.accent:SEM.danger.accent },
@@ -285,7 +314,7 @@ ${invLines}
       {/* Charges par catégorie */}
       {byCategorie.length > 0 && (
         <div className="bg-card rounded-2xl border border-border overflow-hidden">
-          <div className="px-4 py-3 border-b border-border flex items-center gap-2"><Wallet size={16} style={{color:"#ef4444"}}/><p className="font-bold text-sm">Charges</p></div>
+          <div className="px-4 py-3 border-b border-border flex items-center gap-2"><Wallet size={16} style={{color:"#ef4444"}}/><p className="font-bold text-sm">Charges décaissées</p></div>
           {byCategorie.map((r,i)=>(
             <div key={i} className="flex items-center gap-3 px-4 py-3 border-b border-border last:border-0">
               <div className="w-3 h-3 rounded-full flex-shrink-0" style={{background:CHARGE_COLORS[r.cat as ChargeCategorie]}}/>
@@ -296,6 +325,20 @@ ${invLines}
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {(supplierReceipts.length > 0 || supplierOutstanding > 0) && (
+        <div className="bg-card rounded-2xl border border-border overflow-hidden">
+          <div className="px-4 py-3 border-b border-border flex items-center gap-2"><Wallet size={16} style={{color:SEM.warning.accent}}/><p className="font-bold text-sm">Fournisseurs à régler</p></div>
+          <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+            <div><p className="text-sm font-medium">Solde actuel</p><p className="text-xs text-muted-foreground">Toutes les réceptions non soldées</p></div>
+            <p className="font-black text-sm" style={{color:SEM.warning.accent,fontFamily:"'Nunito',sans-serif"}}>{fmt(supplierOutstanding)}</p>
+          </div>
+          {supplierReceipts.length > 0 && <div className="flex items-center justify-between px-4 py-3">
+            <div><p className="text-sm font-medium">Réceptions de la période</p><p className="text-xs text-muted-foreground">Reçu {fmt(supplierReceiptAmount)} · réglé {fmt(supplierReceiptPaid)}</p></div>
+            <p className="font-black text-sm" style={{color:SEM.warning.accent,fontFamily:"'Nunito',sans-serif"}}>{fmt(supplierReceiptDue)} dû</p>
+          </div>}
         </div>
       )}
 

@@ -29,18 +29,20 @@ export function InventoryView({ boutique, onUpdate, logAction }: {
     if (!product || !counted.trim() || !Number.isFinite(countedValue) || countedValue < 0 || difference === 0 || saving) return;
     setSaving(true);
     try {
-      await recordStockMovement({
+      const persisted = await recordStockMovement({
         boutiqueId: boutique.id,
         productId: product.id,
         qty: difference,
         type: "inventaire",
         note: `Inventaire physique : ${countedValue} ${product.unit} compté(s)`,
       });
-      // Immediate feedback only. Realtime reloads the canonical relational row.
+      // Use the server ID immediately: Realtime then merges the same row instead
+      // of briefly rendering a second, temporary inventory movement.
       onUpdate({
         entries: [...boutique.entries, {
-          id: Date.now(), productId: product.id, qty: difference, unit: product.unit,
-          montantDu: 0, date: new Date().toLocaleDateString("fr-FR"), fournisseur: "Inventaire physique",
+          id: persisted.entry_id, productId: product.id, qty: difference, unit: product.unit,
+          montantDu: 0, date: new Date().toLocaleDateString("fr-FR"), recordedAt:new Date().toISOString(),
+          fournisseur: "Inventaire physique", movementType:"inventaire",
         }],
       });
       logAction("Inventaire physique", `${product.nom} : ${expected} → ${countedValue} ${product.unit}`, "📋");
