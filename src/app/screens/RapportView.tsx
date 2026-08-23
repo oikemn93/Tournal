@@ -5,7 +5,7 @@ import { SEM, inputCls, PAYMENT_METHODS, PM_ICON, PM_COLOR, CHARGE_CATS, CHARGE_
 import { fmt } from "../utils/formatting";
 import { invBadge, lineDispQty, lineDispUnit, lineTotal, filterByPeriod, invoiceMargin, supplierBalance } from "../utils/inventory";
 import { Modal } from "../components/Modal";
-import { filterPaymentEventsByPeriod, invoicePaidAmount, invoiceRemainingAmount } from "../utils/payments";
+import { filterPaymentEventsByPeriod, formatPreciseDateTime, invoicePaidAmount, invoiceRemainingAmount } from "../utils/payments";
 
 export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique: Boutique; canSeeMargin?: boolean }) {
   const RC = boutique.color;
@@ -100,7 +100,7 @@ h1{font-size:22px;font-weight:900;margin:0 0 2px}
 @media print{body{padding:20px}}
 </style></head><body>
 <h1>${boutique.nom}</h1>
-<div class="sub">Rapport — ${periodLabel[period]}${period==="custom"?` (${customFrom} → ${customTo})`:""} · Généré le ${new Date().toLocaleDateString("fr-FR",{day:"2-digit",month:"long",year:"numeric"})}</div>
+<div class="sub">Rapport — ${periodLabel[period]}${period==="custom"?` (${customFrom} → ${customTo})`:""} · Généré le ${formatPreciseDateTime(new Date().toISOString())}</div>
 <div class="kpis">
   <div class="kpi"><div class="label">CA encaissé (date de paiement)</div><div class="value green">${fmt(ca)}</div></div>
   <div class="kpi"><div class="label">Ventes</div><div class="value">${nbVentes}</div></div>
@@ -114,11 +114,11 @@ ${byMethode.map(r=>`<div class="row"><span class="label">${PM_ICON[r.m]} ${r.m} 
 <div class="row total-row"><span class="label">Total encaissé</span><span class="value green">${fmt(ca)}</span></div>`:""}
 ${paidCharges.length>0?`<div class="section-title">Charges décaissées (${paidCharges.length})</div>
 ${byCategorie.map(r=>`<div class="row"><span class="label">${r.cat}</span><span class="value red">${fmt(r.montant)}</span></div>`).join("")}
-${paidCharges.map(c=>`<div class="row"><span class="label" style="padding-left:12px;color:#888">· ${c.label}</span><span class="value muted">${fmt(chargeCashAmount(c))}</span></div>`).join("")}
+${paidCharges.map(c=>`<div class="row"><span class="label" style="padding-left:12px;color:#888">· ${c.label} · ${formatPreciseDateTime(c.dateRaw) === "—" ? c.date : formatPreciseDateTime(c.dateRaw)}</span><span class="value muted">${fmt(chargeCashAmount(c))}</span></div>`).join("")}
 <div class="row total-row"><span class="label">Total charges</span><span class="value red">${fmt(totalCharges)}</span></div>
 ${canSeeMargin && margeVentesData.has ? `<div class="row total-row" style="border-top:2px solid ${resultatApresCharges>=0?"#1E9B1E":"#ef4444"}"><span class="label" style="color:${resultatApresCharges>=0?"#1E9B1E":"#ef4444"}">Résultat après charges</span><span class="value" style="color:${resultatApresCharges>=0?"#1E9B1E":"#ef4444"}">${fmt(resultatApresCharges)}</span></div>` : ""}`:""}
 ${supplierReceipts.length>0?`<div class="section-title">Réceptions fournisseur — engagement non décaissé</div>
-${supplierReceipts.map(c=>`<div class="row"><span class="label">· ${c.label}</span><span class="value muted">Reçu ${fmt(c.montant)} · réglé ${fmt(Number(c.paidAmount ?? 0))} · reste ${fmt(Math.max(0, Number(c.montant)-Number(c.paidAmount ?? 0)))}</span></div>`).join("")}
+${supplierReceipts.map(c=>`<div class="row"><span class="label">· ${c.label} · ${formatPreciseDateTime(c.dateRaw) === "—" ? c.date : formatPreciseDateTime(c.dateRaw)}</span><span class="value muted">Reçu ${fmt(c.montant)} · réglé ${fmt(Number(c.paidAmount ?? 0))} · reste ${fmt(Math.max(0, Number(c.montant)-Number(c.paidAmount ?? 0)))}</span></div>`).join("")}
 <div class="row total-row"><span class="label">Reste à payer sur la période</span><span class="value orange">${fmt(supplierReceiptDue)}</span></div>`:""}
 <div class="row"><span class="label">Solde fournisseurs actuel</span><span class="value orange">${fmt(supplierOutstanding)}</span></div>
 </body></html>`;
@@ -128,13 +128,13 @@ ${supplierReceipts.map(c=>`<div class="row"><span class="label">· ${c.label}</s
     const chargesBlock = paidCharges.length > 0 ? `
 <div class="section-title">Charges décaissées (${paidCharges.length})</div>
 <table><thead><tr><th>Libellé</th><th>Catégorie</th><th>Date</th><th class="val">Montant</th></tr></thead><tbody>
-${paidCharges.map(c=>`<tr><td>${c.label}</td><td>${c.categorie}</td><td>${c.date}</td><td class="val">${fmt(chargeCashAmount(c))}</td></tr>`).join("")}
+${paidCharges.map(c=>`<tr><td>${c.label}</td><td>${c.categorie}</td><td>${formatPreciseDateTime(c.dateRaw) === "—" ? c.date : formatPreciseDateTime(c.dateRaw)}</td><td class="val">${fmt(chargeCashAmount(c))}</td></tr>`).join("")}
 <tr class="total-row"><td colspan="3"><b>TOTAL CHARGES</b></td><td class="val red"><b>${fmt(totalCharges)}</b></td></tr>
 </tbody></table>` : "";
     const supplierReceiptsBlock = supplierReceipts.length > 0 ? `
 <div class="section-title">Réceptions fournisseur — engagement non décaissé</div>
 <table><thead><tr><th>Libellé</th><th>Date</th><th class="val">Réception</th><th class="val">Réglé</th><th class="val">Reste dû</th></tr></thead><tbody>
-${supplierReceipts.map(c=>`<tr><td>${c.label}</td><td>${c.date}</td><td class="val">${fmt(c.montant)}</td><td class="val">${fmt(Number(c.paidAmount ?? 0))}</td><td class="val red">${fmt(Math.max(0, Number(c.montant)-Number(c.paidAmount ?? 0)))}</td></tr>`).join("")}
+${supplierReceipts.map(c=>`<tr><td>${c.label}</td><td>${formatPreciseDateTime(c.dateRaw) === "—" ? c.date : formatPreciseDateTime(c.dateRaw)}</td><td class="val">${fmt(c.montant)}</td><td class="val">${fmt(Number(c.paidAmount ?? 0))}</td><td class="val red">${fmt(Math.max(0, Number(c.montant)-Number(c.paidAmount ?? 0)))}</td></tr>`).join("")}
 <tr class="total-row"><td colspan="2"><b>TOTAL RÉCEPTIONS</b></td><td class="val"><b>${fmt(supplierReceiptAmount)}</b></td><td class="val"><b>${fmt(supplierReceiptPaid)}</b></td><td class="val red"><b>${fmt(supplierReceiptDue)}</b></td></tr>
 </tbody></table>` : "";
     const invLines = filtInv.map(inv=>{
@@ -142,7 +142,7 @@ ${supplierReceipts.map(c=>`<tr><td>${c.label}</td><td>${c.date}</td><td class="v
       const paymentLabel = invoicePaymentLabel(inv);
       const paymentHtml = paymentLabel ? `<tr style="background:#f0fdf4"><td colspan="6" style="padding-left:24px;color:#166534;font-size:10px;font-weight:700">Paiements : ${paymentLabel}</td></tr>` : "";
       const [tc,bc]=invBadge(inv.status);
-      return `<tr><td>${inv.id}</td><td>${inv.client}</td><td>${inv.date}</td><td><span style="background:${bc};color:${tc};padding:2px 7px;border-radius:20px;font-size:10px;font-weight:700">${inv.status}</span></td><td class="val">${fmt(inv.montant)}</td><td class="val green">${fmt(invoicePaidAmount(inv))}</td></tr>${paymentHtml}${linesHtml}`;
+      return `<tr><td>${inv.id}</td><td>${inv.client}</td><td>${formatPreciseDateTime(inv.dateRaw) === "—" ? inv.date : formatPreciseDateTime(inv.dateRaw)}</td><td><span style="background:${bc};color:${tc};padding:2px 7px;border-radius:20px;font-size:10px;font-weight:700">${inv.status}</span></td><td class="val">${fmt(inv.montant)}</td><td class="val green">${fmt(invoicePaidAmount(inv))}</td></tr>${paymentHtml}${linesHtml}`;
     }).join("");
     return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Rapport complet — ${boutique.nom}</title>
 <style>
@@ -160,7 +160,7 @@ th{font-weight:700;color:#666;font-size:10px;text-transform:uppercase}
 @media print{body{padding:16px}}
 </style></head><body>
 <h1>${boutique.nom} — Rapport complet</h1>
-<div class="sub">${periodLabel[period]}${period==="custom"?` (${customFrom} → ${customTo})`:""} · ${new Date().toLocaleDateString("fr-FR",{day:"2-digit",month:"long",year:"numeric"})}</div>
+<div class="sub">${periodLabel[period]}${period==="custom"?` (${customFrom} → ${customTo})`:""} · Généré le ${formatPreciseDateTime(new Date().toISOString())}</div>
 <div class="kpis">
   <div class="kpi"><div class="label">CA encaissé (date de paiement)</div><div class="value green">${fmt(ca)}</div></div>
   <div class="kpi"><div class="label">Ventes</div><div class="value">${nbVentes}</div></div>
@@ -367,7 +367,7 @@ ${invLines}
           const [tc,bc]=invBadge(inv.status);
           return (
             <div key={inv.id} className="flex items-center justify-between px-4 py-3 border-b border-border last:border-0">
-              <div className="min-w-0 flex-1"><p className="text-sm font-semibold">{inv.client}</p><p className="text-xs text-muted-foreground">{inv.id} · {inv.date}</p>{invoicePaymentLabel(inv)&&<p className="text-xs font-bold mt-0.5 truncate" style={{color:SEM.success.accent}}>💳 {invoicePaymentLabel(inv)}</p>}</div>
+              <div className="min-w-0 flex-1"><p className="text-sm font-semibold">{inv.client}</p><p className="text-xs text-muted-foreground">{inv.id} · {formatPreciseDateTime(inv.dateRaw) === "—" ? inv.date : formatPreciseDateTime(inv.dateRaw)}</p>{invoicePaymentLabel(inv)&&<p className="text-xs font-bold mt-0.5 truncate" style={{color:SEM.success.accent}}>💳 {invoicePaymentLabel(inv)}</p>}</div>
               <div className="text-right">
                 <p className="text-sm font-black" style={{fontFamily:"'Nunito',sans-serif"}}>{fmt(invoicePaidAmount(inv) > 0 ? invoicePaidAmount(inv) : inv.montant)}</p>
                 <span className="text-xs px-2 py-0.5 rounded-full font-bold capitalize" style={{background:bc,color:tc}}>{inv.status}</span>

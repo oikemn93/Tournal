@@ -50,6 +50,9 @@ export const PM_ICON: Record<string, string> = { "Espèces":"💵", "Wave":"📱
 export const PM_COLOR: Record<string, string> = { "Espèces":"#1E9B1E", "Wave":"#3b82f6", "Orange Money":"#f97316", "Autre":"#a855f7", "Avoir client":"#0f766e" };
 
 export const inputCls = "w-full bg-muted border border-border rounded-xl px-4 py-3.5 text-base focus:outline-none";
+// Search is a frequent navigation control, not a data-entry field.  Keep it
+// compact so it does not dominate the operational screens on mobile.
+export const searchInputCls = "w-full bg-muted border border-border rounded-xl px-3 py-2 text-sm focus:outline-none";
 
 // ─── SEED DATA ────────────────────────────────────────────────────────────────
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Search, Plus, Minus, ChevronRight, ShoppingBag, Trash2, CheckCircle, AlertCircle, Zap, ClipboardList, Printer, Settings, Pencil } from "lucide-react";
 import type { Boutique, CartItem, Invoice, Product, PlatformUser, PaymentMethod, StockEntry } from "../types";
-import { SEM, inputCls, PAYMENT_METHODS, PM_ICON } from "../constants";
+import { SEM, inputCls, searchInputCls, PAYMENT_METHODS, PM_ICON } from "../constants";
 import { fmt, today, imgSrc } from "../utils/formatting";
 import { productQty, lineTotal, lineDispQty, lineDispUnit } from "../utils/inventory";
 import { silentPrint, buildOrderTicketHtml, buildReceiptHtml, agentPrint, connectQZ, PA, usePAStatus } from "../utils/invoice";
@@ -10,6 +10,7 @@ import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
 import { createSale, recordMultiPayment, recordPayment, cancelPendingInvoice } from "../../lib/api";
 import { getDefaultSaleUnit, getLastSalePrice, getSaleUnitOptions, toBaseSaleQty } from "../utils/sales";
+import { formatPreciseDateTime } from "../utils/payments";
 
 export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente = false, initialClientId, onInitialClientPrepared, onOrderCreated, onUpdate, logAction }: {
   boutique: Boutique; allBoutiques: Boutique[]; currentUser: PlatformUser;
@@ -418,7 +419,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
       {posTab==="produits" && <>
         <div className="relative">
           <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground"/>
-          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Chercher un produit…" className={inputCls+" pl-11"}/>
+          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Chercher un produit…" className={searchInputCls+" pl-10"}/>
         </div>
         {/* Category filter + sort */}
         <div className="flex items-center gap-2">
@@ -551,7 +552,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
                   </div>
                   <div className="text-right flex-shrink-0">
                     <p className="font-black text-lg" style={{ color:SEM.warning.accent, fontFamily:"'Nunito', sans-serif" }}>{fmt(inv.montant)}</p>
-                    <p className="text-xs text-muted-foreground">{inv.date.split(" · ")[0]}</p>
+                    <p className="text-xs text-muted-foreground">{formatPreciseDateTime(inv.dateRaw) === "—" ? inv.date : formatPreciseDateTime(inv.dateRaw)}</p>
                   </div>
                 </div>
                 {inv.lines && inv.lines.length > 0 && (

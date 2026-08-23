@@ -1,13 +1,14 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Search, Plus, Edit2, ArrowLeft, History, Camera, AlertTriangle, PackageOpen } from "lucide-react";
 import type { Boutique, Product, StockEntry } from "../types";
-import { PLACEHOLDER_IMGS, inputCls } from "../constants";
+import { PLACEHOLDER_IMGS, inputCls, searchInputCls } from "../constants";
 import { fmt, today, imgSrc, resizeImage } from "../utils/formatting";
 import { productQty, productMontant, productSupplierOutstanding, stockEntrySupplierOutstanding, stockStatus, stockDot } from "../utils/inventory";
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
 import { correctSupplierReceipt, createProduct, recordStockMovement, updateProduct } from "../../lib/api";
+import { formatPreciseDateTime } from "../utils/payments";
 
 function sortStockEntriesNewestFirst(a: StockEntry, b: StockEntry) {
   const aTime = a.recordedAt ? Date.parse(a.recordedAt) : Number.NaN;
@@ -308,7 +309,7 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter, initia
     <div data-screen-source="relational-stock" className="space-y-4 pb-24">
       <div className="relative">
         <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground"/>
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Chercher un produit…" className={inputCls + " pl-11"}/>
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Chercher un produit…" className={searchInputCls + " pl-10"}/>
       </div>
 
       <div className="flex gap-2" style={{ overflowX: "auto", scrollbarWidth: "none" }}>
@@ -462,7 +463,7 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter, initia
                             {isSale ? "−" : "+"}{Math.abs(e.qty)} <span className="text-muted-foreground font-normal">{e.unit}</span>
                             {e.nbPieces ? <span className="text-xs text-muted-foreground font-normal ml-1">({e.nbLots && e.nbLots > 1 ? `${e.nbLots}lots×` : ""}{e.nbPieces}p{e.longueurPiece ? `×${e.longueurPiece}` : ""})</span> : null}
                           </p>
-                          <p className="text-xs text-muted-foreground">{isSale ? "Vente" : isReturn ? "Retour client" : e.movementType === "inventaire" ? "Inventaire" : e.movementType === "ajustement" ? "Ajustement" : e.nbPieces ? "Lot reçu" : "Achat"} · {(entrySupplier?.nom ?? e.fournisseur).replace("Vente → ", "")} · {e.date}{e.sku ? ` · SKU: ${e.sku}` : ""}</p>
+                          <p className="text-xs text-muted-foreground">{isSale ? "Vente" : isReturn ? "Retour client" : e.movementType === "inventaire" ? "Inventaire" : e.movementType === "ajustement" ? "Ajustement" : e.nbPieces ? "Lot reçu" : "Achat"} · {(entrySupplier?.nom ?? e.fournisseur).replace("Vente → ", "")} · {formatPreciseDateTime(e.recordedAt) === "—" ? e.date : formatPreciseDateTime(e.recordedAt)}{e.sku ? ` · SKU: ${e.sku}` : ""}</p>
                         </div>
                         {isReceipt && <div className="text-right"><p className="text-sm font-black" style={{ color: "#C9A227", fontFamily: "'Nunito', sans-serif" }}>{fmt(remainingSupplierDue)}</p><p className="text-[10px] text-muted-foreground">reste dû</p></div>}
                         {isReceipt && (

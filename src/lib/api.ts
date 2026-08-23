@@ -1194,9 +1194,9 @@ export async function saveGroupes(groups: Array<{ id: string; nom: string }>): P
   });
 }
 
-export async function loadAuthSettings(boutiqueId: string): Promise<{ lockMinutes: number; sessionMinutes: number; supplierPaymentTermsDays: number; clientPaymentTermsDays: number } | null> {
-  const rows = await dataRequest<Array<{ lock_minutes: number; session_minutes: number; supplier_payment_terms_days: number; client_payment_terms_days: number }>>(
-    `auth_settings?select=lock_minutes,session_minutes,supplier_payment_terms_days,client_payment_terms_days&boutique_id=eq.${encodeURIComponent(boutiqueId)}&limit=1`,
+export async function loadAuthSettings(boutiqueId: string): Promise<{ lockMinutes: number; sessionMinutes: number; supplierPaymentTermsDays: number; clientPaymentTermsDays: number; caisseControlEnabled: boolean; caisseDefaultOpeningFloat: number; caisseOpeningReminderTime?: string | null; caisseClosingReminderTime?: string | null } | null> {
+  const rows = await dataRequest<Array<{ lock_minutes: number; session_minutes: number; supplier_payment_terms_days: number; client_payment_terms_days: number; caisse_daily_control_enabled?: boolean; caisse_default_opening_float?: number; caisse_opening_reminder_time?: string | null; caisse_closing_reminder_time?: string | null }>>(
+    `auth_settings?select=lock_minutes,session_minutes,supplier_payment_terms_days,client_payment_terms_days,caisse_daily_control_enabled,caisse_default_opening_float,caisse_opening_reminder_time,caisse_closing_reminder_time&boutique_id=eq.${encodeURIComponent(boutiqueId)}&limit=1`,
   );
   const row = rows[0];
   return row ? {
@@ -1204,10 +1204,14 @@ export async function loadAuthSettings(boutiqueId: string): Promise<{ lockMinute
     sessionMinutes: row.session_minutes,
     supplierPaymentTermsDays: row.supplier_payment_terms_days ?? 30,
     clientPaymentTermsDays: row.client_payment_terms_days ?? 30,
+    caisseControlEnabled: row.caisse_daily_control_enabled ?? false,
+    caisseDefaultOpeningFloat: Number(row.caisse_default_opening_float ?? 0),
+    caisseOpeningReminderTime: row.caisse_opening_reminder_time ?? null,
+    caisseClosingReminderTime: row.caisse_closing_reminder_time ?? null,
   } : null;
 }
 
-export async function saveAuthSettings(boutiqueId: string, settings: { lockMinutes?: number; sessionMinutes?: number; supplierPaymentTermsDays?: number; clientPaymentTermsDays?: number }): Promise<void> {
+export async function saveAuthSettings(boutiqueId: string, settings: { lockMinutes?: number; sessionMinutes?: number; supplierPaymentTermsDays?: number; clientPaymentTermsDays?: number; caisseControlEnabled?: boolean; caisseDefaultOpeningFloat?: number; caisseOpeningReminderTime?: string | null; caisseClosingReminderTime?: string | null }): Promise<void> {
   await dataRequest("auth_settings?on_conflict=boutique_id", {
     method: "POST",
     headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
@@ -1217,6 +1221,10 @@ export async function saveAuthSettings(boutiqueId: string, settings: { lockMinut
       session_minutes: settings.sessionMinutes ?? 720,
       supplier_payment_terms_days: settings.supplierPaymentTermsDays ?? 30,
       client_payment_terms_days: settings.clientPaymentTermsDays ?? 30,
+      caisse_daily_control_enabled: settings.caisseControlEnabled ?? false,
+      caisse_default_opening_float: Math.max(0, Number(settings.caisseDefaultOpeningFloat ?? 0)),
+      caisse_opening_reminder_time: settings.caisseOpeningReminderTime || null,
+      caisse_closing_reminder_time: settings.caisseClosingReminderTime || null,
     }),
   });
 }

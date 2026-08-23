@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Search, MapPin, Phone, Lock, Store, ChevronRight, Plus, ArrowLeft, FilePlus, Wallet, CheckCircle, CalendarClock, Edit2 } from "lucide-react";
 import type { Boutique, Client, ClientType, Invoice, PaymentMethod, PlatformUser } from "../types";
-import { SEM, inputCls } from "../constants";
+import { SEM, inputCls, searchInputCls } from "../constants";
 import { fmt, today, ini } from "../utils/formatting";
 import { invBadge } from "../utils/inventory";
 import { PAYMENT_METHODS, PM_ICON } from "../constants";
@@ -380,7 +380,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
               const content = <>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2"><p className="text-xs font-black text-muted-foreground">{inv.id}</p><span className="text-xs px-1.5 py-0.5 rounded font-bold capitalize" style={{ background:bc,color:tc }}>{inv.status}</span>{isReturn&&<span className="text-xs px-1.5 py-0.5 rounded font-bold" style={{ background:"#ef444415",color:"#ef4444" }}>Retour</span>}</div>
-                  <p className="text-xs text-muted-foreground mt-0.5">{inv.date} · {inv.type}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{formatPreciseDateTime(inv.dateRaw) === "—" ? inv.date : formatPreciseDateTime(inv.dateRaw)} · {inv.type}</p>
                   {inv.paymentMethod&&<p className="text-xs text-muted-foreground">{PM_ICON[inv.paymentMethod]} {inv.paymentMethod}</p>}
                   {maturity&&<p className="mt-1 inline-flex rounded px-1.5 py-0.5 text-[11px] font-bold" style={{background:maturity.bg,color:maturity.color}}>{maturity.text}</p>}
                 </div>
@@ -490,7 +490,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
 
   return (
     <div data-screen-source="relational-clients" className="space-y-4 pb-24">
-      <div className="relative"><Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground"/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Chercher un client…" className={inputCls+" pl-11"}/></div>
+      <div className="relative"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Chercher un client…" className={searchInputCls+" pl-9"}/></div>
       <div className="flex bg-card rounded-2xl p-1 border border-border gap-1">
         {tabDefs.map(t=>(
           <button key={t.id} onClick={()=>setTab(t.id)} className="flex-1 py-2.5 rounded-xl text-xs font-bold relative" style={{ background:tab===t.id?t.color:"transparent", color:tab===t.id?"#fff":"#6b7280" }}>
@@ -534,7 +534,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
                     </div>
                     <div className="text-right">
                       <p className="font-black text-base" style={{ color, fontFamily:"'Nunito', sans-serif" }}>{fmt(totalCA)}</p>
-                      {lastInv && <p className="text-xs text-muted-foreground">{lastInv.date}</p>}
+                      {lastInv && <p className="text-xs text-muted-foreground">{formatPreciseDateTime(lastInv.dateRaw) === "—" ? lastInv.date : formatPreciseDateTime(lastInv.dateRaw)}</p>}
                     </div>
                   </div>
                   {/* Each boutique row */}
@@ -552,7 +552,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
                           </div>
                           <div className="text-right">
                             <p className="font-black text-sm" style={{ color, fontFamily:"'Nunito', sans-serif" }}>{fmt(ca)}</p>
-                            <p className="text-xs text-muted-foreground">{invCount} facture{invCount!==1?"s":""}{lastB ? " · " + lastB.date.split(" · ")[0] : ""}</p>
+                            <p className="text-xs text-muted-foreground">{invCount} facture{invCount!==1?"s":""}{lastB ? " · " + (formatPreciseDateTime(lastB.dateRaw) === "—" ? lastB.date : formatPreciseDateTime(lastB.dateRaw)) : ""}</p>
                           </div>
                         </div>
                       );

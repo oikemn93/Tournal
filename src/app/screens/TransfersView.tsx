@@ -6,10 +6,11 @@ import { acceptStockTransfer, createStockTransfer, getStockTransfers, rejectStoc
 import { productQty } from "../utils/inventory";
 import { getLastSalePrice } from "../utils/sales";
 import { fmt } from "../utils/formatting";
-import { SEM, inputCls } from "../constants";
+import { SEM, inputCls, searchInputCls } from "../constants";
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
+import { formatPreciseDateTime } from "../utils/payments";
 
 const TRANSFER_COLOR = "#ea580c";
 
@@ -249,7 +250,7 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
           </div>
           <div className="flex-1 min-w-0">
             <p className="font-black text-sm">{isIn ? "Reçu de" : "Envoyé à"} <span style={{ color: isIn ? SEM.success.accent : TRANSFER_COLOR }}>{other?.nom ?? "Boutique"}</span></p>
-            <p className="text-xs text-muted-foreground mt-0.5">{new Date(t.created_at).toLocaleDateString("fr-FR", { day:"2-digit", month:"short", year:"numeric", hour:"2-digit", minute:"2-digit" })}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{formatPreciseDateTime(t.created_at)}</p>
             <div className="flex flex-wrap gap-1 mt-1.5">
               <span className="text-xs px-2 py-0.5 rounded-full font-bold" style={{ background:st.bg, color:st.color }}>
                 <Icon size={10} className="inline mr-1"/>{st.label}
@@ -366,7 +367,7 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
             <div className="flex gap-2">
               <div className="relative flex-1">
                 <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"/>
-                <input type="tel" inputMode="tel" value={directoryQuery} onChange={e=>{setDirectoryQuery(e.target.value);setDirectoryResults([]);}} onKeyDown={e=>e.key==="Enter"&&void runDirectorySearch()} placeholder="Téléphone de la boutique…" className={inputCls+" pl-9"}/>
+                <input type="tel" inputMode="tel" value={directoryQuery} onChange={e=>{setDirectoryQuery(e.target.value);setDirectoryResults([]);}} onKeyDown={e=>e.key==="Enter"&&void runDirectorySearch()} placeholder="Téléphone de la boutique…" className={searchInputCls+" pl-9"}/>
               </div>
               <button onClick={()=>void runDirectorySearch()} disabled={directoryLoading || directoryQuery.replace(/\D/g, "").length < 9} className="px-4 rounded-xl font-black text-sm text-white disabled:opacity-40" style={{background:TRANSFER_COLOR}}>
                 {directoryLoading ? <Loader2 size={16} className="animate-spin"/> : "Rechercher"}
@@ -418,7 +419,7 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
             <div className="space-y-2">
               <div className="relative">
                 <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"/>
-                <input value={destinationSearch} onChange={e=>setDestinationSearch(e.target.value)} placeholder="Rechercher nom, téléphone ou ville…" className={inputCls+" pl-9"}/>
+                <input value={destinationSearch} onChange={e=>setDestinationSearch(e.target.value)} placeholder="Rechercher nom, téléphone ou ville…" className={searchInputCls+" pl-9"}/>
               </div>
               <select value={destination} onChange={e => setDestination(e.target.value)} className={inputCls}>
                 <option value="">Choisir une boutique…</option>

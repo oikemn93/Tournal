@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Search, Plus, Send, FileText, Eye, Mail, MessageCircle, Smartphone, Phone, Wallet, CreditCard, RotateCcw, ShoppingCart, Receipt, AlertCircle, Trash2, CheckCircle, Minus, Store, X, ChevronLeft, ChevronRight, CalendarDays, PlusCircle } from "lucide-react";
 import type { Boutique, Invoice, InvoiceStatus, InvoiceLine, StockEntry, PaymentMethod, Client, PlatformUser, CaisseSession, PaymentEntry } from "../types";
-import { SEM, inputCls, PAYMENT_METHODS, PM_ICON, PM_COLOR, PLACEHOLDER_IMGS } from "../constants";
+import { SEM, inputCls, searchInputCls, PAYMENT_METHODS, PM_ICON, PM_COLOR, PLACEHOLDER_IMGS } from "../constants";
 import { createSale, recordPayment, recordMultiPayment, returnSale, openCaisseSession, closeCaisseSession, createInvoiceShare } from "../../lib/api";
 import { fmt, today, imgSrc } from "../utils/formatting";
 import { invBadge, lineTotal, lineDispQty, lineDispUnit, genInvoiceId, productQty, getSiblings, invoiceMargin, lineUnitCost } from "../utils/inventory";
@@ -95,7 +95,7 @@ function ShareInvoiceModal({ inv, boutique, clients, onClose }: { inv: Invoice; 
         <FileText size={18} className="text-muted-foreground flex-shrink-0"/>
         <div className="flex-1 min-w-0">
           <p className="text-sm font-black">{inv.id} · {inv.client}</p>
-          <p className="text-xs text-muted-foreground">{fmtN(inv.montant)} F · {inv.date}</p>
+          <p className="text-xs text-muted-foreground">{fmtN(inv.montant)} F · {formatPreciseDateTime(inv.dateRaw) === "—" ? inv.date : formatPreciseDateTime(inv.dateRaw)}</p>
         </div>
         <span className="text-xs font-bold px-2 py-1 rounded-lg" style={{ background:reste<=0?"#f0fdf4":inv.acompte>0?"#fffbeb":"#fef2f2", color:reste<=0?"#16a34a":inv.acompte>0?"#d97706":"#dc2626" }}>
           {reste<=0?"Payé":inv.acompte>0?"Acompte":"Impayé"}
@@ -153,11 +153,12 @@ function ShareInvoiceModal({ inv, boutique, clients, onClose }: { inv: Invoice; 
 
 // ─── FACTURES VIEW ────────────────────────────────────────────────────────────
 
-export function FacturesView({ boutique, allBoutiques, platformUsers, currentUser, canReturn, canCollectPayment = false, canSeeMargin = false, onUpdate, onUpdateOtherBoutique, logAction, initialStatus, initialInvoiceId, initialClientId, onPaymentRecorded }: {
+export function FacturesView({ boutique, allBoutiques, platformUsers, currentUser, canReturn, canCollectPayment = false, canSeeMargin = false, caisseDefaults, onUpdate, onUpdateOtherBoutique, logAction, initialStatus, initialInvoiceId, initialClientId, onPaymentRecorded }: {
   boutique: Boutique; allBoutiques: Boutique[]; platformUsers: PlatformUser[]; currentUser: PlatformUser;
   canReturn: boolean;
   canCollectPayment?: boolean;
   canSeeMargin?: boolean;
+  caisseDefaults?: { enabled: boolean; openingFloat: number; openingReminderTime?: string | null; closingReminderTime?: string | null };
   onUpdate: (u: Partial<Boutique>) => void;
   onUpdateOtherBoutique: (boutiqueId: string, u: Partial<Boutique>) => void;
   logAction: (action: string, detail: string, icon: string) => void;
@@ -260,9 +261,22 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
   // ── Caisse (déplacée depuis Vente) : le caissier ouvre/ferme et encaisse ici ──
   const caisseSession = boutique.caisseSession;
   const isCaisseOpen = !!(caisseSession && !caisseSession.closedAt);
-  const [fondCaisse, setFondCaisse] = useState("0");
+  const [fondCaisse, setFondCaisse] = useState(String(caisseDefaults?.openingFloat ?? 0));
   const [caisseCloseModal, setCaisseCloseModal] = useState(false);
   const [savingCaisse, setSavingCaisse] = useState(false);
+  useEffect(() => {
+    if (!isCaisseOpen) setFondCaisse(String(caisseDefaults?.openingFloat ?? 0));
+  }, [caisseDefaults?.openingFloat, isCaisseOpen]);
+
+  const hasReachedReminder = (time?: string | null) => {
+    if (!time) return false;
+    const [hours, minutes] = time.split(":").map(Number);
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return false;
+    const now = new Date();
+    return now.getHours() * 60 + now.getMinutes() >= hours * 60 + minutes;
+  };
+  const openingReminderDue = !!caisseDefaults?.enabled && !isCaisseOpen && hasReachedReminder(caisseDefaults.openingReminderTime);
+  const closingReminderDue = !!caisseDefaults?.enabled && isCaisseOpen && hasReachedReminder(caisseDefaults.closingReminderTime);
 
   // The session total is the sum of payments recorded since the caisse was opened,
   // so each encaissement below increments it correctly (the bug fixed by the move).
@@ -318,7 +332,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
   // ── Filtre par jour (point 4) : par défaut le jour en cours, avec navigation ──
   const todayKey = new Date().toISOString().slice(0,10);
   const [selectedDay, setSelectedDay] = useState(todayKey);
-  const [dayFilterActive, setDayFilterActive] = useState(true);
+  const [dayFilterActive, setDayFilterActive] = useState(initialStatus !== "impayé" && initialStatus !== "en retard");
   function shiftDay(delta: number) {
     const d = new Date(selectedDay + "T12:00:00");
     d.setDate(d.getDate() + delta);
@@ -654,13 +668,19 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
     setLines([]); setAcompte(""); setInitialPaymentMethod("Espèces"); setModal(false); setSubmittingInvoice(false);
   }
 
+  const invoiceIsOverdue = (invoice: Invoice) => {
+    if (invoiceRemainingAmount(invoice) <= 0 || !invoice.dueDate) return false;
+    const dueAt = new Date(`${invoice.dueDate.slice(0, 10)}T23:59:59`);
+    return Number.isFinite(dueAt.getTime()) && dueAt.getTime() < Date.now();
+  };
+  const effectiveStatus = (invoice: Invoice): InvoiceStatus => invoiceIsOverdue(invoice) ? "en retard" : invoice.status;
   const UNPAID: InvoiceStatus[] = ["en attente","acompte","en retard"];
   // The day filter is bypassed while searching so the search reaches every day.
   const dayActive = dayFilterActive && !invSearch.trim();
   const filtered = [...invoices]
     .sort((a,b)=>(b.dateRaw??b.date).localeCompare(a.dateRaw??a.date))
     .filter(i => !isClientRecordOnlyInvoice(i))
-    .filter(i => (statusFilter==="all"||statusFilter==="impayé"?statusFilter==="impayé"?UNPAID.includes(i.status):true:i.status===statusFilter)
+    .filter(i => (statusFilter==="all"||statusFilter==="impayé"?statusFilter==="impayé"?UNPAID.includes(effectiveStatus(i)):true:effectiveStatus(i)===statusFilter)
       && (i.client.toLowerCase().includes(invSearch.toLowerCase())||i.id.toLowerCase().includes(invSearch.toLowerCase()))
       && (!dayActive||(i.dateRaw??"").slice(0,10)===selectedDay));
   const pills: Array<{id:InvoiceStatus|"all"|"impayé";label:string;color:string}> = [
@@ -677,34 +697,34 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
 
       {/* Caisse — réservée aux utilisateurs autorisés à encaisser */}
       {canCollectPayment && (isCaisseOpen && caisseSession ? (
-        <div className="flex items-center gap-3 px-4 py-3 rounded-2xl" style={{ background:SEM.success.bg, border:"1px solid "+SEM.success.accent+"44" }}>
+        <div className="flex items-center gap-3 px-4 py-3 rounded-2xl" style={{ background:closingReminderDue ? "#fff7ed" : SEM.success.bg, border:"1px solid "+(closingReminderDue ? "#ea580c" : SEM.success.accent)+"44" }}>
           <div className="flex items-center gap-2 flex-1 min-w-0">
             <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse flex-shrink-0"/>
             <div className="min-w-0">
-              <p className="text-sm font-black truncate" style={{ color:SEM.success.text }}>CAISSE OUVERTE</p>
-              <p className="text-xs text-muted-foreground truncate">{caisseSession.openedBy} · {new Date(caisseSession.openedAt).toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"})} · Fond : {fmt(caisseSession.fondDeCaisse)}</p>
+              <p className="text-sm font-black truncate" style={{ color:closingReminderDue ? "#9a3412" : SEM.success.text }}>{closingReminderDue ? "CLÔTURE À EFFECTUER" : "CAISSE OUVERTE"}</p>
+              <p className="text-xs text-muted-foreground truncate">{caisseSession.openedBy} · {formatPreciseDateTime(caisseSession.openedAt)} · Fond : {fmt(caisseSession.fondDeCaisse)}</p>
             </div>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             <span className="text-base font-black" style={{ color:SEM.success.accent, fontFamily:"'Nunito', sans-serif" }}>{fmt(sessionTotal)}</span>
-            <button onClick={()=>setCaisseCloseModal(true)} className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold active:scale-95" style={{ background:"#f3f4f6", color:"#374151" }}>
-              <X size={13}/> Fermer
+            <button onClick={()=>setCaisseCloseModal(true)} className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black active:scale-95" style={{ background:closingReminderDue ? "#ea580c" : "#f3f4f6", color:closingReminderDue ? "#fff" : "#374151" }}>
+              <X size={13}/> Clôturer
             </button>
           </div>
         </div>
       ) : (
-        <div className="flex items-center gap-3 px-4 py-3 rounded-2xl" style={{ background:"#EEE9D8" }}>
+        <div className="flex items-center gap-3 px-4 py-3 rounded-2xl" style={{ background:openingReminderDue ? "#fef2f2" : "#EEE9D8", border:openingReminderDue ? "1px solid #ef444455" : undefined }}>
           <div className="flex items-center gap-2 flex-1 min-w-0">
-            <Store size={18} style={{ color:FCT_COLOR }}/>
+            <Store size={20} style={{ color:openingReminderDue ? "#dc2626" : FCT_COLOR }}/>
             <div className="min-w-0">
-              <p className="text-sm font-black truncate">Caisse fermée</p>
-              <p className="text-xs text-muted-foreground truncate">Ouvrez la caisse pour encaisser</p>
+              <p className="text-sm font-black truncate" style={{color:openingReminderDue ? "#991b1b" : undefined}}>{openingReminderDue ? "CAISSE À OUVRIR" : "Caisse fermée"}</p>
+              <p className="text-xs text-muted-foreground truncate">Ouvrez la caisse pour encaisser{caisseDefaults?.openingFloat ? ` · fond par défaut : ${fmt(caisseDefaults.openingFloat)}` : ""}</p>
             </div>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
-            <input value={fondCaisse} onChange={e=>setFondCaisse(e.target.value)} type="number" placeholder="Fond" className="w-24 px-3 py-2 rounded-xl text-sm font-bold text-center border border-border bg-card" onKeyDown={e=>e.key==="Enter"&&openCaisse()}/>
-            <button disabled={savingCaisse} onClick={openCaisse} className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black active:scale-95 disabled:opacity-60" style={{ background:FCT_COLOR, color:"#fff" }}>
-              <Store size={13}/> {savingCaisse?"…":"Ouvrir"}
+            <input value={fondCaisse} onChange={e=>setFondCaisse(e.target.value)} type="number" placeholder="Fond" aria-label="Fond de caisse à l'ouverture" className="w-24 px-3 py-2.5 rounded-xl text-sm font-bold text-center border border-border bg-card" onKeyDown={e=>e.key==="Enter"&&openCaisse()}/>
+            <button disabled={savingCaisse} onClick={openCaisse} className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-black active:scale-95 disabled:opacity-60" style={{ background:openingReminderDue ? "#dc2626" : FCT_COLOR, color:"#fff" }}>
+              <Store size={15}/> {savingCaisse?"…":"Ouvrir la caisse"}
             </button>
           </div>
         </div>
@@ -716,25 +736,25 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
         </div>
       )}
 
-      <div className="relative"><Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground"/><input value={invSearch} onChange={e=>setInvSearch(e.target.value)} placeholder="Chercher une facture ou un client…" className={inputCls+" pl-11"}/></div>
+      <div className="relative"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"/><input value={invSearch} onChange={e=>setInvSearch(e.target.value)} placeholder="Chercher une facture ou un client…" className={searchInputCls+" pl-9"}/></div>
 
       {/* Navigation par jour (point 4) */}
       <div className="flex items-center gap-2">
         <button onClick={()=>shiftDay(-1)} className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 border border-border bg-card active:scale-90" title="Jour précédent"><ChevronLeft size={16}/></button>
-        <button onClick={()=>{ setDayFilterActive(a=>!a); }} className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold capitalize active:scale-95" style={{ background: dayFilterActive?FCT_COLOR:FCT_COLOR+"22", color: dayFilterActive?"#fff":FCT_COLOR }}>
-          <CalendarDays size={15}/> {dayFilterActive ? dayLabel : "Toutes les factures"}
+        <button onClick={()=>{ setDayFilterActive(a=>!a); }} className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-xl text-xs font-black capitalize active:scale-95" style={{ background: dayFilterActive?FCT_COLOR:FCT_COLOR+"22", color: dayFilterActive?"#fff":FCT_COLOR }}>
+          <CalendarDays size={13}/> {dayFilterActive ? dayLabel : "Toutes les factures"}
         </button>
         <button onClick={()=>shiftDay(1)} disabled={selectedDay>=todayKey} className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 border border-border bg-card active:scale-90 disabled:opacity-40" title="Jour suivant"><ChevronRight size={16}/></button>
-        {selectedDay!==todayKey && <button onClick={()=>{ setSelectedDay(todayKey); setDayFilterActive(true); }} className="px-3 h-9 rounded-xl text-xs font-bold flex-shrink-0" style={{ background:FCT_COLOR+"22", color:FCT_COLOR }}>Aujourd'hui</button>}
+        {selectedDay!==todayKey && <button onClick={()=>{ setSelectedDay(todayKey); setDayFilterActive(true); }} className="px-2 h-7 rounded-lg text-[10px] font-black flex-shrink-0" style={{ background:FCT_COLOR+"22", color:FCT_COLOR }}>Auj.</button>}
       </div>
 
       <div className="flex gap-2" style={{ overflowX:"auto", scrollbarWidth:"none" }}>
-        {pills.map(s=><button key={s.id} onClick={()=>setStatusFilter(s.id as InvoiceStatus|"all"|"impayé")}className="px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap flex-shrink-0" style={{ background:statusFilter===s.id?s.color:s.color+"22", color:statusFilter===s.id?"#fff":s.color }}>{s.label}</button>)}
+        {pills.map(s=><button key={s.id} onClick={()=>{setStatusFilter(s.id as InvoiceStatus|"all"|"impayé"); if (s.id==="impayé" || s.id==="en retard") setDayFilterActive(false);}} className="px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap flex-shrink-0" style={{ background:statusFilter===s.id?s.color:s.color+"22", color:statusFilter===s.id?"#fff":s.color }}>{s.label}</button>)}
       </div>
       <p className="text-xs text-muted-foreground px-1">Les factures des clients B2C et B2B enregistrés sont consultables depuis leur fiche client.</p>
       <div className="space-y-3">
         {filtered.map(inv=>{
-          const [tc,bc]=invBadge(inv.status);
+          const [tc,bc]=invBadge(effectiveStatus(inv));
           const isReturn = inv.type === "Retour";
           return (
             <div key={inv.id} className="bg-card rounded-2xl p-4 border border-border" style={isReturn?{borderColor:"#ef444433"}:{}}>
@@ -749,7 +769,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
                     {inv.lines&&inv.lines.length>0&&<p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1"><ShoppingCart size={10}/> {inv.lines.length} produit{inv.lines.length>1?"s":""}</p>}
                   </div>
                   <div className="flex items-center gap-2 ml-3">
-                    <div className="text-right"><p className="text-base font-black" style={{ fontFamily:"'Nunito', sans-serif" }}>{fmt(inv.montant)}</p><span className="text-xs px-2 py-0.5 rounded-full font-bold capitalize inline-block mt-0.5" style={{ background:bc,color:tc }}>{inv.status}</span></div>
+                    <div className="text-right"><p className="text-base font-black" style={{ fontFamily:"'Nunito', sans-serif" }}>{fmt(inv.montant)}</p><span className="text-xs px-2 py-0.5 rounded-full font-bold capitalize inline-block mt-0.5" style={{ background:bc,color:tc }}>{effectiveStatus(inv)}</span></div>
                     {canCollectPayment && !isReturn && inv.status !== "payé" && (
                       <button onClick={e=>{e.stopPropagation();setEncaissInv(inv);setEncaissSplit([{ method:"Espèces", amount:invoiceRemainingAmount(inv) }]);}} className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background:SEM.success.bg }} title="Encaisser">
                         <Wallet size={15} style={{ color:SEM.success.text }}/>
@@ -1049,7 +1069,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
           {/* Invoice detail */}
           <div className="bg-muted rounded-2xl p-4">
             <p className="font-bold text-sm">{encaissInv.client}</p>
-            <p className="text-xs text-muted-foreground mt-0.5">{encaissInv.date} · {encaissInv.type}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{formatPreciseDateTime(encaissInv.dateRaw) === "—" ? encaissInv.date : formatPreciseDateTime(encaissInv.dateRaw)} · {encaissInv.type}</p>
             {encaissInv.lines && encaissInv.lines.length > 0 && (
               <div className="mt-3 space-y-1.5">
                 {encaissInv.lines.map((l, i) => {
@@ -1209,7 +1229,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
               <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background:FCT_COLOR+"22" }}><Store size={18} style={{ color:FCT_COLOR }}/></div>
               <div>
                 <p className="text-sm font-bold">Session</p>
-                <p className="text-xs text-muted-foreground">Ouvert par {caisseSession.openedBy} à {new Date(caisseSession.openedAt).toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"})}</p>
+                <p className="text-xs text-muted-foreground">Ouvert par {caisseSession.openedBy} · {formatPreciseDateTime(caisseSession.openedAt)}</p>
               </div>
             </div>
             <div className="rounded-2xl border border-border overflow-hidden">

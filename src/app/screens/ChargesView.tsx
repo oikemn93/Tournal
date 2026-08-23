@@ -2,13 +2,14 @@ import React, { useState } from "react";
 import { Search, Wallet, RefreshCw, Plus, CheckCircle, CreditCard, Loader2 } from "lucide-react";
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import type { Boutique, Charge, ChargeCategorie } from "../types";
-import { CHARGE_CATS, CHARGE_COLORS, SEM, inputCls } from "../constants";
+import { CHARGE_CATS, CHARGE_COLORS, SEM, inputCls, searchInputCls } from "../constants";
 import { fmt, today } from "../utils/formatting";
 import { supplierBalance } from "../utils/inventory";
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
 import { createCharge, recordTransferChargePayment } from "../../lib/api";
+import { formatPreciseDateTime } from "../utils/payments";
 
 export function ChargesView({ boutique, onUpdate, logAction }: {
   boutique: Boutique; onUpdate: (u: Partial<Boutique>) => void;
@@ -47,7 +48,7 @@ export function ChargesView({ boutique, onUpdate, logAction }: {
     if (!label.trim() || !montant) return;
     const now = new Date();
     const dateStr = now.toLocaleDateString("fr-FR",{day:"2-digit",month:"short"});
-    const dateRaw = now.toISOString().split("T")[0];
+    const dateRaw = now.toISOString();
     const linkedFourn = (cat === "Achat stock" && fourn) ? fourn : undefined;
     let persisted;
     try { persisted = await createCharge({ boutiqueId:boutique.id, label:label.trim(), amount:Number(montant), category:cat, note:note.trim() || undefined, supplier:linkedFourn }); }
@@ -104,7 +105,7 @@ export function ChargesView({ boutique, onUpdate, logAction }: {
       )}
 
       {/* Search + filter */}
-      <div className="relative"><Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground"/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Chercher une charge…" className={inputCls+" pl-11"}/></div>
+      <div className="relative"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Chercher une charge…" className={searchInputCls+" pl-9"}/></div>
       <div className="flex gap-2" style={{overflowX:"auto",scrollbarWidth:"none"}}>
         <button onClick={()=>setCatFilter("all")} className="px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap flex-shrink-0" style={{background:catFilter==="all"?"#1f2937":"#f3f4f6",color:catFilter==="all"?"#fff":"#374151"}}>Tout</button>
         {CHARGE_CATS.map(c=>(
@@ -126,7 +127,7 @@ export function ChargesView({ boutique, onUpdate, logAction }: {
                 <span className="text-xs px-2 py-0.5 rounded-full font-bold" style={{background:CHARGE_COLORS[c.categorie]+"22",color:CHARGE_COLORS[c.categorie]}}>{c.categorie}</span>
                 {c.recurrence !== "unique" && <span className="text-xs text-muted-foreground">↺ {c.recurrence}</span>}
                 {c.fournisseur && <span className="text-xs font-bold" style={{color:SEM.neutral.accent}}>→ {c.fournisseur}</span>}
-                <span className="text-xs text-muted-foreground">{c.date}</span>
+                <span className="text-xs text-muted-foreground">{formatPreciseDateTime(c.dateRaw) === "—" ? c.date : formatPreciseDateTime(c.dateRaw)}</span>
               </div>
             </div>
             <div className="text-right flex-shrink-0">

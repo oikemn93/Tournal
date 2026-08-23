@@ -25,7 +25,7 @@ import { ComptabiliteView as RelationalComptabiliteView } from "./screens/Rappor
 import { TransfersView as RelationalTransfersView } from "./screens/TransfersView";
 import { SuperAdminUserActions } from "./components/SuperAdminUserActions";
 import { NotificationCenter } from "./components/NotificationCenter";
-import { filterPaymentEventsByPeriod, invoicePaymentEvents, invoiceRemainingAmount } from "./utils/payments";
+import { filterPaymentEventsByPeriod, formatPreciseDateTime, invoicePaymentEvents, invoiceRemainingAmount } from "./utils/payments";
 
 const ReadOnlyCtx = React.createContext(false);
 const useReadOnly = () => React.useContext(ReadOnlyCtx);
@@ -69,7 +69,8 @@ type InventaireLine = { productId: number; nom: string; unit: string; categorie?
 type InventaireSession = { id: string; date: string; dateRaw: string; userId: string; userNom: string; userColor: string; statut: "en_cours" | "terminé"; perimetre: "tout" | string[]; lines: InventaireLine[]; valeurEcart?: number; chiffreAffaires?: number; benefice?: number };
 type ChargeCategorie = "Loyer" | "Salaires" | "Électricité" | "Transport" | "Achat stock" | "Marketing" | "Taxes" | "Autre";
 type CaisseSession = { id: number; openedAt: string; openedBy: string; fondDeCaisse: number; closedAt?: string; closedBy?: string };
-type Charge = { id: number; label: string; montant: number; date: string; dateRaw: string; categorie: ChargeCategorie; recurrence: "unique" | "mensuelle" | "hebdomadaire"; note?: string; fournisseur?: string; isB2BDebt?: boolean; acompte?: number; status?: "en_attente" | "partiel" | "payé" };
+type CaisseDefaults = { enabled: boolean; openingFloat: number; openingReminderTime?: string | null; closingReminderTime?: string | null };
+type Charge = { id: number; label: string; montant: number; date: string; dateRaw: string; categorie: ChargeCategorie; recurrence: "unique" | "mensuelle" | "hebdomadaire"; note?: string; fournisseur?: string; isB2BDebt?: boolean; acompte?: number; status?: "en_attente" | "partiel" | "payé"; source?: "manual" | "supplier_receipt" | "transfer" | "other"; paidAmount?: number };
 type ClientType = "B2C" | "B2B" | "Grossiste";
 
 type InvoiceLine = { productId: number; nom: string; qty: number; unit: string; prixUnit: number; sellUnit?: string; sellQty?: number; prixAchat?: number };
@@ -2323,15 +2324,18 @@ function DashboardView({ boutique, onNavigate }: { boutique: Boutique; onNavigat
   const caInv       = filtInv.filter(i => i.type !== "Transfert interne" && i.type !== "B2B Achat");
   const ca          = filtPayments.reduce((sum,payment) => sum + payment.signedAmount, 0);
   const caTotal     = caInv.reduce((s,i) => s + signedInvoiceAmount(i), 0);
-  // B2B debt charges count only their paid portion (acompte); regular charges count fully
-  const totalCharges= filtCh.reduce((s,c) => s + (c.isB2BDebt ? (c.acompte ?? 0) : c.montant), 0);
-  const margeBrute  = ca - totalCharges;
+  // A supplier receipt is an amount owed, not money that has already left the
+  // cash desk.  Only actual disbursements belong in the cash position.
+  const chargeCashAmount = (charge: Charge) => charge.source === "transfer"
+    ? Number(charge.paidAmount ?? 0)
+    : charge.source === "supplier_receipt" ? 0 : Number(charge.montant);
+  const paidCharges = filtCh.filter(charge => charge.source !== "supplier_receipt");
+  const totalCashCharges = paidCharges.reduce((sum, charge) => sum + chargeCashAmount(charge), 0);
+  const cashPosition = ca - totalCashCharges;
   const prevCa      = prevPayments.reduce((sum,payment) => sum + payment.signedAmount, 0);
   const prevTotal   = prevInv.filter(i => i.type !== "Transfert interne" && i.type !== "B2B Achat").reduce((s,i) => s + signedInvoiceAmount(i), 0);
   const trendCa     = trend(ca, prevCa);
   const trendTotal  = trend(caTotal, prevTotal);
-  const margeNette  = margeBrute; // can extend with taxes
-  const tauxMarge   = ca > 0 ? Math.round((margeBrute/ca)*100) : 0;
   const impayées    = caInv.filter(i=>i.status!=="payé");
   const totalImpayé = impayées.reduce((s,i)=>s+invoiceRemainingAmount(i),0);
   const totalQty    = products.reduce((s,p)=>s+productQty(p.id,entries),0);
@@ -2342,7 +2346,7 @@ function DashboardView({ boutique, onNavigate }: { boutique: Boutique; onNavigat
   // Pie: CA vs Charges vs Marge
   const pieData = [
     { name:"Encaissé", value:ca, color:"#475569" },
-    { name:"Charges",  value:totalCharges, color:"#ef4444" },
+    { name:"Décaissements",  value:totalCashCharges, color:"#ef4444" },
   ].filter(d=>d.value>0);
 
   // Bar chart: group invoices by label depending on period
@@ -2375,7 +2379,7 @@ function DashboardView({ boutique, onNavigate }: { boutique: Boutique; onNavigat
     { label:"Stock",   value:`${totalQty} pcs`, icon:Boxes,       color:negativeProducts.length?SEM.danger.accent:SEM.neutral.accent, sub:negativeProducts.length?`${negativeProducts.length} écart${negativeProducts.length>1?"s":""} à vérifier`:`${rupture} en rupture`, tab:"stock", filter:{ stockFilter:negativeProducts.length?"negative":"critical" } },
     { label:"Clients", value:`${clients.length}`,icon:Users,       color:SEM.neutral.accent, sub:`${grossistes} grossistes`,     tab:"clients",  filter:{ clientTab:"Grossiste" } },
     { label:"Impayés", value:fmt(totalImpayé),   icon:CreditCard,  color:SEM.danger.accent,  sub:`${impayées.length} factures`,  tab:"factures", filter:{ statusFilter:"impayé" } },
-    { label:"Charges", value:fmt(totalCharges),  icon:TrendingDown,color:SEM.neutral.accent, sub:`${filtCh.length} entrées`,     tab:"charges" },
+    { label:"Charges", value:fmt(totalCashCharges),  icon:TrendingDown,color:SEM.neutral.accent, sub:`${paidCharges.length} décaissements`,     tab:"charges" },
   ];
 
   const periodBtns: Array<{id:DashPeriod;label:string}> = [
@@ -2399,17 +2403,17 @@ function DashboardView({ boutique, onNavigate }: { boutique: Boutique; onNavigat
         </div>
       )}
 
-      {/* Margin summary */}
+      {/* Cash summary — margins are calculated from FIFO costs in the report. */}
       <div className="bg-card rounded-2xl p-4 border border-border">
         <div className="flex items-center justify-between mb-3">
-          <p className="font-bold text-sm">Résultat de la période</p>
-          <span className="text-xs px-2.5 py-1 rounded-full font-bold" style={{background:margeBrute>=0?SEM.success.bg:"#ef444422",color:margeBrute>=0?SEM.success.accent:SEM.danger.accent}}>{tauxMarge}% marge</span>
+          <p className="font-bold text-sm">Trésorerie de la période</p>
+          <span className="text-[10px] px-2 py-1 rounded-full font-black" style={{background:SEM.neutral.bg,color:SEM.neutral.accent}}>encaissements − décaissements</span>
         </div>
         <div className="grid grid-cols-3 gap-2">
           {[
             {label:"CA encaissé · paiements", value:ca, color:"#1f2937", t:trendCa},
             {label:"CA facturé · factures",  value:caTotal, color:"#475569", t:trendTotal},
-            {label:"Marge nette", value:margeBrute, color:margeBrute>=0?SEM.success.accent:SEM.danger.accent, t:null},
+            {label:"Solde trésorerie", value:cashPosition, color:cashPosition>=0?SEM.success.accent:SEM.danger.accent, t:null},
           ].map(m=>(
             <div key={m.label} className="rounded-xl p-2.5 text-center" style={{background:m.color+"11"}}>
               <p className="text-base font-black leading-tight" style={{color:m.color,fontFamily:"'Nunito',sans-serif"}}>{fmt(m.value)}</p>
@@ -2444,6 +2448,11 @@ function DashboardView({ boutique, onNavigate }: { boutique: Boutique; onNavigat
           </button>);
         })}
       </div>
+
+      <button type="button" onClick={()=>onNavigate("inventaire")} className="w-full flex items-center justify-between rounded-2xl border border-border bg-card px-4 py-3 text-left active:scale-[0.99]">
+        <span className="flex items-center gap-2"><ClipboardCheck size={17} style={{color:boutique.color}}/><span><span className="block text-sm font-black">Inventaire physique</span><span className="block text-xs text-muted-foreground">Compter et régulariser le stock réel</span></span></span>
+        <ChevronRight size={17} className="text-muted-foreground"/>
+      </button>
 
       {negativeProducts.length > 0 && (
         <section className="rounded-2xl border border-red-200 bg-red-50 p-4">
@@ -2499,7 +2508,7 @@ function DashboardView({ boutique, onNavigate }: { boutique: Boutique; onNavigat
         <div className="flex items-center justify-between px-4 py-3"><p className="font-bold text-sm">Factures récentes</p><button onClick={()=>onNavigate("factures")} className="text-xs font-bold" style={{color:SEM.neutral.accent}}>Voir tout →</button></div>
         {[...invoices].reverse().slice(0,4).map(inv=>{const [tc,bc]=invBadge(inv.status);return(
           <div key={inv.id} className="flex items-center justify-between px-4 py-3 border-t border-border">
-            <div><p className="text-sm font-semibold">{inv.client}</p><p className="text-xs text-muted-foreground">{inv.id} · {inv.date}</p></div>
+            <div><p className="text-sm font-semibold">{inv.client}</p><p className="text-xs text-muted-foreground">{inv.id} · {formatPreciseDateTime(inv.dateRaw) === "—" ? inv.date : formatPreciseDateTime(inv.dateRaw)}</p></div>
             <div className="text-right"><p className="text-sm font-black" style={{fontFamily:"'Nunito',sans-serif"}}>{fmt(inv.montant)}</p><span className="text-xs px-2 py-0.5 rounded-full font-bold capitalize" style={{background:bc,color:tc}}>{inv.status}</span></div>
           </div>
         );})}
@@ -3266,8 +3275,10 @@ function InventaireView({ boutique, currentUser, onUpdate, logAction, onClose, i
   const inventaires = boutique.inventaires ?? [];
   const [screen, setScreen] = useState<"list"|"scope"|"count"|"rapport"|"confirm">("list");
   const [session, setSession] = useState<InventaireSession|null>(null);
-  const [scopeAll, setScopeAll] = useState(true);
+  const [scopeMode, setScopeMode] = useState<"all"|"category"|"product">("all");
   const [scopeCats, setScopeCats] = useState<string[]>([]);
+  const [scopeProductIds, setScopeProductIds] = useState<number[]>([]);
+  const [scopeProductSearch, setScopeProductSearch] = useState("");
   const [countVals, setCountVals] = useState<Record<number,string>>({});
   const [search, setSearch] = useState("");
   const [blindMode, setBlindMode] = useState(false);
@@ -3280,14 +3291,22 @@ function InventaireView({ boutique, currentUser, onUpdate, logAction, onClose, i
   useEffect(() => {
     if (!initialProductId || !products.some(product => product.id === initialProductId)) return;
     setPreselectedProductId(initialProductId);
-    setScopeAll(false); setScopeCats([]); setScreen("scope");
+    setScopeMode("product"); setScopeCats([]); setScopeProductIds([]); setScreen("scope");
     onInitialProductPrepared?.();
   }, [initialProductId, products, onInitialProductPrepared]);
 
   function startSession() {
     const selectedProduct = preselectedProductId ? products.find(product => product.id === preselectedProductId) : null;
-    const perimetre: "tout"|string[] = selectedProduct ? [selectedProduct.categorie ?? "Produit ciblé"] : scopeAll ? "tout" : scopeCats;
-    const filteredProds = selectedProduct ? [selectedProduct] : products.filter(p => scopeAll || scopeCats.includes(p.categorie ?? "Sans catégorie"));
+    const perimetre: "tout"|string[] = selectedProduct
+      ? [`Produit : ${selectedProduct.nom}`]
+      : scopeMode === "all" ? "tout"
+      : scopeMode === "category" ? scopeCats
+      : products.filter(product => scopeProductIds.includes(product.id)).map(product => `Produit : ${product.nom}`);
+    const filteredProds = selectedProduct ? [selectedProduct] : products.filter(product =>
+      scopeMode === "all" ||
+      (scopeMode === "category" && scopeCats.includes(product.categorie ?? "Sans catégorie")) ||
+      (scopeMode === "product" && scopeProductIds.includes(product.id)),
+    );
     const lines: InventaireLine[] = filteredProds.map(p => ({
       productId: p.id, nom: p.nom, unit: p.unit, categorie: p.categorie,
       theorique: productQty(p.id, entries),
@@ -3381,7 +3400,7 @@ function InventaireView({ boutique, currentUser, onUpdate, logAction, onClose, i
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="font-bold text-sm text-amber-800">Inventaire en cours</p>
-                <p className="text-xs text-amber-600">{inProgressSession.date} · {inProgressSession.userNom}</p>
+                <p className="text-xs text-amber-600">{formatPreciseDateTime(inProgressSession.dateRaw) === "—" ? inProgressSession.date : formatPreciseDateTime(inProgressSession.dateRaw)} · {inProgressSession.userNom}</p>
                 <p className="text-xs text-amber-600 mt-0.5">{inProgressSession.lines.filter(l=>l.compte!==undefined).length}/{inProgressSession.lines.length} produits comptés</p>
               </div>
               <button onClick={resumeSession} className="shrink-0 text-sm font-bold px-4 py-2 rounded-xl bg-amber-700 text-white">Reprendre</button>
@@ -3399,7 +3418,7 @@ function InventaireView({ boutique, currentUser, onUpdate, logAction, onClose, i
           <button key={sess.id} onClick={()=>setViewSession(sess)} className="w-full bg-card border border-border rounded-2xl p-4 text-left hover:border-gray-400 transition-colors">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="font-bold text-sm">{sess.date}</p>
+                <p className="font-bold text-sm">{formatPreciseDateTime(sess.dateRaw) === "—" ? sess.date : formatPreciseDateTime(sess.dateRaw)}</p>
                 <p className="text-xs text-muted-foreground">{sess.userNom}</p>
                 <p className="text-xs text-muted-foreground mt-0.5">
                   {typeof sess.perimetre === "string" ? "Tout le catalogue" : sess.perimetre.join(", ")} · {sess.lines.length} produits
@@ -3423,7 +3442,7 @@ function InventaireView({ boutique, currentUser, onUpdate, logAction, onClose, i
           <div className="bg-card rounded-2xl w-full max-w-lg max-h-[80vh] flex flex-col">
             <div className="flex items-center justify-between px-4 py-3 border-b border-border">
               <div>
-                <p className="font-bold text-sm">{viewSession.date}</p>
+                <p className="font-bold text-sm">{formatPreciseDateTime(viewSession.dateRaw) === "—" ? viewSession.date : formatPreciseDateTime(viewSession.dateRaw)}</p>
                 <p className="text-xs text-muted-foreground">{viewSession.userNom} · {viewSession.lines.filter(l=>l.ecart!==undefined&&(l.compte??l.theorique)!==l.theorique).length} écart(s)</p>
               </div>
               <button onClick={()=>setViewSession(null)} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-muted"><X size={16}/></button>
@@ -3468,11 +3487,11 @@ function InventaireView({ boutique, currentUser, onUpdate, logAction, onClose, i
           const product = products.find(item => item.id === preselectedProductId);
           return product ? <div className="rounded-2xl border border-red-200 bg-red-50 p-4"><p className="text-xs font-black tracking-wider text-red-700">PRODUIT PRÉSÉLECTIONNÉ</p><p className="mt-1 font-black text-red-900">{product.nom}</p><p className="mt-1 text-xs text-red-800">Cet inventaire ne portera que sur ce produit afin de corriger l’écart signalé.</p></div> : null;
         })()}
-        {[{val:true,label:"Tout le catalogue",sub:`${products.length} produits`},{val:false,label:"Par catégorie",sub:"Sélectionner des catégories"}].map(opt => (
-          <button key={String(opt.val)} onClick={()=>setScopeAll(opt.val)}
-            className={`w-full p-4 rounded-2xl border-2 text-left flex items-center gap-3 transition-colors ${scopeAll===opt.val?"border-gray-800 bg-gray-50":"border-border"}`}>
-            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${scopeAll===opt.val?"border-gray-800":"border-gray-400"}`}>
-              {scopeAll===opt.val && <div className="w-2.5 h-2.5 rounded-full bg-gray-800"/>}
+        {[{val:"all" as const,label:"Tout le catalogue",sub:`${products.length} produits`},{val:"category" as const,label:"Par catégorie",sub:"Sélectionner des catégories"},{val:"product" as const,label:"Par produit",sub:"Sélectionner un ou plusieurs produits"}].map(opt => (
+          <button key={opt.val} onClick={()=>setScopeMode(opt.val)}
+            className={`w-full p-4 rounded-2xl border-2 text-left flex items-center gap-3 transition-colors ${scopeMode===opt.val?"border-gray-800 bg-gray-50":"border-border"}`}>
+            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${scopeMode===opt.val?"border-gray-800":"border-gray-400"}`}>
+              {scopeMode===opt.val && <div className="w-2.5 h-2.5 rounded-full bg-gray-800"/>}
             </div>
             <div>
               <p className="font-bold text-sm">{opt.label}</p>
@@ -3480,7 +3499,7 @@ function InventaireView({ boutique, currentUser, onUpdate, logAction, onClose, i
             </div>
           </button>
         ))}
-        {!scopeAll && preselectedProductId == null && (
+        {scopeMode === "category" && preselectedProductId == null && (
           <div className="space-y-2 mt-1">
             {allCats.map(cat => (
               <button key={cat} onClick={()=>setScopeCats(prev=>prev.includes(cat)?prev.filter(c=>c!==cat):[...prev,cat])}
@@ -3494,9 +3513,26 @@ function InventaireView({ boutique, currentUser, onUpdate, logAction, onClose, i
             ))}
           </div>
         )}
+        {scopeMode === "product" && preselectedProductId == null && (
+          <div className="space-y-2 mt-1">
+            <div className="relative"><Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"/><input value={scopeProductSearch} onChange={event=>setScopeProductSearch(event.target.value)} placeholder="Chercher un produit à inventorier…" className="w-full rounded-xl border border-border bg-muted py-2 pl-9 pr-3 text-sm focus:outline-none"/></div>
+            <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
+              {products.filter(product=>product.nom.toLowerCase().includes(scopeProductSearch.trim().toLowerCase())).map(product => (
+                <button key={product.id} onClick={()=>setScopeProductIds(previous=>previous.includes(product.id)?previous.filter(id=>id!==product.id):[...previous,product.id])}
+                  className={`w-full p-3 rounded-xl border text-left flex items-center gap-3 transition-colors ${scopeProductIds.includes(product.id)?"border-gray-800 bg-gray-50":"border-border"}`}>
+                  <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 ${scopeProductIds.includes(product.id)?"border-gray-800 bg-gray-800":"border-gray-400"}`}>
+                    {scopeProductIds.includes(product.id) && <Check size={10} className="text-white"/>}
+                  </div>
+                  <span className="text-sm flex-1 truncate">{product.nom}</span>
+                  <span className="text-xs text-muted-foreground">{productQty(product.id,entries)} {product.unit}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
       <div className="shrink-0 p-4 border-t border-border">
-        <button onClick={startSession} disabled={!scopeAll && scopeCats.length === 0}
+        <button onClick={startSession} disabled={preselectedProductId == null && ((scopeMode === "category" && scopeCats.length === 0) || (scopeMode === "product" && scopeProductIds.length === 0))}
           className="w-full py-3 rounded-2xl font-bold text-white disabled:opacity-40 transition-opacity" style={{background:"#1f2937"}}>
           Démarrer l'inventaire
         </button>
@@ -6749,22 +6785,24 @@ function SupervisionSection({ boutique, allBoutiques, backendOk, lastSyncAt }: {
 
 // ─── VIEW: ADMIN ──────────────────────────────────────────────────────────────
 
-function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdate, onUpdateUsers, onCreateUser, logAction, onSaveAuthSettings, lockMinutesInit, sessionMinutesInit, supplierPaymentTermsDaysInit, clientPaymentTermsDaysInit, backendOk, lastSyncAt }: {
+function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdate, onUpdateUsers, onCreateUser, logAction, onSaveAuthSettings, onSaveCaisseDefaults, lockMinutesInit, sessionMinutesInit, supplierPaymentTermsDaysInit, clientPaymentTermsDaysInit, caisseDefaultsInit, backendOk, lastSyncAt }: {
   boutique: Boutique; allBoutiques: Boutique[]; platformUsers: PlatformUser[]; currentUser: PlatformUser;
   onUpdate: (u: Partial<Boutique>) => void;
   onUpdateUsers: (updater: PlatformUser[] | ((prev: PlatformUser[]) => PlatformUser[])) => void;
   onCreateUser: (user: Omit<PlatformUser,"id">) => Promise<PlatformUser|null>;
   logAction: (action: string, detail: string, icon: string) => void;
   onSaveAuthSettings?: (lockMin: number, sessMin: number, supplierTermsDays: number, clientTermsDays: number) => Promise<void>;
+  onSaveCaisseDefaults?: (defaults: CaisseDefaults) => Promise<void>;
   lockMinutesInit?: number;
   sessionMinutesInit?: number;
   supplierPaymentTermsDaysInit?: number;
   clientPaymentTermsDaysInit?: number;
+  caisseDefaultsInit?: CaisseDefaults;
   backendOk?: boolean|null;
   lastSyncAt?: number;
 }) {
   // ── section type ──────────────────────────────────────────────────────────
-  type AdminSec = "equipe"|"perms"|"auth"|"payment-terms"|"stock-params"|"boutique"|"imprimante"|"lecteur"|"tiroir"|"activite"|"supervision";
+  type AdminSec = "equipe"|"perms"|"auth"|"payment-terms"|"caisse"|"stock-params"|"boutique"|"imprimante"|"lecteur"|"tiroir"|"activite"|"supervision";
   const [section, setSection] = useState<AdminSec>("equipe");
   const [catOpen, setCatOpen] = useState<"securite"|"fonctionnel"|"systeme"|"journal"|"supervision">("securite");
 
@@ -6795,10 +6833,15 @@ function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdat
   const [authSaveError, setAuthSaveError] = useState<string | null>(null);
   const [supplierTermsDays, setSupplierTermsDays] = useState(supplierPaymentTermsDaysInit ?? 30);
   const [clientTermsDays, setClientTermsDays] = useState(clientPaymentTermsDaysInit ?? 30);
+  const [caisseDefaults, setCaisseDefaults] = useState<CaisseDefaults>(caisseDefaultsInit ?? { enabled:false, openingFloat:0, openingReminderTime:null, closingReminderTime:null });
+  const [caisseSaving, setCaisseSaving] = useState(false);
+  const [caisseSaved, setCaisseSaved] = useState(false);
+  const [caisseSaveError, setCaisseSaveError] = useState<string | null>(null);
   const sessMinutes = Math.max(5, Math.round(sessValue * (sessUnit === "min" ? 1 : sessUnit === "h" ? 60 : 1440)));
 
   useEffect(() => { setSupplierTermsDays(supplierPaymentTermsDaysInit ?? 30); }, [supplierPaymentTermsDaysInit]);
   useEffect(() => { setClientTermsDays(clientPaymentTermsDaysInit ?? 30); }, [clientPaymentTermsDaysInit]);
+  useEffect(() => { setCaisseDefaults(caisseDefaultsInit ?? { enabled:false, openingFloat:0, openingReminderTime:null, closingReminderTime:null }); }, [caisseDefaultsInit]);
 
   const boutiqueUsers = platformUsers.filter(u=>!u.isSuperAdmin&&u.assignments.some(a=>a.boutiqueId===boutique.id));
   const permDefs = [
@@ -6887,7 +6930,7 @@ function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdat
   type CatId = "securite"|"fonctionnel"|"systeme"|"journal"|"supervision";
   const CATS: Array<{ id:CatId; icon:string; label:string; subs:Array<{id:AdminSec;label:string}> }> = [
     { id:"securite",    icon:"🔒", label:"Sécurité",    subs:[{id:"equipe",label:"Équipe"},{id:"perms",label:"Droits"},{id:"auth",label:"Authentification"}] },
-    { id:"fonctionnel", icon:"⚙️", label:"Fonctionnel", subs:[{id:"stock-params",label:"Catalogue"},{id:"boutique",label:"Boutique"},{id:"payment-terms",label:"Délais paiement"}] },
+    { id:"fonctionnel", icon:"⚙️", label:"Fonctionnel", subs:[{id:"stock-params",label:"Catalogue"},{id:"boutique",label:"Boutique"},{id:"payment-terms",label:"Délais paiement"},{id:"caisse",label:"Caisse"}] },
     { id:"systeme",     icon:"🔧", label:"Système",     subs:[{id:"imprimante",label:"Imprimante"},{id:"lecteur",label:"Code-barre"},{id:"tiroir",label:"Tiroir caisse"}] },
     { id:"journal",     icon:"📋", label:"Journal",     subs:[{id:"activite",label:"Activité"}] },
     { id:"supervision", icon:"🩺", label:"Supervis.",   subs:[{id:"supervision",label:"Monitoring"}] },
@@ -7184,6 +7227,42 @@ function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdat
               } finally { setAuthSaving(false); }
             }} disabled={authSaving} className="w-full py-4 rounded-2xl text-base font-black active:scale-95 transition-all disabled:opacity-60" style={{background:authSaved?SEM.success.accent:boutique.color,color:"#fff",fontFamily:"'Nunito',sans-serif"}}>
             {authSaving ? "Enregistrement…" : authSaved ? "✓ Enregistré" : "Enregistrer les délais"}
+          </button>
+        </div>}
+
+        {section==="caisse"&&<div className="space-y-4">
+          <div className="rounded-2xl px-4 py-3 flex items-start gap-3" style={{background:"#f59e0b0d",border:"1px solid #f59e0b28"}}>
+            <Wallet size={17} className="mt-0.5 shrink-0" style={{color:SEM.warning.accent}}/>
+            <p className="text-xs font-semibold" style={{color:SEM.warning.accent}}>La caisse reste ouverte et clôturée volontairement par le caissier : ces réglages proposent le fond et rendent les rappels visibles, sans fermer une journée sans comptage.</p>
+          </div>
+          <div className="bg-card rounded-2xl border border-border p-4 space-y-4">
+            <label className="flex items-center justify-between gap-3 cursor-pointer">
+              <span><span className="block text-sm font-black">Suivi quotidien de caisse</span><span className="block mt-0.5 text-xs text-muted-foreground">Afficher les rappels d'ouverture et de clôture.</span></span>
+              <input type="checkbox" checked={caisseDefaults.enabled} onChange={event=>setCaisseDefaults(current=>({...current,enabled:event.target.checked}))} className="h-5 w-5 accent-black"/>
+            </label>
+            <div>
+              <label className="mb-1.5 block text-xs font-black tracking-wider text-muted-foreground">FOND D'OUVERTURE PAR DÉFAUT (F CFA)</label>
+              <input type="number" min="0" step="1" value={caisseDefaults.openingFloat} onChange={event=>setCaisseDefaults(current=>({...current,openingFloat:Math.max(0,Number(event.target.value)||0)}))} className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm font-black focus:outline-none focus:ring-2 focus:ring-primary/30"/>
+              <p className="mt-1.5 text-xs text-muted-foreground">Le caissier peut toujours ajuster ce montant avant l'ouverture.</p>
+            </div>
+            {caisseDefaults.enabled&&<div className="grid grid-cols-2 gap-3">
+              <div><label className="mb-1.5 block text-xs font-black tracking-wider text-muted-foreground">RAPPEL OUVERTURE</label><input type="time" value={caisseDefaults.openingReminderTime ?? ""} onChange={event=>setCaisseDefaults(current=>({...current,openingReminderTime:event.target.value || null}))} className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-primary/30"/></div>
+              <div><label className="mb-1.5 block text-xs font-black tracking-wider text-muted-foreground">RAPPEL CLÔTURE</label><input type="time" value={caisseDefaults.closingReminderTime ?? ""} onChange={event=>setCaisseDefaults(current=>({...current,closingReminderTime:event.target.value || null}))} className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-primary/30"/></div>
+            </div>}
+          </div>
+          {caisseSaveError&&<p className="text-xs font-semibold" style={{color:SEM.danger.text}}>{caisseSaveError}</p>}
+          <button onClick={async()=>{
+              if (caisseSaving) return;
+              setCaisseSaving(true); setCaisseSaveError(null);
+              try {
+                await onSaveCaisseDefaults?.(caisseDefaults);
+                setCaisseSaved(true); setTimeout(()=>setCaisseSaved(false),2000);
+                logAction("Réglages caisse modifiés", `${caisseDefaults.enabled?"Rappels actifs":"Rappels désactivés"} · Fond ${fmt(caisseDefaults.openingFloat)}`, "🏪");
+              } catch (error) {
+                setCaisseSaveError(error instanceof Error ? error.message : "Enregistrement impossible. Réessayez.");
+              } finally { setCaisseSaving(false); }
+            }} disabled={caisseSaving} className="w-full py-4 rounded-2xl text-base font-black active:scale-95 transition-all disabled:opacity-60" style={{background:caisseSaved?SEM.success.accent:boutique.color,color:"#fff",fontFamily:"'Nunito',sans-serif"}}>
+            {caisseSaving ? "Enregistrement…" : caisseSaved ? "✓ Enregistré" : "Enregistrer les réglages de caisse"}
           </button>
         </div>}
 
@@ -8563,6 +8642,7 @@ export default function App() {
   const [sessionExpiryMs, setSessionExpiryMs] = useState(SESSION_EXPIRY_MS);
   const [supplierPaymentTermsDays, setSupplierPaymentTermsDays] = useState(30);
   const [clientPaymentTermsDays, setClientPaymentTermsDays] = useState(30);
+  const [caisseDefaults, setCaisseDefaults] = useState<CaisseDefaults>({ enabled:false, openingFloat:0, openingReminderTime:null, closingReminderTime:null });
   const LOCK_TIMEOUT_MS = lockTimeoutMs; // alias for existing refs
   const saveTimer   = useRef<ReturnType<typeof setTimeout>|null>(null);
   const isPulling            = useRef(false); // prevents overlapping Realtime reconciliations
@@ -8722,6 +8802,12 @@ export default function App() {
         if (settings.sessionMinutes) setSessionExpiryMs(settings.sessionMinutes * 60 * 1000);
         setSupplierPaymentTermsDays(settings.supplierPaymentTermsDays ?? 30);
         setClientPaymentTermsDays(settings.clientPaymentTermsDays ?? 30);
+        setCaisseDefaults({
+          enabled: settings.caisseControlEnabled ?? false,
+          openingFloat: settings.caisseDefaultOpeningFloat ?? 0,
+          openingReminderTime: settings.caisseOpeningReminderTime ?? null,
+          closingReminderTime: settings.caisseClosingReminderTime ?? null,
+        });
       }
     } catch { /* use defaults */ }
   }, []);
@@ -9616,7 +9702,7 @@ export default function App() {
         {safeTab==="stock"        && canAccess("stock")        && <RelationalStockView boutique={boutique} onUpdate={updateBoutique} logAction={logAction} initialFilter={navFilter.stockFilter} initialSupplierId={navFilter.supplierId?Number(navFilter.supplierId):undefined} initialEntryId={navFilter.stockEntryId?Number(navFilter.stockEntryId):undefined} onInitialRoutePrepared={()=>setNavFilter({})}/>}
         {safeTab==="fournisseurs" && canAccess("fournisseurs") && <RelationalFournisseursView boutique={boutique} onUpdate={updateBoutique} logAction={logAction} canPaySupplier={canAccess("charges")} canManageReceipts={canAccess("stock")} onStartReceipt={(supplierId)=>{setNavFilter({supplierId:String(supplierId)});setTab("stock");}} onCorrectReceipt={(entry,supplierId)=>{setNavFilter({supplierId:String(supplierId),stockEntryId:String(entry.id)});setTab("stock");}} defaultPaymentTermsDays={supplierPaymentTermsDays}/>}
         {safeTab==="clients"      && canAccess("clients")      && <RelationalClientsView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} currentUser={currentUser!} onUpdate={updateBoutique} logAction={logAction} initialTab={navFilter.clientTab as ClientType|undefined} initialClientId={navFilter.clientId?Number(navFilter.clientId):undefined} initialInvoiceId={navFilter.invoiceId} initialInvoiceNotice={navFilter.invoiceNotice === "payment" ? "payment" : "order"} onInitialClientOpened={()=>setNavFilter({})} canCreateOrder={canAccess("vente")} canCollectPayment={isOwner || !!(droits?.encaissement_vente)} canOpenInvoice={canAccess("factures")} defaultPaymentTermsDays={clientPaymentTermsDays} onOpenInvoice={(invoiceId)=>{setNavFilter({invoiceId});setTab("factures");}} onCreateOrder={(client)=>{setNavFilter({clientId:String(client.id)});setTab("pos");}}/>}
-        {safeTab==="factures"     && canAccess("factures")     && <RelationalFacturesView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} currentUser={currentUser} canReturn={canAccess("remboursement")} canCollectPayment={isOwner || !!(droits?.encaissement_vente)} canSeeMargin={canSeeMargin} onUpdate={updateBoutique} onUpdateOtherBoutique={updateOtherBoutique} logAction={logAction} initialStatus={navFilter.statusFilter as InvoiceStatus|"all"|undefined} initialInvoiceId={navFilter.invoiceId} initialClientId={navFilter.clientId?Number(navFilter.clientId):undefined} onPaymentRecorded={canAccess("clients") ? (clientId,invoiceId)=>{setNavFilter({clientId:String(clientId),invoiceId,invoiceNotice:"payment"});setTab("clients");} : undefined}/>}
+        {safeTab==="factures"     && canAccess("factures")     && <RelationalFacturesView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} currentUser={currentUser} canReturn={canAccess("remboursement")} canCollectPayment={isOwner || !!(droits?.encaissement_vente)} canSeeMargin={canSeeMargin} caisseDefaults={caisseDefaults} onUpdate={updateBoutique} onUpdateOtherBoutique={updateOtherBoutique} logAction={logAction} initialStatus={navFilter.statusFilter as InvoiceStatus|"all"|undefined} initialInvoiceId={navFilter.invoiceId} initialClientId={navFilter.clientId?Number(navFilter.clientId):undefined} onPaymentRecorded={canAccess("clients") ? (clientId,invoiceId)=>{setNavFilter({clientId:String(clientId),invoiceId,invoiceNotice:"payment"});setTab("clients");} : undefined}/>}
         {safeTab==="pos"          && canAccess("vente")        && <RelationalPOSView boutique={boutique} allBoutiques={boutiques} currentUser={currentUser} canEncaissVente={isOwner || !!(droits?.encaissement_vente)} initialClientId={navFilter.clientId?Number(navFilter.clientId):undefined} onInitialClientPrepared={()=>setNavFilter({})} onOrderCreated={(clientId,invoiceId,notice="order")=>{setNavFilter({clientId:String(clientId),invoiceId,...(notice==="payment"?{invoiceNotice:"payment"}:{})});setTab("clients");}} onUpdate={updateBoutique} logAction={logAction}/>}
         {safeTab==="charges"      && canAccess("charges")      && <RelationalChargesView boutique={boutique} onUpdate={updateBoutique} logAction={logAction}/>}
         {safeTab==="compta"       && canAccess("compta")       && <RelationalComptabiliteView boutique={boutique} canSeeMargin={canSeeMargin}/>}
@@ -9646,12 +9732,26 @@ export default function App() {
             sessionMinutesInit={Math.round(sessionExpiryMs / 60000)}
             supplierPaymentTermsDaysInit={supplierPaymentTermsDays}
             clientPaymentTermsDaysInit={clientPaymentTermsDays}
+            caisseDefaultsInit={caisseDefaults}
             onSaveAuthSettings={async (lockMinutes, sessionMinutes, supplierTermsDays, clientTermsDays) => {
-              await saveAuthSettings(boutique.id, { lockMinutes, sessionMinutes, supplierPaymentTermsDays:supplierTermsDays, clientPaymentTermsDays:clientTermsDays });
+              await saveAuthSettings(boutique.id, { lockMinutes, sessionMinutes, supplierPaymentTermsDays:supplierTermsDays, clientPaymentTermsDays:clientTermsDays, caisseControlEnabled:caisseDefaults.enabled, caisseDefaultOpeningFloat:caisseDefaults.openingFloat, caisseOpeningReminderTime:caisseDefaults.openingReminderTime ?? null, caisseClosingReminderTime:caisseDefaults.closingReminderTime ?? null });
               setLockTimeoutMs(lockMinutes * 60 * 1000);
               setSessionExpiryMs(sessionMinutes * 60 * 1000);
               setSupplierPaymentTermsDays(supplierTermsDays);
               setClientPaymentTermsDays(clientTermsDays);
+            }}
+            onSaveCaisseDefaults={async (defaults) => {
+              await saveAuthSettings(boutique.id, {
+                lockMinutes: Math.round(lockTimeoutMs / 60000),
+                sessionMinutes: Math.round(sessionExpiryMs / 60000),
+                supplierPaymentTermsDays,
+                clientPaymentTermsDays,
+                caisseControlEnabled: defaults.enabled,
+                caisseDefaultOpeningFloat: defaults.openingFloat,
+                caisseOpeningReminderTime: defaults.openingReminderTime ?? null,
+                caisseClosingReminderTime: defaults.closingReminderTime ?? null,
+              });
+              setCaisseDefaults(defaults);
             }}
             backendOk={backendOk}
             lastSyncAt={lastSyncAt}
