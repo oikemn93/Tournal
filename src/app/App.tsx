@@ -182,7 +182,7 @@ const ROLE_PRESETS: Record<string, Record<Permission,boolean>> = {
   "Gérant":   { dashboard:true,  stock:true,  fournisseurs:true,  clients:true,  factures:true,  remboursement:true,  charges:true,  compta:true,  vente:true,  inventaire:true,  marges:true,  encaissement_vente:true  },
   "Vendeur":  { dashboard:true,  stock:true,  fournisseurs:false, clients:true,  factures:true,  remboursement:false, charges:false, compta:false, vente:true,  inventaire:false, marges:false, encaissement_vente:false },
   "Vendeuse": { dashboard:true,  stock:true,  fournisseurs:false, clients:true,  factures:true,  remboursement:false, charges:false, compta:false, vente:true,  inventaire:false, marges:false, encaissement_vente:false },
-  "Caissier": { dashboard:true,  stock:false, fournisseurs:false, clients:true,  factures:true,  remboursement:false, charges:false, compta:false, vente:true,  inventaire:false, marges:false, encaissement_vente:true  },
+  "Caissier": { dashboard:true,  stock:false, fournisseurs:false, clients:true,  factures:true,  remboursement:false, charges:false, compta:false, vente:false, inventaire:false, marges:false, encaissement_vente:true  },
   "Livreur":  { dashboard:false, stock:false, fournisseurs:false, clients:false, factures:true,  remboursement:false, charges:false, compta:false, vente:false, inventaire:false, marges:false, encaissement_vente:false },
   "Autre":    { dashboard:false, stock:false, fournisseurs:false, clients:false, factures:false, remboursement:false, charges:false, compta:false, vente:false, inventaire:false, marges:false, encaissement_vente:false },
 };
@@ -6905,9 +6905,7 @@ function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdat
     const nextValue = !assignment.droits[perm];
     onUpdateUsers(prev=>prev.map(x=>x.id!==userId?x:{...x,assignments:x.assignments.map(a=>{
       if (a.boutiqueId!==bid) return a;
-      const nextDroits = {...a.droits,[perm]:nextValue};
-      if (perm === "vente" && !nextValue) nextDroits.encaissement_vente = false;
-      return {...a,droits:nextDroits};
+      return {...a,droits:{...a.droits,[perm]:nextValue}};
     })}));
     logAction("Permission modifiée",`${u.nom} · ${perm}→${nextValue?"ON":"OFF"}`,"🔒");
   }
@@ -7048,14 +7046,8 @@ function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdat
             <Field label="ACCÈS (cliquez pour activer / désactiver)">
               <div className="grid grid-cols-2 gap-2">{permDefs.map(p=>(
                 <button key={p.id}
-                  disabled={p.id==="encaissement_vente"&&!uDroits.vente}
-                  onClick={()=>setUDroits(d=>{
-                    if (p.id==="encaissement_vente"&&!d.vente) return d;
-                    const next={...d,[p.id]:!d[p.id]};
-                    if (p.id==="vente"&&d.vente) next.encaissement_vente=false;
-                    return next;
-                  })}
-                  className="flex items-center gap-2 px-3 py-3 rounded-xl border-2 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                  onClick={()=>setUDroits(d=>({...d,[p.id]:!d[p.id]}))}
+                  className="flex items-center gap-2 px-3 py-3 rounded-xl border-2 transition-all"
                   style={{ background:uDroits[p.id]?boutique.color+"18":"transparent", borderColor:uDroits[p.id]?boutique.color:"rgba(0,0,0,0.1)" }}>
                   <span className="text-base">{p.icon}</span>
                   <span className="text-xs font-bold flex-1 text-left" style={{ color:uDroits[p.id]?boutique.color:"#7A7055" }}>{p.label}</span>
@@ -7123,7 +7115,7 @@ function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdat
                   </div>
                   {!isOwner&&<div className="grid grid-cols-2 divide-x divide-y divide-border border-t border-border">
                     {permDefs.map(({id,label,icon})=>{const enabled=a.droits[id];return(
-                      <button key={id} disabled={id==="encaissement_vente"&&!a.droits.vente} onClick={()=>toggleDroit(u.id,id)} className="flex items-center gap-3 px-4 py-3.5 active:opacity-70 disabled:opacity-40 disabled:cursor-not-allowed">
+                      <button key={id} onClick={()=>toggleDroit(u.id,id)} className="flex items-center gap-3 px-4 py-3.5 active:opacity-70">
                         <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background:enabled?boutique.color+"22":"#EEE9D8" }}><span className="text-base">{icon}</span></div>
                         <div className="flex-1 text-left"><p className="text-xs font-bold" style={{ color:enabled?boutique.color:"#7A7055" }}>{label}</p></div>
                         <div className="w-9 h-5 rounded-full flex-shrink-0 flex items-center transition-all duration-200" style={{ background:enabled?boutique.color:"#c7bfa0", paddingLeft:enabled?"18px":"2px" }}><div className="w-4 h-4 rounded-full bg-white shadow-sm"/></div>

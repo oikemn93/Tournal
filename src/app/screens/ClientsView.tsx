@@ -51,8 +51,8 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
   const [search, setSearch] = useState("");
   const [modal, setModal] = useState(false);
   const [detailClient, setDetailClient] = useState<Client|null>(null);
-  const [showTransactionHistory, setShowTransactionHistory] = useState(false);
-  const [showAllTransactions, setShowAllTransactions] = useState(false);
+  const [showPaymentHistory, setShowPaymentHistory] = useState(false);
+  const [showAllInvoices, setShowAllInvoices] = useState(false);
   const [highlightedInvoiceId, setHighlightedInvoiceId] = useState<string|null>(null);
   const [highlightedInvoiceNotice, setHighlightedInvoiceNotice] = useState<"order" | "payment">("order");
   const [nom,setNom]=useState(""); const [dialCode,setDialCode]=useState("+221"); const [tel,setTel]=useState(""); const [ville,setVille]=useState(""); const [type,setType]=useState<ClientType>("B2C");
@@ -70,8 +70,10 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
       setTab(client.type);
       setSearch("");
       setDetailClient(client);
-      setShowTransactionHistory(true);
-      setShowAllTransactions(true);
+      // The invoice list is always visible. Only unfold payment details when
+      // returning immediately after an encashment.
+      setShowPaymentHistory(initialInvoiceNotice === "payment");
+      setShowAllInvoices(true);
       setHighlightedInvoiceId(initialInvoiceId ?? null);
       setHighlightedInvoiceNotice(initialInvoiceNotice);
     }
@@ -80,8 +82,8 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
 
   function openClientDetail(client: Client) {
     setDetailClient(client);
-    setShowTransactionHistory(false);
-    setShowAllTransactions(false);
+    setShowPaymentHistory(false);
+    setShowAllInvoices(false);
     setHighlightedInvoiceId(null);
     setHighlightedInvoiceNotice("order");
   }
@@ -182,10 +184,8 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
     const months = Object.entries(byMonth).sort((a,b)=>b[0].localeCompare(a[0])).slice(0,6);
     const clientPayments = clientInvoices.flatMap(inv => (inv.payments ?? []).map(payment => ({ ...payment, invoiceId:inv.id })))
       .sort((a,b)=>b.paidAt.localeCompare(a.paidAt));
-    const transactionHistoryCount = clientInvoices.length + clientPayments.length + clientAdvances.length;
-    const visibleTransactions = showTransactionHistory
-      ? (showAllTransactions ? clientInvoices : clientInvoices.slice(0, 5))
-      : [];
+    const paymentHistoryCount = clientPayments.length + clientAdvances.length;
+    const visibleInvoices = showAllInvoices ? clientInvoices : clientInvoices.slice(0, 5);
 
     async function submitClientPayment() {
       if (submittingPayment) return;
@@ -365,15 +365,14 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
           </div>
         </section>}
         <section className="bg-card rounded-2xl p-3.5 border border-border" aria-label="Factures et commandes du client">
-          <button type="button" onClick={()=>setShowTransactionHistory(value=>!value)} aria-expanded={showTransactionHistory} className="flex w-full items-center justify-between gap-3 text-left">
-            <div><p className="text-xs font-black tracking-wider text-muted-foreground">HISTORIQUE DES TRANSACTIONS</p><p className="text-xs text-muted-foreground mt-0.5">{showTransactionHistory ? "Factures, règlements et avoirs" : "Appuyez pour consulter le détail"}</p></div>
-            <span className="flex items-center gap-2"><span className="rounded-lg px-2 py-1 text-xs font-black" style={{background:CC+"18",color:CC}}>{transactionHistoryCount}</span><ChevronRight size={16} className={`text-muted-foreground transition-transform ${showTransactionHistory ? "rotate-90" : ""}`}/></span>
-          </button>
-          {showTransactionHistory && <>
-          {highlightedInvoiceId && <div className="mt-3 rounded-xl px-3 py-2 text-xs font-bold" style={{background:SEM.success.bg,color:SEM.success.accent}}>{highlightedInvoiceNotice === "payment" ? `✓ Encaissement enregistré : ${highlightedInvoiceId}` : `✓ Nouvelle commande enregistrée : ${highlightedInvoiceId}`}</div>}
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div><p className="text-xs font-black tracking-wider text-muted-foreground">FACTURES & COMMANDES</p><p className="text-xs text-muted-foreground mt-0.5">Les plus récentes sont affichées en premier.</p></div>
+            <span className="rounded-lg px-2 py-1 text-xs font-black" style={{background:CC+"18",color:CC}}>{clientInvoices.length}</span>
+          </div>
+          {highlightedInvoiceId && <div className="mb-3 rounded-xl px-3 py-2 text-xs font-bold" style={{background:SEM.success.bg,color:SEM.success.accent}}>{highlightedInvoiceNotice === "payment" ? `✓ Encaissement enregistré : ${highlightedInvoiceId}` : `✓ Nouvelle commande enregistrée : ${highlightedInvoiceId}`}</div>}
           <div className="space-y-2">
             {clientInvoices.length===0&&<p className="text-sm text-muted-foreground text-center py-5">Aucune transaction</p>}
-            {visibleTransactions.map(inv=>{
+            {visibleInvoices.map(inv=>{
               const [tc,bc]=invBadge(inv.status);
               const isReturn=inv.type==="Retour";
               const paid = invoicePaidAmount(inv);
@@ -407,11 +406,17 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
               </div>;
             })}
           </div>
-          {clientInvoices.length>5&&<button type="button" onClick={()=>setShowAllTransactions(value=>!value)} className="mt-3 w-full rounded-xl bg-muted py-2.5 text-xs font-black text-foreground">{showAllTransactions ? "Réduire la liste" : `Voir les ${clientInvoices.length} transactions`}</button>}
+          {clientInvoices.length>5&&<button type="button" onClick={()=>setShowAllInvoices(value=>!value)} className="mt-3 w-full rounded-xl bg-muted py-2.5 text-xs font-black text-foreground">{showAllInvoices ? "Réduire la liste" : `Voir les ${clientInvoices.length} factures`}</button>}
+        </section>
+        {paymentHistoryCount>0&&<section className="bg-card rounded-2xl p-3.5 border border-border" aria-label="Historique des paiements du client">
+          <button type="button" onClick={()=>setShowPaymentHistory(value=>!value)} aria-expanded={showPaymentHistory} className="flex w-full items-center justify-between gap-3 text-left">
+            <div><p className="text-xs font-black tracking-wider text-muted-foreground">HISTORIQUE DES PAIEMENTS</p><p className="text-xs text-muted-foreground mt-0.5">{showPaymentHistory ? "Règlements et versements d’avance" : "Appuyez pour consulter le détail"}</p></div>
+            <span className="flex items-center gap-2"><span className="rounded-lg px-2 py-1 text-xs font-black" style={{background:SEM.success.bg,color:SEM.success.accent}}>{paymentHistoryCount}</span><ChevronRight size={16} className={`text-muted-foreground transition-transform ${showPaymentHistory ? "rotate-90" : ""}`}/></span>
+          </button>
+          {showPaymentHistory&&<>
           {clientPayments.length>0&&<div className="mt-4 border-t border-border pt-4">
-            <p className="mb-3 text-xs font-black tracking-wider text-muted-foreground">HISTORIQUE DES PAIEMENTS</p>
             <div className="space-y-2">
-              {clientPayments.slice(0,showAllTransactions ? undefined : 20).map(payment=><div key={`${payment.invoiceId}-${payment.id}`} className="flex items-center justify-between gap-3 text-xs">
+              {clientPayments.slice(0,20).map(payment=><div key={`${payment.invoiceId}-${payment.id}`} className="flex items-center justify-between gap-3 text-xs">
                 <div><p className="font-bold">{payment.invoiceId} · {payment.paymentMethod}</p><p className="text-muted-foreground">{formatPreciseDateTime(payment.paidAt)} · {payment.operatorName}</p></div>
                 <p className="font-black" style={{color:SEM.success.accent}}>{fmt(payment.amount)}</p>
               </div>)}
@@ -420,14 +425,14 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
           {clientAdvances.length>0&&<div className="mt-4 border-t border-border pt-4">
             <p className="mb-3 text-xs font-black tracking-wider text-muted-foreground">VERSEMENTS D'AVANCE</p>
             <div className="space-y-2">
-              {clientAdvances.slice(0,showAllTransactions ? undefined : 20).map(advance=><div key={advance.id} className="flex items-center justify-between gap-3 text-xs">
+              {clientAdvances.slice(0,20).map(advance=><div key={advance.id} className="flex items-center justify-between gap-3 text-xs">
                 <div><p className="font-bold">{PM_ICON[advance.paymentMethod]} {advance.paymentMethod} · Avoir</p><p className="text-muted-foreground">{formatPreciseDateTime(advance.paidAt)} · {advance.operatorName}</p></div>
                 <div className="text-right"><p className="font-black" style={{color:advanceRemaining(advance)>0?SEM.success.accent:SEM.neutral.accent}}>{fmt(advanceRemaining(advance))}</p><p className="text-[10px] text-muted-foreground">reçu {fmt(advance.amount)}</p></div>
               </div>)}
             </div>
           </div>}
           </>}
-        </section>
+        </section>}
         {totalAvoir>0&&<section className="rounded-2xl p-3.5 border" style={{borderColor:SEM.success.accent+"44",background:SEM.success.bg}}>
           <div className="flex items-center justify-between gap-3">
             <div><p className="text-xs font-black tracking-wider" style={{color:SEM.success.accent}}>AVOIR CLIENT DISPONIBLE</p><p className="text-xs text-muted-foreground mt-1">À proposer pour régler une prochaine facture.</p></div>
