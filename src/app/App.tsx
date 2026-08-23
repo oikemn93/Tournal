@@ -6726,20 +6726,22 @@ function SupervisionSection({ boutique, allBoutiques, backendOk, lastSyncAt }: {
 
 // ─── VIEW: ADMIN ──────────────────────────────────────────────────────────────
 
-function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdate, onUpdateUsers, onCreateUser, logAction, onSaveAuthSettings, lockMinutesInit, sessionMinutesInit, backendOk, lastSyncAt }: {
+function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdate, onUpdateUsers, onCreateUser, logAction, onSaveAuthSettings, lockMinutesInit, sessionMinutesInit, supplierPaymentTermsDaysInit, clientPaymentTermsDaysInit, backendOk, lastSyncAt }: {
   boutique: Boutique; allBoutiques: Boutique[]; platformUsers: PlatformUser[]; currentUser: PlatformUser;
   onUpdate: (u: Partial<Boutique>) => void;
   onUpdateUsers: (updater: PlatformUser[] | ((prev: PlatformUser[]) => PlatformUser[])) => void;
   onCreateUser: (user: Omit<PlatformUser,"id">) => Promise<PlatformUser|null>;
   logAction: (action: string, detail: string, icon: string) => void;
-  onSaveAuthSettings?: (lockMin: number, sessMin: number) => Promise<void>;
+  onSaveAuthSettings?: (lockMin: number, sessMin: number, supplierTermsDays: number, clientTermsDays: number) => Promise<void>;
   lockMinutesInit?: number;
   sessionMinutesInit?: number;
+  supplierPaymentTermsDaysInit?: number;
+  clientPaymentTermsDaysInit?: number;
   backendOk?: boolean|null;
   lastSyncAt?: number;
 }) {
   // ── section type ──────────────────────────────────────────────────────────
-  type AdminSec = "equipe"|"perms"|"auth"|"stock-params"|"boutique"|"imprimante"|"lecteur"|"tiroir"|"activite"|"supervision";
+  type AdminSec = "equipe"|"perms"|"auth"|"payment-terms"|"stock-params"|"boutique"|"imprimante"|"lecteur"|"tiroir"|"activite"|"supervision";
   const [section, setSection] = useState<AdminSec>("equipe");
   const [catOpen, setCatOpen] = useState<"securite"|"fonctionnel"|"systeme"|"journal"|"supervision">("securite");
 
@@ -6768,7 +6770,12 @@ function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdat
   const [authSaved, setAuthSaved] = useState(false);
   const [authSaving, setAuthSaving] = useState(false);
   const [authSaveError, setAuthSaveError] = useState<string | null>(null);
+  const [supplierTermsDays, setSupplierTermsDays] = useState(supplierPaymentTermsDaysInit ?? 30);
+  const [clientTermsDays, setClientTermsDays] = useState(clientPaymentTermsDaysInit ?? 30);
   const sessMinutes = Math.max(5, Math.round(sessValue * (sessUnit === "min" ? 1 : sessUnit === "h" ? 60 : 1440)));
+
+  useEffect(() => { setSupplierTermsDays(supplierPaymentTermsDaysInit ?? 30); }, [supplierPaymentTermsDaysInit]);
+  useEffect(() => { setClientTermsDays(clientPaymentTermsDaysInit ?? 30); }, [clientPaymentTermsDaysInit]);
 
   const boutiqueUsers = platformUsers.filter(u=>!u.isSuperAdmin&&u.assignments.some(a=>a.boutiqueId===boutique.id));
   const permDefs = [
@@ -6857,7 +6864,7 @@ function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdat
   type CatId = "securite"|"fonctionnel"|"systeme"|"journal"|"supervision";
   const CATS: Array<{ id:CatId; icon:string; label:string; subs:Array<{id:AdminSec;label:string}> }> = [
     { id:"securite",    icon:"🔒", label:"Sécurité",    subs:[{id:"equipe",label:"Équipe"},{id:"perms",label:"Droits"},{id:"auth",label:"Authentification"}] },
-    { id:"fonctionnel", icon:"⚙️", label:"Fonctionnel", subs:[{id:"stock-params",label:"Catalogue"},{id:"boutique",label:"Boutique"}] },
+    { id:"fonctionnel", icon:"⚙️", label:"Fonctionnel", subs:[{id:"stock-params",label:"Catalogue"},{id:"boutique",label:"Boutique"},{id:"payment-terms",label:"Délais paiement"}] },
     { id:"systeme",     icon:"🔧", label:"Système",     subs:[{id:"imprimante",label:"Imprimante"},{id:"lecteur",label:"Code-barre"},{id:"tiroir",label:"Tiroir caisse"}] },
     { id:"journal",     icon:"📋", label:"Journal",     subs:[{id:"activite",label:"Activité"}] },
     { id:"supervision", icon:"🩺", label:"Supervis.",   subs:[{id:"supervision",label:"Monitoring"}] },
@@ -7112,7 +7119,7 @@ function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdat
               if (authSaving) return;
               setAuthSaving(true); setAuthSaveError(null);
               try {
-                await onSaveAuthSettings?.(lockMinutes, sessMinutes);
+                await onSaveAuthSettings?.(lockMinutes, sessMinutes, supplierTermsDays, clientTermsDays);
                 setAuthSaved(true);
                 setTimeout(()=>setAuthSaved(false),2000);
                 logAction("Paramètres auth modifiés",`Verrou ${lockMinutes}min · Session ${sessMinutes}min`,"🔒");
@@ -7125,6 +7132,35 @@ function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdat
             className="w-full py-4 rounded-2xl text-base font-black active:scale-95 transition-all disabled:opacity-60"
             style={{ background:authSaved?SEM.success.accent:boutique.color, color:"#fff", fontFamily:"'Nunito',sans-serif" }}>
             {authSaving ? "Enregistrement…" : authSaved ? "✓ Enregistré" : "Appliquer les paramètres"}
+          </button>
+        </div>}
+
+        {section==="payment-terms"&&<div className="space-y-4">
+          <div className="rounded-2xl px-4 py-3 flex items-center gap-3" style={{background:"#f59e0b0d",border:"1px solid #f59e0b28"}}>
+            <Calendar size={16} style={{color:SEM.warning.accent}}/>
+            <p className="text-xs font-semibold" style={{color:SEM.warning.accent}}>Les échéances sont calculées à la création des nouvelles réceptions et factures. Les délais personnalisés d’un fournisseur ou client restent prioritaires.</p>
+          </div>
+          <div className="bg-card rounded-2xl border border-border p-4 space-y-3">
+            <div><p className="font-bold text-sm">Fournisseurs</p><p className="text-xs text-muted-foreground mt-0.5">Délai par défaut appliqué à chaque nouvelle réception de stock.</p></div>
+            <div className="flex items-center gap-3"><input type="number" min="0" max="3650" value={supplierTermsDays} onChange={event=>setSupplierTermsDays(Math.max(0, Math.min(3650, Number(event.target.value))))} className="w-28 rounded-xl border border-border bg-background px-3 py-2.5 text-center text-sm font-black focus:outline-none focus:ring-2 focus:ring-primary/30"/><span className="text-sm font-bold text-muted-foreground">jours</span></div>
+          </div>
+          <div className="bg-card rounded-2xl border border-border p-4 space-y-3">
+            <div><p className="font-bold text-sm">Clients B2B et grossistes</p><p className="text-xs text-muted-foreground mt-0.5">Délai par défaut des nouvelles factures à crédit. Les ventes B2C n’ont pas d’échéance.</p></div>
+            <div className="flex items-center gap-3"><input type="number" min="0" max="3650" value={clientTermsDays} onChange={event=>setClientTermsDays(Math.max(0, Math.min(3650, Number(event.target.value))))} className="w-28 rounded-xl border border-border bg-background px-3 py-2.5 text-center text-sm font-black focus:outline-none focus:ring-2 focus:ring-primary/30"/><span className="text-sm font-bold text-muted-foreground">jours</span></div>
+          </div>
+          {authSaveError&&<p className="text-xs font-semibold" style={{color:SEM.danger.text}}>{authSaveError}</p>}
+          <button onClick={async()=>{
+              if (authSaving) return;
+              setAuthSaving(true); setAuthSaveError(null);
+              try {
+                await onSaveAuthSettings?.(lockMinutes, sessMinutes, supplierTermsDays, clientTermsDays);
+                setAuthSaved(true); setTimeout(()=>setAuthSaved(false),2000);
+                logAction("Délais de paiement modifiés", `Fournisseurs ${supplierTermsDays}j · Clients B2B ${clientTermsDays}j`, "📅");
+              } catch (error) {
+                setAuthSaveError(error instanceof Error ? error.message : "Enregistrement impossible. Réessayez.");
+              } finally { setAuthSaving(false); }
+            }} disabled={authSaving} className="w-full py-4 rounded-2xl text-base font-black active:scale-95 transition-all disabled:opacity-60" style={{background:authSaved?SEM.success.accent:boutique.color,color:"#fff",fontFamily:"'Nunito',sans-serif"}}>
+            {authSaving ? "Enregistrement…" : authSaved ? "✓ Enregistré" : "Enregistrer les délais"}
           </button>
         </div>}
 
@@ -8502,6 +8538,8 @@ export default function App() {
   // Auth settings come from the relational auth_settings table.
   const [lockTimeoutMs, setLockTimeoutMs] = useState(10 * 60 * 1000);
   const [sessionExpiryMs, setSessionExpiryMs] = useState(SESSION_EXPIRY_MS);
+  const [supplierPaymentTermsDays, setSupplierPaymentTermsDays] = useState(30);
+  const [clientPaymentTermsDays, setClientPaymentTermsDays] = useState(30);
   const LOCK_TIMEOUT_MS = lockTimeoutMs; // alias for existing refs
   const saveTimer   = useRef<ReturnType<typeof setTimeout>|null>(null);
   const isPulling            = useRef(false); // prevents overlapping Realtime reconciliations
@@ -8659,6 +8697,8 @@ export default function App() {
       if (settings) {
         if (settings.lockMinutes) setLockTimeoutMs(settings.lockMinutes * 60 * 1000);
         if (settings.sessionMinutes) setSessionExpiryMs(settings.sessionMinutes * 60 * 1000);
+        setSupplierPaymentTermsDays(settings.supplierPaymentTermsDays ?? 30);
+        setClientPaymentTermsDays(settings.clientPaymentTermsDays ?? 30);
       }
     } catch { /* use defaults */ }
   }, []);
@@ -9551,8 +9591,8 @@ export default function App() {
       <main className="flex-1 overflow-y-auto px-4 py-4 pb-20" style={{ scrollbarWidth:"none" }}>
         {safeTab==="dashboard"    && canAccess("dashboard") && <DashboardView boutique={boutique} onNavigate={(t,f)=>{setNavFilter(f??{});setTab(t);}}/>}
         {safeTab==="stock"        && canAccess("stock")        && <RelationalStockView boutique={boutique} onUpdate={updateBoutique} logAction={logAction} initialFilter={navFilter.stockFilter}/>}
-        {safeTab==="fournisseurs" && canAccess("fournisseurs") && <RelationalFournisseursView boutique={boutique} onUpdate={updateBoutique} logAction={logAction} canPaySupplier={canAccess("charges")}/>}
-        {safeTab==="clients"      && canAccess("clients")      && <RelationalClientsView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} currentUser={currentUser!} onUpdate={updateBoutique} logAction={logAction} initialTab={navFilter.clientTab as ClientType|undefined} initialClientId={navFilter.clientId?Number(navFilter.clientId):undefined} initialInvoiceId={navFilter.invoiceId} initialInvoiceNotice={navFilter.invoiceNotice === "payment" ? "payment" : "order"} onInitialClientOpened={()=>setNavFilter({})} canCreateOrder={canAccess("vente")} canCollectPayment={isOwner || !!(droits?.encaissement_vente)} canOpenInvoice={canAccess("factures")} onOpenInvoice={(invoiceId)=>{setNavFilter({invoiceId});setTab("factures");}} onCreateOrder={(client)=>{setNavFilter({clientId:String(client.id)});setTab("pos");}}/>}
+        {safeTab==="fournisseurs" && canAccess("fournisseurs") && <RelationalFournisseursView boutique={boutique} onUpdate={updateBoutique} logAction={logAction} canPaySupplier={canAccess("charges")} defaultPaymentTermsDays={supplierPaymentTermsDays}/>}
+        {safeTab==="clients"      && canAccess("clients")      && <RelationalClientsView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} currentUser={currentUser!} onUpdate={updateBoutique} logAction={logAction} initialTab={navFilter.clientTab as ClientType|undefined} initialClientId={navFilter.clientId?Number(navFilter.clientId):undefined} initialInvoiceId={navFilter.invoiceId} initialInvoiceNotice={navFilter.invoiceNotice === "payment" ? "payment" : "order"} onInitialClientOpened={()=>setNavFilter({})} canCreateOrder={canAccess("vente")} canCollectPayment={isOwner || !!(droits?.encaissement_vente)} canOpenInvoice={canAccess("factures")} defaultPaymentTermsDays={clientPaymentTermsDays} onOpenInvoice={(invoiceId)=>{setNavFilter({invoiceId});setTab("factures");}} onCreateOrder={(client)=>{setNavFilter({clientId:String(client.id)});setTab("pos");}}/>}
         {safeTab==="factures"     && canAccess("factures")     && <RelationalFacturesView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} currentUser={currentUser} canReturn={canAccess("remboursement")} canCollectPayment={isOwner || !!(droits?.encaissement_vente)} canSeeMargin={canSeeMargin} onUpdate={updateBoutique} onUpdateOtherBoutique={updateOtherBoutique} logAction={logAction} initialStatus={navFilter.statusFilter as InvoiceStatus|"all"|undefined} initialInvoiceId={navFilter.invoiceId} initialClientId={navFilter.clientId?Number(navFilter.clientId):undefined} onPaymentRecorded={canAccess("clients") ? (clientId,invoiceId)=>{setNavFilter({clientId:String(clientId),invoiceId,invoiceNotice:"payment"});setTab("clients");} : undefined}/>}
         {safeTab==="pos"          && canAccess("vente")        && <RelationalPOSView boutique={boutique} allBoutiques={boutiques} currentUser={currentUser} canEncaissVente={isOwner || !!(droits?.encaissement_vente)} initialClientId={navFilter.clientId?Number(navFilter.clientId):undefined} onInitialClientPrepared={()=>setNavFilter({})} onOrderCreated={(clientId,invoiceId,notice="order")=>{setNavFilter({clientId:String(clientId),invoiceId,...(notice==="payment"?{invoiceNotice:"payment"}:{})});setTab("clients");}} onUpdate={updateBoutique} logAction={logAction}/>}
         {safeTab==="charges"      && canAccess("charges")      && <RelationalChargesView boutique={boutique} onUpdate={updateBoutique} logAction={logAction}/>}
@@ -9579,10 +9619,14 @@ export default function App() {
             logAction={logAction}
             lockMinutesInit={Math.round(lockTimeoutMs / 60000)}
             sessionMinutesInit={Math.round(sessionExpiryMs / 60000)}
-            onSaveAuthSettings={async (lockMinutes, sessionMinutes) => {
-              await saveAuthSettings(boutique.id, { lockMinutes, sessionMinutes });
+            supplierPaymentTermsDaysInit={supplierPaymentTermsDays}
+            clientPaymentTermsDaysInit={clientPaymentTermsDays}
+            onSaveAuthSettings={async (lockMinutes, sessionMinutes, supplierTermsDays, clientTermsDays) => {
+              await saveAuthSettings(boutique.id, { lockMinutes, sessionMinutes, supplierPaymentTermsDays:supplierTermsDays, clientPaymentTermsDays:clientTermsDays });
               setLockTimeoutMs(lockMinutes * 60 * 1000);
               setSessionExpiryMs(sessionMinutes * 60 * 1000);
+              setSupplierPaymentTermsDays(supplierTermsDays);
+              setClientPaymentTermsDays(clientTermsDays);
             }}
             backendOk={backendOk}
             lastSyncAt={lastSyncAt}

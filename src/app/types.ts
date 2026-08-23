@@ -17,11 +17,13 @@ export type Charge = {
   id: number; label: string; montant: number; date: string; dateRaw: string;
   categorie: ChargeCategorie; recurrence: "unique" | "mensuelle" | "hebdomadaire";
   note?: string; fournisseur?: string; supplierId?: number; paymentMethod?: PaymentMethod;
+  dueDate?: string; stockEntryId?: number;
+  operatorId?: string; operatorName?: string;
   isB2BDebt?: boolean; acompte?: number;
   status?: "en_attente" | "partiel" | "payé" | "pending" | "partial" | "paid";
   paidAmount?: number;
   transferId?: string;
-  source?: "manual" | "transfer" | "recurrence" | "supplier_payment";
+  source?: "manual" | "transfer" | "recurrence" | "supplier_payment" | "supplier_receipt";
 };
 
 export type InvoiceLine = { productId: number; nom: string; qty: number; unit: string; prixUnit: number; sellUnit?: string; sellQty?: number; prixAchat?: number };
@@ -70,9 +72,9 @@ export type PlatformUser = {
 };
 
 export type Product    = { id: number; nom: string; img: string; unit: string; fournisseur: string; categorie?: string; couleur?: string; prixVente?: number; prixAchat?: number; alertOk?: number; alertLow?: number };
-export type StockEntry = { id: number; productId: number; qty: number; unit: string; montantDu: number; date: string; fournisseur: string; supplierId?: number; movementType?: "achat"|"ajustement"|"retour"|"inventaire"|string; recordedAt?: string; invoiceId?: string; nbLots?: number; nbPieces?: number; longueurPiece?: number; sku?: string; isTransfertInterne?: boolean };
-export type Supplier   = { id: number; nom: string; ville: string; lastDelivery: string; tel: string; initials: string; color: string; email?: string; contact?: string };
-export type Client     = { id: number; nom: string; type: ClientType; tel: string; total: number; last: string; ville: string; adresse?: string; email?: string; contact?: string };
+export type StockEntry = { id: number; productId: number; qty: number; unit: string; montantDu: number; date: string; fournisseur: string; supplierId?: number; movementType?: "achat"|"ajustement"|"retour"|"inventaire"|string; recordedAt?: string; invoiceId?: string; nbLots?: number; nbPieces?: number; longueurPiece?: number; sku?: string; reference?: string; operatorId?: string; operatorName?: string; isTransfertInterne?: boolean };
+export type Supplier   = { id: number; nom: string; ville: string; lastDelivery: string; tel: string; initials: string; color: string; email?: string; contact?: string; notes?: string; paymentTermsDays?: number; linkedBoutiqueId?: string };
+export type Client     = { id: number; nom: string; type: ClientType; tel: string; total: number; last: string; ville: string; adresse?: string; email?: string; contact?: string; paymentTermsDays?: number; linkedBoutiqueId?: string };
 
 export type Invoice    = {
   id: string; clientId?: number; client: string; clientTel?: string; clientType?: ClientType;
@@ -80,6 +82,7 @@ export type Invoice    = {
   boutiqueNomSnapshot?: string; boutiqueVilleSnapshot?: string; boutiqueAdresseSnapshot?: string; boutiqueTelSnapshot?: string; boutiqueEmailSnapshot?: string; boutiqueLogoSnapshot?: string;
   lines?: InvoiceLine[]; payments?: InvoicePayment[];
   montant: number; acompte: number; date: string; dateRaw?: string;
+  dueDate?: string;
   status: InvoiceStatus; type: string; returnOfInvoiceId?: string;
   operatorId?: string; operatorNom?: string; operatorColor?: string;
   paymentMethod?: PaymentMethod; paymentSplit?: PaymentEntry[];

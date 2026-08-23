@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Search, MapPin, Phone, Lock, Store, ChevronRight, Plus, ArrowLeft, FilePlus, Wallet, CheckCircle } from "lucide-react";
+import { Search, MapPin, Phone, Lock, Store, ChevronRight, Plus, ArrowLeft, FilePlus, Wallet, CheckCircle, CalendarClock, Edit2 } from "lucide-react";
 import type { Boutique, Client, ClientType, Invoice, PaymentMethod, PlatformUser } from "../types";
 import { SEM, inputCls } from "../constants";
 import { fmt, today, ini } from "../utils/formatting";
@@ -9,7 +9,7 @@ import { getSiblings } from "../utils/inventory";
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
-import { applyClientAdvanceToInvoice, createClient, recordClientPayment, updateClientContact, WHOLESALE_MARKER } from "../../lib/api";
+import { applyClientAdvanceToInvoice, createClient, recordClientPayment, updateClientContact, updateClientPaymentTerms, WHOLESALE_MARKER } from "../../lib/api";
 import { PhoneField } from "../components/PhoneField";
 import { formatPreciseDateTime, invoicePaidAmount, invoiceRemainingAmount } from "../utils/payments";
 
@@ -17,7 +17,18 @@ function normalizePhone(value?: string): string {
   return (value ?? "").replace(/\D/g, "");
 }
 
-export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser, onUpdate, logAction, initialTab, initialClientId, initialInvoiceId, initialInvoiceNotice = "order", onInitialClientOpened, canCreateOrder = false, canCollectPayment = false, canOpenInvoice = false, onOpenInvoice, onCreateOrder }: {
+function dueLabel(dueDate: string | undefined, remaining: number) {
+  if (!dueDate || remaining <= 0) return null;
+  const todayAtMidnight = new Date();
+  todayAtMidnight.setHours(0, 0, 0, 0);
+  const dueAtMidnight = new Date(`${dueDate}T00:00:00`);
+  const days = Math.ceil((dueAtMidnight.getTime() - todayAtMidnight.getTime()) / 86_400_000);
+  if (days < 0) return { text:`Retard de ${Math.abs(days)} j`, color:SEM.danger.text, bg:SEM.danger.bg };
+  if (days <= 3) return { text:days === 0 ? "Échéance aujourd’hui" : `Échéance dans ${days} j`, color:SEM.warning.accent, bg:SEM.warning.bg };
+  return { text:`Échéance le ${dueAtMidnight.toLocaleDateString("fr-FR")}`, color:SEM.neutral.accent, bg:"#f1f5f9" };
+}
+
+export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser, onUpdate, logAction, initialTab, initialClientId, initialInvoiceId, initialInvoiceNotice = "order", onInitialClientOpened, canCreateOrder = false, canCollectPayment = false, canOpenInvoice = false, defaultPaymentTermsDays = 30, onOpenInvoice, onCreateOrder }: {
   boutique: Boutique; allBoutiques: Boutique[]; platformUsers: PlatformUser[];
   currentUser: PlatformUser;
   onUpdate: (u: Partial<Boutique>) => void;
@@ -30,6 +41,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
   canCreateOrder?: boolean;
   canCollectPayment?: boolean;
   canOpenInvoice?: boolean;
+  defaultPaymentTermsDays?: number;
   onOpenInvoice: (invoiceId: string) => void;
   onCreateOrder: (client: Client) => void;
 }) {
@@ -123,6 +135,9 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
   const [paymentSummary, setPaymentSummary] = useState<{ applied:number; advance:number }|null>(null);
   const [applyingAdvanceInvoiceId, setApplyingAdvanceInvoiceId] = useState<string|null>(null);
   const [advanceAppliedNotice, setAdvanceAppliedNotice] = useState<{ invoiceId:string; amount:number }|null>(null);
+  const [termsModalClient, setTermsModalClient] = useState<Client|null>(null);
+  const [termsDraft, setTermsDraft] = useState("");
+  const [savingTerms, setSavingTerms] = useState(false);
   const tabDefs: Array<{id:ClientType;label:string;color:string}> = [
     {id:"B2C",      label:"👤 Particuliers", color:"#374151"},
     {id:"B2B",      label:"🏢 Entreprises",  color:"#0e7490"},
@@ -148,6 +163,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
       .sort((a,b)=>b.paidAt.localeCompare(a.paidAt));
     const advanceRemaining = (advance: typeof clientAdvances[number]) => Math.max(0, advance.amount - (advance.allocatedAmount ?? 0));
     const totalAvoir = clientAdvances.reduce((sum, advance) => sum + advanceRemaining(advance), 0);
+    const clientTermsDays = c.paymentTermsDays ?? defaultPaymentTermsDays;
     const nbVentes = ventes.filter(i=>invoicePaidAmount(i)>0).length;
     const panierMoyen = nbVentes>0?ventes.reduce((s,i)=>s+invoicePaidAmount(i),0)/nbVentes:0;
 
@@ -290,6 +306,24 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
       }
     }
 
+    async function saveClientTerms() {
+      const days = termsDraft.trim() === "" ? null : Number(termsDraft);
+      if (savingTerms || (days != null && (!Number.isInteger(days) || days < 0 || days > 3650))) return;
+      setSavingTerms(true);
+      try {
+        const result = await updateClientPaymentTerms({ boutiqueId:boutique.id, clientId:c.id, paymentTermsDays:days });
+        const updated = { ...c, paymentTermsDays:result.payment_terms_days ?? undefined };
+        onUpdate({ clients:clients.map(client => client.id === c.id ? updated : client) });
+        setDetailClient(updated);
+        setTermsModalClient(null);
+        logAction("Délai client modifié", `${c.nom} · ${result.payment_terms_days ?? defaultPaymentTermsDays} jours`, "📅");
+      } catch (error) {
+        alert(error instanceof Error ? error.message : "Modification du délai impossible");
+      } finally {
+        setSavingTerms(false);
+      }
+    }
+
     return (
       <div className="space-y-4 pb-24">
         <button onClick={()=>{setDetailClient(null);setHighlightedInvoiceId(null);}} className="flex items-center gap-2 text-muted-foreground active:opacity-70">
@@ -317,6 +351,13 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
             </button>}
           </div>}
         </div>
+        {c.type !== "B2C" && <section className="rounded-2xl border p-3.5" style={{borderColor:"#f59e0b33",background:"#fffbeb"}}>
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl" style={{background:"#fef3c7",color:SEM.warning.accent}}><CalendarClock size={17}/></div>
+            <div className="flex-1"><p className="text-xs font-black tracking-wider" style={{color:SEM.warning.accent}}>DÉLAI DE PAIEMENT</p><p className="mt-0.5 text-xs text-muted-foreground">{c.paymentTermsDays == null ? `Délai boutique : ${clientTermsDays} jours` : `${clientTermsDays} jours pour ce client`}</p></div>
+            <button type="button" onClick={()=>{setTermsModalClient(c);setTermsDraft(c.paymentTermsDays == null ? "" : String(c.paymentTermsDays));}} className="rounded-lg px-2.5 py-2 text-xs font-black" style={{background:"#fff",color:SEM.warning.accent}}><Edit2 size={13} className="mr-1 inline"/>Modifier</button>
+          </div>
+        </section>}
         <section className="bg-card rounded-2xl p-3.5 border border-border" aria-label="Factures et commandes du client">
           <div className="flex items-center justify-between gap-3 mb-3">
             <div><p className="text-xs font-black tracking-wider text-muted-foreground">FACTURES & COMMANDES</p><p className="text-xs text-muted-foreground mt-0.5">Les plus récentes sont affichées en premier.</p></div>
@@ -330,6 +371,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
               const isReturn=inv.type==="Retour";
               const paid = invoicePaidAmount(inv);
               const remaining = invoiceRemainingAmount(inv);
+              const maturity = dueLabel(inv.dueDate, remaining);
               const isHighlighted = inv.id === highlightedInvoiceId;
               const canUseAdvance = canCollectPayment && !isReturn && remaining>0 && totalAvoir>0;
               const paymentNotice = isHighlighted && advanceAppliedNotice?.invoiceId === inv.id
@@ -340,6 +382,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
                   <div className="flex items-center gap-2"><p className="text-xs font-black text-muted-foreground">{inv.id}</p><span className="text-xs px-1.5 py-0.5 rounded font-bold capitalize" style={{ background:bc,color:tc }}>{inv.status}</span>{isReturn&&<span className="text-xs px-1.5 py-0.5 rounded font-bold" style={{ background:"#ef444415",color:"#ef4444" }}>Retour</span>}</div>
                   <p className="text-xs text-muted-foreground mt-0.5">{inv.date} · {inv.type}</p>
                   {inv.paymentMethod&&<p className="text-xs text-muted-foreground">{PM_ICON[inv.paymentMethod]} {inv.paymentMethod}</p>}
+                  {maturity&&<p className="mt-1 inline-flex rounded px-1.5 py-0.5 text-[11px] font-bold" style={{background:maturity.bg,color:maturity.color}}>{maturity.text}</p>}
                 </div>
                 <div className="text-right flex-shrink-0"><p className="font-black text-sm" style={{ fontFamily:"'Nunito',sans-serif" }}>{fmt(inv.montant)}</p>{paid>0&&<p className="text-xs font-semibold" style={{ color:SEM.success.accent }}>✓ {fmt(paid)}</p>}{remaining>0&&<p className="text-xs font-semibold" style={{ color:SEM.warning.accent }}>⏳ {fmt(remaining)}</p>}</div>
                 {canOpenInvoice&&<ChevronRight size={15} className="text-muted-foreground"/>}
@@ -435,6 +478,11 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
           </Field>
           <Field label="DATE DU PAIEMENT"><input type="date" value={paymentDate} onChange={e=>setPaymentDate(e.target.value)} className={inputCls}/></Field>
           {paymentDone ? <div className="rounded-2xl p-4 text-center" style={{background:SEM.success.bg,color:SEM.success.accent}}><div className="flex items-center justify-center gap-2 font-black"><CheckCircle size={20}/> Versement enregistré</div>{paymentSummary&&<p className="mt-1 text-xs font-semibold">{paymentSummary.applied>0&&`${fmt(paymentSummary.applied)} réglé`}{paymentSummary.applied>0&&paymentSummary.advance>0&&" · "}{paymentSummary.advance>0&&`${fmt(paymentSummary.advance)} ajouté à l'avoir`}</p>}</div> : <SubmitBtn color={SEM.success.accent} label={submittingPayment?"Enregistrement…":`Enregistrer ${fmt(Number(paymentAmount)||0)}`} onClick={submitClientPayment} disabled={submittingPayment||!Number(paymentAmount)}/>}
+        </Modal>}
+        {termsModalClient&&<Modal title="Délai de paiement client" color={CC} onClose={()=>!savingTerms&&setTermsModalClient(null)}>
+          <p className="mb-3 text-xs text-muted-foreground">Laissez vide pour reprendre le délai par défaut de la boutique ({defaultPaymentTermsDays} jours). Ce réglage s’applique aux prochaines factures B2B ou grossistes.</p>
+          <Field label="DÉLAI EN JOURS"><input type="number" min="0" max="3650" value={termsDraft} onChange={event=>setTermsDraft(event.target.value)} placeholder={String(defaultPaymentTermsDays)} className={inputCls}/></Field>
+          <SubmitBtn color={CC} label={savingTerms?"Enregistrement…":"Enregistrer le délai"} onClick={saveClientTerms} disabled={savingTerms}/>
         </Modal>}
       </div>
     );

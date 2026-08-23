@@ -139,8 +139,15 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
     const isPieces = dUnit === "pièces";
     const lotExtra = dLotMode ? { nbLots: Number(dLots) || 1, nbPieces: Number(dPieces) || 0, ...(isPieces ? {} : { longueurPiece: Number(dLongueur) || 0 }) } : {};
     try {
-      const persisted = await recordStockMovement({ boutiqueId:boutique.id, productId:detail.id, qty, type:"achat", prixUnit:(Number(dMontant) || 0) / qty, note:supplier.nom, supplierId:supplier.id });
-      onUpdate({ entries: [...entries, { id: persisted.entry_id, productId: detail.id, qty, unit: dUnit, montantDu: Number(dMontant) || 0, date: today(), recordedAt:new Date().toISOString(), fournisseur: supplier.nom, supplierId:supplier.id, movementType:"achat", ...lotExtra, ...(dSku.trim() ? { sku: dSku.trim() } : {}) }] });
+      const persisted = await recordStockMovement({ boutiqueId:boutique.id, productId:detail.id, qty, type:"achat", prixUnit:(Number(dMontant) || 0) / qty, note:supplier.nom, supplierId:supplier.id, reference:dSku.trim() || undefined });
+      const newEntry = { id: persisted.entry_id, productId: detail.id, qty, unit: dUnit, montantDu: Number(dMontant) || 0, date: today(), recordedAt:new Date().toISOString(), fournisseur: supplier.nom, supplierId:supplier.id, movementType:"achat" as const, reference:dSku.trim() || undefined, ...lotExtra, ...(dSku.trim() ? { sku: dSku.trim() } : {}) };
+      const receiptCharge = persisted.charge_id ? {
+        id:persisted.charge_id, label:`Réception stock · ${supplier.nom}`, montant:Number(dMontant) || 0,
+        date:today(), dateRaw:new Date().toISOString(), categorie:"Achat stock" as const, recurrence:"unique" as const,
+        fournisseur:supplier.nom, supplierId:supplier.id, status:"pending" as const, paidAmount:0,
+        source:"supplier_receipt" as const, stockEntryId:persisted.entry_id, dueDate:persisted.due_date ?? undefined,
+      } : null;
+      onUpdate({ entries: [...entries, newEntry], ...(receiptCharge ? { charges:[...charges, receiptCharge] } : {}) });
     } catch (error) {
       alert(error instanceof Error ? error.message : "Entrée de stock impossible");
       return;
@@ -173,9 +180,15 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
         : null;
       const pid = persisted.product_id;
       const newEntries = movement ? [...entries, { id: movement.entry_id, productId: pid, qty: initQty, unit: nUnit, montantDu: Number(nMontant) || 0, date: today(), recordedAt:new Date().toISOString(), fournisseur: supplier?.nom ?? "", supplierId:supplier?.id, movementType:"achat" as const, ...lotExtra }] : entries;
+      const receiptCharge = movement?.charge_id && supplier ? {
+        id:movement.charge_id, label:`Réception stock · ${supplier.nom}`, montant:Number(nMontant) || 0,
+        date:today(), dateRaw:new Date().toISOString(), categorie:"Achat stock" as const, recurrence:"unique" as const,
+        fournisseur:supplier.nom, supplierId:supplier.id, status:"pending" as const, paidAmount:0,
+        source:"supplier_receipt" as const, stockEntryId:movement.entry_id, dueDate:movement.due_date ?? undefined,
+      } : null;
       onUpdate({
         products: [...products, { id: pid, nom: nNom.trim(), img: nImg ?? PLACEHOLDER_IMGS[Math.floor(Math.random() * 4)], unit: nUnit, fournisseur: supplier?.nom ?? "", categorie: finalCat || undefined, prixAchat:Number(nPrixUnit) || 0, prixVente:Number(nPrixUnit) || 0 }],
-        entries: newEntries, categories: updatedCats,
+        entries: newEntries, categories: updatedCats, ...(receiptCharge ? { charges:[...charges, receiptCharge] } : {}),
       });
     } catch (error) { alert(error instanceof Error ? error.message : "Création du produit impossible"); return; }
     logAction("Nouveau produit", `${nNom.trim()}${finalCat ? " · " + finalCat : ""}`, "🆕");
@@ -400,10 +413,13 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter }: {
                     const entrySupplier = supplierById(e.supplierId) ?? suppliers.find(s => s.nom === e.fournisseur);
                     const sc = entrySupplier?.color ?? "#6b7280";
                     const isEditing = editingEntryId === e.id;
+                    const entryTime = e.recordedAt ? Date.parse(e.recordedAt) : Number.NaN;
+                    const hasDownstreamConsumption = entries.some(candidate => candidate.productId === e.productId && candidate.qty < 0 && ((Number.isFinite(entryTime) && candidate.recordedAt ? Date.parse(candidate.recordedAt) > entryTime : candidate.id > e.id)));
                     if (isEditing) return (
                       <div key={e.id} className="rounded-xl px-3 py-3 space-y-2 border-2" style={{ borderColor:"#3b82f6", background:"#3b82f608" }}>
                         <p className="text-xs font-bold" style={{ color:"#3b82f6" }}>Corriger la quantité</p>
                         <p className="text-xs text-muted-foreground">L'entrée d'origine restera intacte. Tournal ajoutera uniquement le mouvement d'ajustement nécessaire.</p>
+                        {hasDownstreamConsumption&&<p className="rounded-lg px-2.5 py-2 text-xs font-semibold" style={{background:"#fef3c7",color:"#92400e"}}>Attention : ce produit a déjà eu des sorties après cette réception. L’ajustement modifie le stock actuel ; les marges des ventes déjà encaissées restent volontairement figées.</p>}
                         <input value={editEntryQty} onChange={e2=>setEditEntryQty(e2.target.value)} placeholder="Nouvelle quantité" type="number" min="0.0001" className={inputCls} autoFocus onKeyDown={ev=>ev.key==="Enter"&&saveEntryEdit(e.id)}/>
                         <div className="flex gap-2">
                           <button disabled={stockCorrectionBusy===e.id} onClick={()=>setEditingEntryId(null)} className="flex-1 py-2 rounded-xl text-xs font-bold disabled:opacity-40" style={{ background:"#EEE9D8", color:"#7A7055" }}>Annuler</button>

@@ -186,7 +186,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
         // Sans droit d'encaissement : commande créée en attente, pas de paiement
         const newInv: Invoice = {
           id:saved.invoice_id, clientId:saved.client_id ?? expressClient?.id, client:expressClient?.nom ?? "Client comptoir", clientTel:expressClient?.tel, lines:[line], montant:saved.total, acompte:0,
-          date:today(), dateRaw:new Date().toISOString(), status:"en attente", type:"vente",
+          date:today(), dateRaw:new Date().toISOString(), dueDate:saved.due_date ?? undefined, status:"en attente", type:"vente",
           operatorId:currentUser.id, operatorNom:currentUser.nom, operatorColor:currentUser.color,
         };
         onUpdate({ invoices:[...invoices, newInv] });
@@ -221,7 +221,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
           }];
       const newInv: Invoice = {
         id:saved.invoice_id, clientId:saved.client_id ?? expressClient?.id, client:expressClient?.nom ?? "Client comptoir", clientTel:expressClient?.tel, lines:[line], montant:saved.total, acompte:paid.acompte,
-        date:today(), dateRaw:new Date().toISOString(), status:"payé", type:"vente",
+        date:today(), dateRaw:new Date().toISOString(), dueDate:saved.due_date ?? undefined, status:"payé", type:"vente",
         operatorId:currentUser.id, operatorNom:currentUser.nom, operatorColor:currentUser.color, paymentMethod:advanceAmount >= saved.total ? "Avoir client" : expMethod,
         payments:paidPayments,
       };
@@ -361,7 +361,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
       const saved = await createSale({ boutiqueId:boutique.id, clientId:selectedClientId, client, clientTel:clientTel.trim() || undefined, lines:orderLines });
       const newInv: Invoice = {
         id:saved.invoice_id, clientId:saved.client_id ?? selectedClientId, client, clientTel:clientTel.trim() || undefined, lines:orderLines,
-        montant:saved.total, acompte:0, date:today(), dateRaw:new Date().toISOString(),
+        montant:saved.total, acompte:0, date:today(), dateRaw:new Date().toISOString(), dueDate:saved.due_date ?? undefined,
         status:"en attente", type:"vente", operatorId:currentUser.id, operatorNom:currentUser.nom, operatorColor:currentUser.color,
       };
       onUpdate({ invoices:[...invoices, newInv] });

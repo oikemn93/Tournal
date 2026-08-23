@@ -59,7 +59,10 @@ export function supplierBalance(supplier: Pick<Supplier, "id"|"nom"> | string, e
     .filter(c => c.source === "transfer")
     .reduce((s, c) => s + c.montant, 0);
   const regularPayments = linkedCharges
-    .filter(c => c.source !== "transfer")
+    // A supplier receipt is a payable document, not a cash payment. It is
+    // linked to its stock movement for status and maturity, while the distinct
+    // supplier-payment charge is what reduces the balance.
+    .filter(c => c.source !== "transfer" && c.source !== "supplier_receipt")
     .reduce((s, c) => s + c.montant, 0);
   const transferPayments = linkedCharges
     .filter(c => c.source === "transfer")

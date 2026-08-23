@@ -759,13 +759,13 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string): Promise<T | n
         longueurParPiece: Number(p.length_per_piece ?? 0),
         unitVente: p.unit,
       })),
-      entries: entries.filter(e => e.boutique_id === b.id).map(e => ({ id:e.id, productId:e.product_id, qty:Number(e.qty), unit:"unité", montantDu:Number(e.qty)*Number(e.prix_unit ?? 0), movementType:e.type ?? undefined, date:day(e.entry_date), recordedAt:e.entry_date, fournisseur:supplierById.get(e.supplier_id)?.nom ?? e.note ?? "", supplierId:e.supplier_id ?? undefined, invoiceId:undefined })),
+      entries: entries.filter(e => e.boutique_id === b.id).map(e => ({ id:e.id, productId:e.product_id, qty:Number(e.qty), unit:"unité", montantDu:Number(e.qty)*Number(e.prix_unit ?? 0), movementType:e.type ?? undefined, date:day(e.entry_date), recordedAt:e.entry_date, fournisseur:supplierById.get(e.supplier_id)?.nom ?? e.note ?? "", supplierId:e.supplier_id ?? undefined, reference:e.reference ?? undefined, operatorId:e.operator_id ?? undefined, operatorName:userById.get(e.operator_id)?.nom ?? undefined, invoiceId:undefined })),
       clients: clients.filter(c => c.boutique_id === b.id).map(c => {
         // A wholesale client is stored as B2B with a marker in `contact`.
         const isWholesale = typeof c.contact === "string" && c.contact.includes(WHOLESALE_MARKER);
         const effectiveType = isWholesale ? "Grossiste" : c.type;
         const cleanContact = isWholesale ? c.contact.replace(WHOLESALE_MARKER, "").trim() : c.contact;
-        return { id:c.id, nom:c.nom, type:effectiveType, tel:c.tel ?? "", total:c.total ?? 0, last:day(c.last_invoice_at), ville:c.ville ?? "", adresse:c.adresse ?? undefined, email:c.email ?? undefined, contact:cleanContact || undefined };
+        return { id:c.id, nom:c.nom, type:effectiveType, tel:c.tel ?? "", total:c.total ?? 0, last:day(c.last_invoice_at), ville:c.ville ?? "", adresse:c.adresse ?? undefined, email:c.email ?? undefined, contact:cleanContact || undefined, paymentTermsDays:c.payment_terms_days ?? undefined, linkedBoutiqueId:c.linked_boutique_id ?? undefined };
       }),
       clientAdvances: advances.filter(a => a.boutique_id === b.id).map(a => ({
         id:Number(a.id), clientId:Number(a.client_id), amount:Number(a.amount),
@@ -773,7 +773,7 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string): Promise<T | n
         paymentMethod:a.payment_method, paidAt:a.paid_at, recordedAt:a.recorded_at,
         operatorId:a.operator_id ?? undefined, operatorName:a.operator_name, note:a.note ?? undefined,
       })),
-      suppliers: suppliers.filter(s => s.boutique_id === b.id).map(s => ({ id:s.id, nom:s.nom, ville:s.ville ?? "", lastDelivery:day(s.last_delivery_at), tel:s.tel ?? "", initials:s.initials ?? "", color:s.color ?? "#C9A227", email:s.email ?? undefined, contact:s.contact ?? undefined })),
+      suppliers: suppliers.filter(s => s.boutique_id === b.id).map(s => ({ id:s.id, nom:s.nom, ville:s.ville ?? "", lastDelivery:day(s.last_delivery_at), tel:s.tel ?? "", initials:s.initials ?? "", color:s.color ?? "#C9A227", email:s.email ?? undefined, contact:s.contact ?? undefined, notes:s.notes ?? undefined, paymentTermsDays:s.payment_terms_days ?? undefined, linkedBoutiqueId:s.linked_boutique_id ?? undefined })),
       invoices: invoices.filter(i => i.boutique_id === b.id).map(i => {
         const invoicePayments = paymentsByInvoice.get(i.id) ?? [];
         const paid = invoicePayments.length
@@ -801,6 +801,7 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string): Promise<T | n
           acompte:paid,
           date:day(i.invoice_date),
           dateRaw:i.invoice_date,
+          dueDate:i.due_date ?? undefined,
           status:paid >= Number(i.montant) ? "payé" : paid > 0 ? "acompte" : i.status === "en_attente" ? "en attente" : i.status,
           type:i.type,
           returnOfInvoiceId:i.return_of_invoice_id ?? undefined,
@@ -826,8 +827,9 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string): Promise<T | n
         id:c.id, label:c.label, montant:Number(c.montant), date:day(c.charge_date), dateRaw:c.charge_date,
         categorie:c.categorie ?? "Autre", recurrence:c.recurrence ?? "unique", note:c.note ?? undefined,
         fournisseur:supplierById.get(c.supplier_id)?.nom ?? c.fournisseur ?? undefined, supplierId:c.supplier_id ?? undefined, paymentMethod:c.payment_method ?? undefined,
+        operatorId:c.operator_id ?? undefined, operatorName:userById.get(c.operator_id)?.nom ?? undefined,
         status:c.status ?? "paid", paidAmount:Number(c.paid_amount ?? c.montant),
-        transferId:c.transfer_id ?? undefined, source:c.source ?? "manual",
+        transferId:c.transfer_id ?? undefined, source:c.source ?? "manual", dueDate:c.due_date ?? undefined, stockEntryId:c.stock_entry_id ?? undefined,
       })),
       caisseHistory: sessions
         .filter(s => s.boutique_id === b.id)
@@ -1089,7 +1091,7 @@ export async function loadBoutiqueSyncPatch(boutiqueId: string, sourceEvents: Bo
   const products = [...new Map([...directProducts, ...categoryProducts].map(row => [row.id, row])).values()];
   const extraCategoryIds = products.map(row => row.category_id).filter(Boolean);
   const invoiceClientIds = invoices.map(row => row.client_id).filter(Boolean);
-  const userIds = [...new Set([...invoices.map(row => row.operator_id), ...logs.map(row => row.user_id)].filter(Boolean))];
+  const userIds = [...new Set([...invoices.map(row => row.operator_id), ...entries.map(row => row.operator_id), ...charges.map(row => row.operator_id), ...logs.map(row => row.user_id)].filter(Boolean))];
   const [extraCategories, invoiceClients, users] = await Promise.all([
     extraCategoryIds.length ? dataRequest<any[]>(`categories?select=id,nom${scoped}${syncInFilter("id", extraCategoryIds)}`) : Promise.resolve([]),
     invoiceClientIds.length ? dataRequest<any[]>(`clients?select=id,type,contact${scoped}${syncInFilter("id", invoiceClientIds)}`) : Promise.resolve([]),
@@ -1107,10 +1109,10 @@ export async function loadBoutiqueSyncPatch(boutiqueId: string, sourceEvents: Bo
     patch.products = products.map(row => ({ id:row.id, nom:row.nom, img:row.image_url ?? "", unit:row.unit, fournisseur:row.supplier_name ?? "", categorie:categoryById.get(row.category_id)?.nom, prixVente:Number(row.prix_vente ?? 0), prixAchat:Number(row.prix_achat ?? 0) }));
     patch.productParams = products.filter(row => row.pieces_per_lot != null || row.length_per_piece != null).map(row => ({ productId:row.id, nbPiecesParLot:Number(row.pieces_per_lot ?? 0), longueurParPiece:Number(row.length_per_piece ?? 0), unitVente:row.unit }));
   }
-  if (entries.length) patch.entries = entries.map(row => ({ id:row.id, productId:row.product_id, qty:Number(row.qty), unit:"unité", montantDu:Number(row.qty) * Number(row.prix_unit ?? 0), movementType:row.type ?? undefined, date:syncDate(row.entry_date), recordedAt:row.entry_date, fournisseur:row.note ?? "", supplierId:row.supplier_id ?? undefined, invoiceId:undefined }));
+  if (entries.length) patch.entries = entries.map(row => ({ id:row.id, productId:row.product_id, qty:Number(row.qty), unit:"unité", montantDu:Number(row.qty) * Number(row.prix_unit ?? 0), movementType:row.type ?? undefined, date:syncDate(row.entry_date), recordedAt:row.entry_date, fournisseur:row.note ?? "", supplierId:row.supplier_id ?? undefined, reference:row.reference ?? undefined, operatorId:row.operator_id ?? undefined, operatorName:userById.get(row.operator_id)?.nom ?? undefined, invoiceId:undefined }));
   if (clients.length) patch.clients = clients.map(row => {
     const wholesale = typeof row.contact === "string" && row.contact.includes(WHOLESALE_MARKER);
-    return { id:row.id, nom:row.nom, type:wholesale ? "Grossiste" : row.type, tel:row.tel ?? "", total:Number(row.total ?? 0), last:syncDate(row.last_invoice_at), ville:row.ville ?? "", adresse:row.adresse ?? undefined, email:row.email ?? undefined, contact:wholesale ? row.contact.replace(WHOLESALE_MARKER, "").trim() || undefined : row.contact ?? undefined };
+    return { id:row.id, nom:row.nom, type:wholesale ? "Grossiste" : row.type, tel:row.tel ?? "", total:Number(row.total ?? 0), last:syncDate(row.last_invoice_at), ville:row.ville ?? "", adresse:row.adresse ?? undefined, email:row.email ?? undefined, contact:wholesale ? row.contact.replace(WHOLESALE_MARKER, "").trim() || undefined : row.contact ?? undefined, paymentTermsDays:row.payment_terms_days ?? undefined, linkedBoutiqueId:row.linked_boutique_id ?? undefined };
   });
   if (advances.length) patch.clientAdvances = advances.map(row => ({
     id:Number(row.id), clientId:Number(row.client_id), amount:Number(row.amount),
@@ -1118,15 +1120,15 @@ export async function loadBoutiqueSyncPatch(boutiqueId: string, sourceEvents: Bo
     paymentMethod:row.payment_method, paidAt:row.paid_at, recordedAt:row.recorded_at,
     operatorId:row.operator_id ?? undefined, operatorName:row.operator_name, note:row.note ?? undefined,
   }));
-  if (suppliers.length) patch.suppliers = suppliers.map(row => ({ id:row.id, nom:row.nom, ville:row.ville ?? "", lastDelivery:syncDate(row.last_delivery_at), tel:row.tel ?? "", initials:row.initials ?? "", color:row.color ?? "#C9A227", email:row.email ?? undefined, contact:row.contact ?? undefined }));
+  if (suppliers.length) patch.suppliers = suppliers.map(row => ({ id:row.id, nom:row.nom, ville:row.ville ?? "", lastDelivery:syncDate(row.last_delivery_at), tel:row.tel ?? "", initials:row.initials ?? "", color:row.color ?? "#C9A227", email:row.email ?? undefined, contact:row.contact ?? undefined, notes:row.notes ?? undefined, paymentTermsDays:row.payment_terms_days ?? undefined, linkedBoutiqueId:row.linked_boutique_id ?? undefined }));
   if (invoices.length) patch.invoices = invoices.map(row => {
     const invoicePayments = paymentsByInvoice.get(row.id) ?? [];
     const paid = invoicePayments.length ? invoicePayments.reduce((sum, payment) => sum + Number(payment.amount), 0) : Number(row.acompte);
     const operator = userById.get(row.operator_id) ?? {};
     const client = clientById.get(row.client_id);
-    return { id:row.id, clientId:row.client_id ?? undefined, client:row.client_nom ?? "Client comptoir", clientTel:row.client_tel ?? undefined, clientType:row.client_type_snapshot ?? client?.type ?? undefined, clientEmailSnapshot:row.client_email_snapshot ?? undefined, clientAdresseSnapshot:row.client_adresse_snapshot ?? undefined, clientVilleSnapshot:row.client_ville_snapshot ?? undefined, clientTypeSnapshot:row.client_type_snapshot ?? undefined, boutiqueNomSnapshot:row.boutique_nom_snapshot ?? undefined, boutiqueVilleSnapshot:row.boutique_ville_snapshot ?? undefined, boutiqueAdresseSnapshot:row.boutique_adresse_snapshot ?? undefined, boutiqueTelSnapshot:row.boutique_tel_snapshot ?? undefined, boutiqueEmailSnapshot:row.boutique_email_snapshot ?? undefined, boutiqueLogoSnapshot:row.boutique_logo_snapshot ?? undefined, montant:Number(row.montant), acompte:paid, date:syncDate(row.invoice_date), dateRaw:row.invoice_date, status:paid >= Number(row.montant) ? "payé" : paid > 0 ? "acompte" : row.status === "en_attente" ? "en attente" : row.status, type:row.type, returnOfInvoiceId:row.return_of_invoice_id ?? undefined, operatorId:row.operator_id ?? undefined, operatorNom:row.operator_nom_snapshot ?? operator.nom ?? undefined, operatorColor:operator.color ?? undefined, paymentMethod:row.payment_method ?? undefined, payments:invoicePayments.map(payment => ({ id:payment.id, amount:Number(payment.amount), paymentMethod:payment.payment_method, paidAt:payment.paid_at, recordedAt:payment.recorded_at, operatorId:payment.operator_id ?? undefined, operatorName:payment.operator_name, batchId:payment.batch_id, source:payment.source })), lines:(row.invoice_lines ?? []).map((line:any) => ({ productId:line.product_id, nom:line.nom, qty:Number(line.qty), unit:line.unit ?? "unité", prixUnit:Number(line.prix_unit), prixAchat:line.prix_achat != null ? Number(line.prix_achat) : undefined, sellUnit:line.sell_unit ?? undefined, sellQty:line.sell_qty ? Number(line.sell_qty) : undefined })) };
+    return { id:row.id, clientId:row.client_id ?? undefined, client:row.client_nom ?? "Client comptoir", clientTel:row.client_tel ?? undefined, clientType:row.client_type_snapshot ?? client?.type ?? undefined, clientEmailSnapshot:row.client_email_snapshot ?? undefined, clientAdresseSnapshot:row.client_adresse_snapshot ?? undefined, clientVilleSnapshot:row.client_ville_snapshot ?? undefined, clientTypeSnapshot:row.client_type_snapshot ?? undefined, boutiqueNomSnapshot:row.boutique_nom_snapshot ?? undefined, boutiqueVilleSnapshot:row.boutique_ville_snapshot ?? undefined, boutiqueAdresseSnapshot:row.boutique_adresse_snapshot ?? undefined, boutiqueTelSnapshot:row.boutique_tel_snapshot ?? undefined, boutiqueEmailSnapshot:row.boutique_email_snapshot ?? undefined, boutiqueLogoSnapshot:row.boutique_logo_snapshot ?? undefined, montant:Number(row.montant), acompte:paid, date:syncDate(row.invoice_date), dateRaw:row.invoice_date, dueDate:row.due_date ?? undefined, status:paid >= Number(row.montant) ? "payé" : paid > 0 ? "acompte" : row.status === "en_attente" ? "en attente" : row.status, type:row.type, returnOfInvoiceId:row.return_of_invoice_id ?? undefined, operatorId:row.operator_id ?? undefined, operatorNom:row.operator_nom_snapshot ?? operator.nom ?? undefined, operatorColor:operator.color ?? undefined, paymentMethod:row.payment_method ?? undefined, payments:invoicePayments.map(payment => ({ id:payment.id, amount:Number(payment.amount), paymentMethod:payment.payment_method, paidAt:payment.paid_at, recordedAt:payment.recorded_at, operatorId:payment.operator_id ?? undefined, operatorName:payment.operator_name, batchId:payment.batch_id, source:payment.source })), lines:(row.invoice_lines ?? []).map((line:any) => ({ productId:line.product_id, nom:line.nom, qty:Number(line.qty), unit:line.unit ?? "unité", prixUnit:Number(line.prix_unit), prixAchat:line.prix_achat != null ? Number(line.prix_achat) : undefined, sellUnit:line.sell_unit ?? undefined, sellQty:line.sell_qty ? Number(line.sell_qty) : undefined })) };
   });
-  if (charges.length) patch.charges = charges.map(row => ({ id:row.id, label:row.label, montant:Number(row.montant), date:syncDate(row.charge_date), dateRaw:row.charge_date, categorie:row.categorie ?? "Autre", recurrence:row.recurrence ?? "unique", note:row.note ?? undefined, fournisseur:row.fournisseur ?? undefined, supplierId:row.supplier_id ?? undefined, paymentMethod:row.payment_method ?? undefined, status:row.status ?? "paid", paidAmount:Number(row.paid_amount ?? row.montant), transferId:row.transfer_id ?? undefined, source:row.source ?? "manual" }));
+  if (charges.length) patch.charges = charges.map(row => ({ id:row.id, label:row.label, montant:Number(row.montant), date:syncDate(row.charge_date), dateRaw:row.charge_date, categorie:row.categorie ?? "Autre", recurrence:row.recurrence ?? "unique", note:row.note ?? undefined, fournisseur:row.fournisseur ?? undefined, supplierId:row.supplier_id ?? undefined, paymentMethod:row.payment_method ?? undefined, operatorId:row.operator_id ?? undefined, operatorName:userById.get(row.operator_id)?.nom ?? undefined, status:row.status ?? "paid", paidAmount:Number(row.paid_amount ?? row.montant), transferId:row.transfer_id ?? undefined, source:row.source ?? "manual", dueDate:row.due_date ?? undefined, stockEntryId:row.stock_entry_id ?? undefined }));
   if (sessions.length) patch.caisseSessions = sessions.map(row => ({ id:row.id, openedAt:row.opened_at, closedAt:row.closed_at ?? undefined, fondDeCaisse:Number(row.fond_ouverture ?? 0), openedBy:row.opened_by ?? "", closedBy:row.closed_by ?? "" }));
   if (logs.length) patch.auditLog = logs.map(row => {
     const timestamp = new Date(row.created_at).getTime(); const user = userById.get(row.user_id) ?? {};
@@ -1177,15 +1179,20 @@ export async function saveGroupes(groups: Array<{ id: string; nom: string }>): P
   });
 }
 
-export async function loadAuthSettings(boutiqueId: string): Promise<{ lockMinutes: number; sessionMinutes: number } | null> {
-  const rows = await dataRequest<Array<{ lock_minutes: number; session_minutes: number }>>(
-    `auth_settings?select=lock_minutes,session_minutes&boutique_id=eq.${encodeURIComponent(boutiqueId)}&limit=1`,
+export async function loadAuthSettings(boutiqueId: string): Promise<{ lockMinutes: number; sessionMinutes: number; supplierPaymentTermsDays: number; clientPaymentTermsDays: number } | null> {
+  const rows = await dataRequest<Array<{ lock_minutes: number; session_minutes: number; supplier_payment_terms_days: number; client_payment_terms_days: number }>>(
+    `auth_settings?select=lock_minutes,session_minutes,supplier_payment_terms_days,client_payment_terms_days&boutique_id=eq.${encodeURIComponent(boutiqueId)}&limit=1`,
   );
   const row = rows[0];
-  return row ? { lockMinutes: row.lock_minutes, sessionMinutes: row.session_minutes } : null;
+  return row ? {
+    lockMinutes: row.lock_minutes,
+    sessionMinutes: row.session_minutes,
+    supplierPaymentTermsDays: row.supplier_payment_terms_days ?? 30,
+    clientPaymentTermsDays: row.client_payment_terms_days ?? 30,
+  } : null;
 }
 
-export async function saveAuthSettings(boutiqueId: string, settings: { lockMinutes?: number; sessionMinutes?: number }): Promise<void> {
+export async function saveAuthSettings(boutiqueId: string, settings: { lockMinutes?: number; sessionMinutes?: number; supplierPaymentTermsDays?: number; clientPaymentTermsDays?: number }): Promise<void> {
   await dataRequest("auth_settings?on_conflict=boutique_id", {
     method: "POST",
     headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
@@ -1193,12 +1200,14 @@ export async function saveAuthSettings(boutiqueId: string, settings: { lockMinut
       boutique_id: boutiqueId,
       lock_minutes: settings.lockMinutes ?? 10,
       session_minutes: settings.sessionMinutes ?? 720,
+      supplier_payment_terms_days: settings.supplierPaymentTermsDays ?? 30,
+      client_payment_terms_days: settings.clientPaymentTermsDays ?? 30,
     }),
   });
 }
 
 export async function createSale(params: { boutiqueId: string; clientId?: number; client: string; clientTel?: string; paymentMethod?: string; lines: Array<{ productId:number; nom:string; qty:number; unit:string; prixUnit:number; sellUnit?:string; sellQty?:number }> }) {
-  return dataRequest<{ invoice_id:string; client_id:number|null; total:number }>("rpc/create_sale", {
+  return dataRequest<{ invoice_id:string; client_id:number|null; total:number; due_date?:string|null }>("rpc/create_sale", {
     method: "POST",
     headers: { Prefer: "return=representation" },
     body: JSON.stringify({ p_boutique_id:params.boutiqueId, p_idempotency_key:crypto.randomUUID(), p_client_nom:params.client, p_client_tel:params.clientTel ?? null, p_lines:params.lines, p_payment_method:params.paymentMethod ?? null, p_client_id:params.clientId ?? null }),
@@ -1322,10 +1331,10 @@ export async function returnSale(params: { boutiqueId:string; invoiceId:string; 
   });
 }
 
-export async function recordStockMovement(params:{ boutiqueId:string; productId:number; qty:number; type:"achat"|"ajustement"|"retour"|"inventaire"; prixUnit?:number; note?:string; supplierId?:number }) {
-  return dataRequest<{ entry_id:number; product_id:number; stock:number; supplier_id?:number }>("rpc/record_stock_movement", {
+export async function recordStockMovement(params:{ boutiqueId:string; productId:number; qty:number; type:"achat"|"ajustement"|"retour"|"inventaire"; prixUnit?:number; note?:string; supplierId?:number; reference?:string }) {
+  return dataRequest<{ entry_id:number; product_id:number; stock:number; supplier_id?:number; charge_id?:number|null; due_date?:string|null }>("rpc/record_stock_movement", {
     method:"POST", headers:{ Prefer:"return=representation" },
-    body:JSON.stringify({ p_boutique_id:params.boutiqueId, p_product_id:params.productId, p_idempotency_key:crypto.randomUUID(), p_qty:params.qty, p_type:params.type, p_prix_unit:params.prixUnit ?? 0, p_note:params.note ?? null, p_supplier_id:params.supplierId ?? null }),
+    body:JSON.stringify({ p_boutique_id:params.boutiqueId, p_product_id:params.productId, p_idempotency_key:crypto.randomUUID(), p_qty:params.qty, p_type:params.type, p_prix_unit:params.prixUnit ?? 0, p_note:params.note ?? null, p_supplier_id:params.supplierId ?? null, p_reference:params.reference ?? null }),
   });
 }
 
@@ -1353,11 +1362,17 @@ export async function updateClientContact(clientId:number, contact:string|null) 
 export async function createSupplier(params:{ boutiqueId:string; name:string; phone?:string; city?:string }) {
   return dataRequest<{supplier_id:number}>("rpc/create_supplier", { method:"POST", body:JSON.stringify({ p_boutique_id:params.boutiqueId,p_idempotency_key:crypto.randomUUID(),p_nom:params.name,p_tel:params.phone ?? null,p_ville:params.city ?? null }) });
 }
-export async function updateSupplier(params:{ boutiqueId:string; supplierId:number; name:string; phone?:string; city?:string; email?:string; contact?:string }) {
-  return dataRequest<{supplier_id:number}>("rpc/update_supplier", { method:"POST", headers:{ Prefer:"return=representation" }, body:JSON.stringify({ p_boutique_id:params.boutiqueId,p_supplier_id:params.supplierId,p_nom:params.name,p_tel:params.phone ?? null,p_ville:params.city ?? null,p_email:params.email ?? null,p_contact:params.contact ?? null }) });
+export async function updateClientPaymentTerms(params:{ boutiqueId:string; clientId:number; paymentTermsDays?:number|null }) {
+  return dataRequest<{ client_id:number; payment_terms_days:number|null }>("rpc/update_client_payment_terms", {
+    method:"POST", headers:{ Prefer:"return=representation" },
+    body:JSON.stringify({ p_boutique_id:params.boutiqueId, p_client_id:params.clientId, p_payment_terms_days:params.paymentTermsDays ?? null }),
+  });
 }
-export async function recordSupplierPayment(params:{ boutiqueId:string; supplierId:number; amount:number; paymentMethod:string; note?:string }) {
-  return dataRequest<{charge_id:number; supplier_id:number; applied_amount:number; remaining_due:number; paid_at:string; payment_method:string}>("rpc/record_supplier_payment", { method:"POST", headers:{ Prefer:"return=representation" }, body:JSON.stringify({ p_boutique_id:params.boutiqueId,p_supplier_id:params.supplierId,p_idempotency_key:crypto.randomUUID(),p_montant:params.amount,p_payment_method:params.paymentMethod,p_note:params.note ?? null }) });
+export async function updateSupplier(params:{ boutiqueId:string; supplierId:number; name:string; phone?:string; city?:string; email?:string; contact?:string; notes?:string; paymentTermsDays?:number|null }) {
+  return dataRequest<{supplier_id:number}>("rpc/update_supplier", { method:"POST", headers:{ Prefer:"return=representation" }, body:JSON.stringify({ p_boutique_id:params.boutiqueId,p_supplier_id:params.supplierId,p_nom:params.name,p_tel:params.phone ?? null,p_ville:params.city ?? null,p_email:params.email ?? null,p_contact:params.contact ?? null,p_notes:params.notes ?? null,p_payment_terms_days:params.paymentTermsDays ?? null }) });
+}
+export async function recordSupplierPayment(params:{ boutiqueId:string; supplierId:number; amount:number; paymentMethod:string; note?:string; paymentDate:string }) {
+  return dataRequest<{charge_id:number; supplier_id:number; applied_amount:number; remaining_due:number; paid_at:string; payment_method:string; operator_name?:string; allocations:Array<{charge_id:number;amount:number}>}>("rpc/record_supplier_payment", { method:"POST", headers:{ Prefer:"return=representation" }, body:JSON.stringify({ p_boutique_id:params.boutiqueId,p_supplier_id:params.supplierId,p_idempotency_key:crypto.randomUUID(),p_montant:params.amount,p_payment_method:params.paymentMethod,p_note:params.note ?? null,p_payment_date:params.paymentDate }) });
 }
 export async function createProduct(params:{ boutiqueId:string; name:string; unit:string; categoryId?:string; purchasePrice?:number; salePrice?:number }) {
   return dataRequest<{product_id:number}>("rpc/create_product", { method:"POST", body:JSON.stringify({ p_boutique_id:params.boutiqueId,p_idempotency_key:crypto.randomUUID(),p_nom:params.name,p_unit:params.unit,p_category_id:params.categoryId ?? null,p_prix_achat:params.purchasePrice ?? 0,p_prix_vente:params.salePrice ?? 0 }) });

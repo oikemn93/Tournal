@@ -35,7 +35,9 @@ export function ChargesView({ boutique, onUpdate, logAction }: {
     c.label.toLowerCase().includes(search.toLowerCase())
   ).sort((a,b) => b.id - a.id);
 
-  const expenseAmount = (charge:Charge) => charge.source==="transfer" ? Number(charge.paidAmount??0) : charge.montant;
+  // A reception is a payable document, not a cash outflow. The actual cash
+  // movement remains the separate supplier_payment row created at settlement.
+  const expenseAmount = (charge:Charge) => charge.source==="transfer" ? Number(charge.paidAmount??0) : charge.source==="supplier_receipt" ? 0 : charge.montant;
   const totalMois = charges.reduce((s,c) => s + expenseAmount(c), 0);
   const byCategorie = CHARGE_CATS.map(cat => ({
     name: cat, value: charges.filter(c=>c.categorie===cat).reduce((s,c)=>s+expenseAmount(c),0), color: CHARGE_COLORS[cat]
@@ -128,7 +130,8 @@ export function ChargesView({ boutique, onUpdate, logAction }: {
               </div>
             </div>
             <div className="text-right flex-shrink-0">
-              <p className="font-black text-base" style={{color:"#ef4444",fontFamily:"'Nunito',sans-serif"}}>{fmt(c.montant)}</p>
+              <p className="font-black text-base" style={{color:c.source==="supplier_receipt"?SEM.warning.accent:"#ef4444",fontFamily:"'Nunito',sans-serif"}}>{fmt(c.montant)}</p>
+              {c.source==="supplier_receipt"&&<><p className="text-xs font-semibold" style={{color:SEM.warning.accent}}>À payer : {fmt(Math.max(0,c.montant-Number(c.paidAmount??0)))}</p>{c.dueDate&&<p className="text-xs text-muted-foreground">Échéance : {new Date(`${c.dueDate}T00:00:00`).toLocaleDateString("fr-FR")}</p>}</>}
               {c.source==="transfer"&&<><p className="text-xs text-muted-foreground">Réglé : {fmt(Number(c.paidAmount??0))}</p>{c.status!=="paid"&&<button onClick={()=>{const due=Math.max(0,c.montant-Number(c.paidAmount??0));setPaymentCharge(c);setPaymentAmount(String(due));}} className="mt-1 inline-flex items-center gap-1 rounded-lg bg-slate-900 px-2 py-1 text-xs font-bold text-white"><CreditCard size={12}/>Payer</button>}</>}
             </div>
           </div>
