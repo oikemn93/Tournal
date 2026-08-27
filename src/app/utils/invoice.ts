@@ -328,6 +328,28 @@ export function openInvoicePDF(inv: Invoice, boutique: Boutique, clients: Client
   setTimeout(() => w.print(), 500);
 }
 
+export function openOrderDocument(inv: Invoice, boutique: Boutique, clients: Client[]) {
+  const base = buildInvoicePDFHtml(inv, boutique, clients);
+  const html = base
+    .replace(`<title>Facture ${inv.id}`, `<title>Bon de commande ${inv.id}`)
+    .replace('<div class="inv-label">Facture</div>', '<div class="inv-label">Bon de commande</div>');
+  const w = window.open("", "_blank", "width=900,height=700");
+  if (!w) return;
+  w.document.open();
+  w.document.write(hardenGeneratedHtml(html));
+  w.document.close();
+  w.focus();
+}
+
+export function openReceiptPreview(inv: Invoice, boutique: Boutique, fallbackOperator?: string) {
+  const w = window.open("", "_blank", "width=480,height=760");
+  if (!w) return;
+  w.document.open();
+  w.document.write(hardenGeneratedHtml(buildReceiptHtml(inv, boutique, fallbackOperator, true)));
+  w.document.close();
+  w.focus();
+}
+
 // ─── SILENT PRINT ─────────────────────────────────────────────────────────────
 
 export function silentPrint(html: string) {

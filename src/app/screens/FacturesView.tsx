@@ -277,6 +277,15 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
   };
   const openingReminderDue = !!caisseDefaults?.enabled && !isCaisseOpen && hasReachedReminder(caisseDefaults.openingReminderTime);
   const closingReminderDue = !!caisseDefaults?.enabled && isCaisseOpen && hasReachedReminder(caisseDefaults.closingReminderTime);
+  const dakarDay = (value: string | Date) => {
+    const parts = new Intl.DateTimeFormat("fr-FR", { timeZone:"Africa/Dakar", year:"numeric", month:"2-digit", day:"2-digit" }).formatToParts(new Date(value));
+    const get = (type: string) => parts.find(part => part.type === type)?.value ?? "";
+    return `${get("year")}-${get("month")}-${get("day")}`;
+  };
+  const todayDakar = dakarDay(new Date());
+  const caisseOpenedToday = !!(isCaisseOpen && caisseSession && dakarDay(caisseSession.openedAt) === todayDakar);
+  const staleOpenCaisse = !!(isCaisseOpen && caisseSession && !caisseOpenedToday);
+  const dailyCaisseBlocked = !!(canCollectPayment && caisseDefaults?.enabled && !caisseOpenedToday);
 
   // The session total is the sum of payments recorded since the caisse was opened,
   // so each encaissement below increments it correctly (the bug fixed by the move).
@@ -692,6 +701,35 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
     {id:"en retard",label:"Retard",   color:SEM.danger.accent},
     {id:"annulée", label:"Annulées", color:SEM.danger.accent},
   ];
+
+  if (dailyCaisseBlocked) {
+    return <div className="min-h-[72vh] flex items-center justify-center px-4" data-screen-source="daily-caisse-opening-gate">
+      <div className="w-full max-w-xl rounded-3xl border border-red-200 bg-card p-6 sm:p-8 shadow-xl">
+        <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-red-50"><Store size={30} className="text-red-600"/></div>
+        <div className="text-center">
+          <p className="text-xs font-black uppercase tracking-[0.18em] text-red-600">Contrôle quotidien de caisse</p>
+          <h2 className="mt-2 text-2xl font-black">{staleOpenCaisse ? "Clôturez la caisse précédente" : "Ouvrez la caisse avant d'encaisser"}</h2>
+          <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
+            {staleOpenCaisse
+              ? `La session ouverte le ${formatPreciseDateTime(caisseSession?.openedAt)} ne peut pas être utilisée pour les encaissements d'aujourd'hui.`
+              : "Le contrôle quotidien est activé dans Admin → Fonctionnel → Caisse. Aucun encaissement n'est autorisé tant que la caisse du jour n'est pas ouverte."}
+          </p>
+          {caisseDefaults?.openingReminderTime && <p className={`mt-3 text-xs font-bold ${openingReminderDue ? "text-red-600" : "text-amber-700"}`}>{openingReminderDue ? "Rappel d'ouverture atteint" : "Rappel d'ouverture configuré"} · {caisseDefaults.openingReminderTime.slice(0,5)}</p>}
+        </div>
+        {staleOpenCaisse ? (
+          <button type="button" disabled={savingCaisse} onClick={()=>void closeCaisse()} className="mt-6 w-full rounded-2xl bg-red-600 py-4 text-sm font-black text-white disabled:opacity-50">{savingCaisse ? "Clôture…" : "Clôturer la caisse précédente"}</button>
+        ) : (
+          <div className="mt-6 space-y-3">
+            <label className="block text-xs font-black text-muted-foreground">FOND DE CAISSE
+              <input value={fondCaisse} onChange={e=>setFondCaisse(e.target.value)} type="number" min="0" className="mt-2 w-full rounded-2xl border border-border bg-background px-4 py-4 text-center text-xl font-black" autoFocus onKeyDown={e=>e.key==="Enter"&&void openCaisse()}/>
+            </label>
+            <button type="button" disabled={savingCaisse} onClick={()=>void openCaisse()} className="w-full rounded-2xl py-4 text-sm font-black text-white disabled:opacity-50" style={{background:FCT_COLOR}}>{savingCaisse ? "Ouverture…" : "Ouvrir la caisse du jour"}</button>
+            <p className="text-center text-xs text-muted-foreground">Fond par défaut Admin : {fmt(caisseDefaults?.openingFloat ?? 0)}</p>
+          </div>
+        )}
+      </div>
+    </div>;
+  }
 
   return (
     <div data-screen-source="relational-factures" className="space-y-4 pb-24">

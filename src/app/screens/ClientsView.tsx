@@ -12,6 +12,7 @@ import { SubmitBtn } from "../components/SubmitBtn";
 import { applyClientAdvanceToInvoice, cancelPendingInvoice, createClient, deleteClientIfUnused, recordClientPayment, updateClientContact, updateClientPaymentTerms, updateClientProfile, WHOLESALE_MARKER } from "../../lib/api";
 import { PhoneField } from "../components/PhoneField";
 import { formatPreciseDateTime, invoicePaidAmount, invoiceRemainingAmount } from "../utils/payments";
+import { openInvoicePDF, openOrderDocument, openReceiptPreview } from "../utils/invoice";
 import { POSView as EmbeddedClientPOSView } from "./POSView";
 
 function normalizePhone(value?: string): string {
@@ -608,6 +609,11 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
             <div className="mt-3 grid grid-cols-3 gap-2 text-center"><div className="rounded-xl bg-muted p-2"><p className="text-[10px] text-muted-foreground">TOTAL</p><p className="text-sm font-black">{fmt(viewedInvoice.montant)}</p></div><div className="rounded-xl bg-green-50 p-2"><p className="text-[10px] text-green-700">PAYÉ</p><p className="text-sm font-black text-green-700">{fmt(invoicePaidAmount(viewedInvoice))}</p></div><div className="rounded-xl bg-red-50 p-2"><p className="text-[10px] text-red-700">RESTE</p><p className="text-sm font-black text-red-700">{fmt(invoiceRemainingAmount(viewedInvoice))}</p></div></div>
           </div>
           <div className="space-y-2">{(viewedInvoice.lines ?? []).map((line,index)=><div key={index} className="flex items-center justify-between rounded-xl bg-muted px-3 py-2 text-xs"><div><p className="font-bold">{line.nom}</p><p className="text-muted-foreground">{line.sellQty ?? line.qty} {line.sellUnit ?? line.unit}</p></div><p className="font-black">{fmt((line.sellQty ?? line.qty) * line.prixUnit)}</p></div>)}</div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <button type="button" onClick={()=>openInvoicePDF(viewedInvoice,boutique,boutique.clients)} className="rounded-xl border border-border bg-card py-3 px-2 text-xs font-black">📄 Facture PDF</button>
+            <button type="button" onClick={()=>openReceiptPreview(viewedInvoice,boutique,currentUser.nom)} className="rounded-xl border border-border bg-card py-3 px-2 text-xs font-black">🧾 Ticket caisse</button>
+            {viewedInvoice.type.toLowerCase() !== "retour" && <button type="button" onClick={()=>openOrderDocument(viewedInvoice,boutique,boutique.clients)} className="rounded-xl border border-border bg-card py-3 px-2 text-xs font-black">📋 Bon de commande</button>}
+          </div>
           {canCollectPayment && invoiceRemainingAmount(viewedInvoice)>0 && <button type="button" onClick={()=>{setPaymentAmount(String(invoiceRemainingAmount(viewedInvoice)));setViewedInvoice(null);setPaymentSummary(null);setPaymentModal(true);}} className="w-full rounded-xl bg-emerald-600 py-3 text-sm font-black text-white">Enregistrer un versement</button>}
           <p className="text-xs text-muted-foreground">Le backend applique les versements en FIFO : les factures les plus anciennes sont réglées en premier et tout excédent devient un avoir.</p>
         </Modal>}

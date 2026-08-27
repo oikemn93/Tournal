@@ -6929,7 +6929,7 @@ function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdat
   // ── sidebar categories ────────────────────────────────────────────────────
   type CatId = "securite"|"fonctionnel"|"systeme"|"journal"|"supervision";
   const CATS: Array<{ id:CatId; icon:string; label:string; subs:Array<{id:AdminSec;label:string}> }> = [
-    { id:"securite",    icon:"🔒", label:"Sécurité",    subs:[{id:"equipe",label:"Équipe"},{id:"perms",label:"Droits"},{id:"auth",label:"Authentification"}] },
+    { id:"securite",    icon:"🔒", label:"Sécurité",    subs:[{id:"equipe",label:"Équipe & droits"},{id:"auth",label:"Authentification"}] },
     { id:"fonctionnel", icon:"⚙️", label:"Fonctionnel", subs:[{id:"stock-params",label:"Catalogue"},{id:"boutique",label:"Boutique"},{id:"payment-terms",label:"Délais paiement"},{id:"caisse",label:"Caisse"}] },
     { id:"systeme",     icon:"🔧", label:"Système",     subs:[{id:"imprimante",label:"Imprimante"},{id:"lecteur",label:"Code-barre"},{id:"tiroir",label:"Tiroir caisse"}] },
     { id:"journal",     icon:"📋", label:"Journal",     subs:[{id:"activite",label:"Activité"}] },
@@ -7026,6 +7026,22 @@ function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdat
                     ? activePerms.map(p=><span key={p.id} className="text-xs px-1.5 py-0.5 rounded-md font-bold" style={{ background:"#37415115", color:"#374151" }}>{p.icon} {p.label}</span>)
                     : <span className="text-xs px-2 py-1 rounded-lg font-bold" style={{ background:"#ef444415", color:"#ef4444" }}>⚠ Aucun accès configuré</span>
                 }
+              </div>
+              <div className="border-t border-border px-3.5 py-3">
+                <button type="button" onClick={()=>{setExpanded(expanded===u.id?null:u.id);setEditingRole(null);}} className="flex w-full items-center justify-between gap-3 rounded-xl bg-muted px-3 py-2.5 text-left">
+                  <span className="text-xs font-black">{expanded===u.id ? "Masquer les accès" : "Gérer rôle & droits"}</span>
+                  <ChevronRight size={15} className="transition-transform" style={{transform:expanded===u.id?"rotate(90deg)":"rotate(0deg)"}}/>
+                </button>
+                {expanded===u.id&&<div className="mt-3 space-y-3">
+                  <div>
+                    <p className="mb-2 text-[11px] font-black tracking-wider text-muted-foreground">RÔLE</p>
+                    {isOwner ? <div className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-black text-amber-700">👑 Propriétaire — rôle protégé</div> : <div className="grid grid-cols-3 gap-2">{ROLES.map(r=><button key={r} type="button" onClick={()=>changeRole(u.id,r)} className="rounded-xl py-2 text-xs font-black" style={{background:a.role===r?boutique.color:"#EEE9D8",color:a.role===r?"#fff":"#6b7280"}}>{r}</button>)}</div>}
+                  </div>
+                  {!isOwner&&<div>
+                    <div className="mb-2 flex items-center justify-between"><p className="text-[11px] font-black tracking-wider text-muted-foreground">DROITS</p><span className="text-[10px] text-muted-foreground">Enregistrés avec les règles serveur existantes</span></div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">{permDefs.map(({id,label,icon})=>{const enabled=!!a.droits[id];return <button key={id} type="button" onClick={()=>toggleDroit(u.id,id)} className="flex items-center gap-2 rounded-xl border border-border px-3 py-2.5 text-left" style={{background:enabled?boutique.color+"12":"transparent"}}><span>{icon}</span><span className="flex-1 text-xs font-bold" style={{color:enabled?boutique.color:"#6b7280"}}>{label}</span><span className="text-[10px] font-black" style={{color:enabled?SEM.success.accent:SEM.neutral.accent}}>{enabled?"ON":"OFF"}</span></button>})}</div>
+                  </div>}
+                </div>}
               </div>
             </div>;
           })}
