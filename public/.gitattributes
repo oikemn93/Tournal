@@ -1,0 +1,5 @@
+# Browser/PWA shell assets must be shipped as real static files, never LFS pointers.
+favicon.ico -filter -diff -merge -text
+favicon-*.png -filter -diff -merge -text
+apple-touch-icon.png -filter -diff -merge -text
+icon-*.png -filter -diff -merge -text
