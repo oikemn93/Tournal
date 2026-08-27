@@ -172,7 +172,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
       .filter(advance => advance.clientId === expressClient.id)
       .reduce((sum, advance) => sum + Math.max(0, advance.amount - (advance.allocatedAmount ?? 0)), 0);
 
-  async function confirmExpress() {
+  async function confirmExpress(confirmDuplicate = false) {
     if (!expressModal || expBusy) return;
     const sellQtyN = Number(expQty);
     const prix = Number(expPrice);
@@ -185,14 +185,29 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
     const line = { productId: expressModal.id, nom: expressModal.nom, qty: baseQty, unit: baseUnit, prixUnit: prix, ...(isSell ? { sellUnit: expSellUnit, sellQty: sellQtyN } : {}) };
     setExpBusy(true);
     try {
-      const saved = await createSale({
+      let saved = await createSale({
         boutiqueId:boutique.id,
         clientId:expressClient?.id,
         client:expressClient?.nom ?? "Client comptoir",
         clientTel:expressClient?.tel,
         origin:orderOrigin,
+        confirmDuplicate,
         lines:[line],
       });
+      if (saved.duplicate_invoice_id) {
+        const confirmed = window.confirm(`Une commande identique (${saved.duplicate_invoice_id}) a été créée il y a moins de 30 minutes. Voulez-vous vraiment créer une seconde commande ?`);
+        if (!confirmed) return;
+        saved = await createSale({
+          boutiqueId:boutique.id,
+          clientId:expressClient?.id,
+          client:expressClient?.nom ?? "Client comptoir",
+          clientTel:expressClient?.tel,
+          origin:orderOrigin,
+          confirmDuplicate:true,
+          lines:[line],
+        });
+      }
+      if (!saved.invoice_id || saved.total == null) throw new Error("Réponse de création de commande invalide");
       if (!canEncaissVente) {
         // Sans droit d'encaissement : commande créée en attente, pas de paiement
         const newInv: Invoice = {
@@ -383,9 +398,19 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
     const orderLines = cart.map(i => ({ productId: i.productId, nom: i.nom, qty: i.qty, unit: i.unit, prixUnit: i.prixUnit, sellUnit: i.sellUnit, sellQty: i.sellQty }));
     setSubmittingOrder(true);
     try {
-      const saved = editingInvoice
+      let saved = editingInvoice
         ? await updatePendingInvoice({ boutiqueId:boutique.id, invoiceId:editingInvoice.id, clientId:selectedClientId, client, clientTel:clientTel.trim() || undefined, lines:orderLines })
         : await createSale({ boutiqueId:boutique.id, clientId:selectedClientId, client, clientTel:clientTel.trim() || undefined, origin:orderOrigin, lines:orderLines });
+      if (!editingInvoice) {
+        let created = saved as Awaited<ReturnType<typeof createSale>>;
+        if (created.duplicate_invoice_id) {
+          const confirmed = window.confirm(`Une commande identique (${created.duplicate_invoice_id}) a été créée il y a moins de 30 minutes. Voulez-vous vraiment créer une seconde commande ?`);
+          if (!confirmed) return;
+          created = await createSale({ boutiqueId:boutique.id, clientId:selectedClientId, client, clientTel:clientTel.trim() || undefined, origin:orderOrigin, confirmDuplicate:true, lines:orderLines });
+        }
+        saved = created;
+      }
+      if (!saved.invoice_id || saved.total == null) throw new Error("Réponse de création de commande invalide");
       const newInv: Invoice = {
         ...(editingInvoice ?? {}),
         id:saved.invoice_id, clientId:saved.client_id ?? selectedClientId, client, clientTel:clientTel.trim() || undefined, lines:orderLines,
@@ -832,7 +857,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
                 <span className="text-xl font-black" style={{ color:POS_COLOR, fontFamily:"'Nunito', sans-serif" }}>{fmt(Number(expQty)*Number(expPrice))}</span>
               </div>
             )}
-            <button disabled={expBusy || !Number(expQty) || !Number(expPrice)} onClick={confirmExpress} className="w-full py-4 rounded-2xl font-black text-base flex items-center justify-center gap-2 active:scale-95 disabled:opacity-60" style={{ background:POS_COLOR, color:"#fff", fontFamily:"'Nunito', sans-serif" }}>
+            <button disabled={expBusy || !Number(expQty) || !Number(expPrice)} onClick={()=>confirmExpress()} className="w-full py-4 rounded-2xl font-black text-base flex items-center justify-center gap-2 active:scale-95 disabled:opacity-60" style={{ background:POS_COLOR, color:"#fff", fontFamily:"'Nunito', sans-serif" }}>
               <Zap size={18}/> {expBusy ? "En cours…" : canEncaissVente ? "Vendre & imprimer" : "Valider la commande"}
             </button>
           </>)}

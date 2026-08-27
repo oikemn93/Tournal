@@ -1241,11 +1241,15 @@ export async function saveAuthSettings(boutiqueId: string, settings: { lockMinut
   });
 }
 
-export async function createSale(params: { boutiqueId: string; clientId?: number; client: string; clientTel?: string; paymentMethod?: string; origin?: "pos"|"client_profile"; lines: Array<{ productId:number; nom:string; qty:number; unit:string; prixUnit:number; sellUnit?:string; sellQty?:number }> }) {
-  return dataRequest<{ invoice_id:string; client_id:number|null; total:number; due_date?:string|null }>("rpc/create_sale", {
+export async function createSale(params: { boutiqueId: string; clientId?: number; client: string; clientTel?: string; paymentMethod?: string; origin?: "pos"|"client_profile"; confirmDuplicate?: boolean; lines: Array<{ productId:number; nom:string; qty:number; unit:string; prixUnit:number; sellUnit?:string; sellQty?:number }> }) {
+  return dataRequest<{
+    invoice_id:string; client_id:number|null; total:number; due_date?:string|null;
+    duplicate_invoice_id?:string; duplicate_invoice_number?:number;
+    duplicate_created_at?:string; duplicate_total?:number;
+  }>("rpc/create_sale", {
     method: "POST",
     headers: { Prefer: "return=representation" },
-    body: JSON.stringify({ p_boutique_id:params.boutiqueId, p_idempotency_key:crypto.randomUUID(), p_client_nom:params.client, p_client_tel:params.clientTel ?? null, p_lines:params.lines, p_payment_method:params.paymentMethod ?? null, p_client_id:params.clientId ?? null, p_origin:params.origin ?? "pos" }),
+    body: JSON.stringify({ p_boutique_id:params.boutiqueId, p_idempotency_key:crypto.randomUUID(), p_client_nom:params.client, p_client_tel:params.clientTel ?? null, p_lines:params.lines, p_payment_method:params.paymentMethod ?? null, p_client_id:params.clientId ?? null, p_origin:params.origin ?? "pos", p_confirm_duplicate:params.confirmDuplicate ?? false }),
   });
 }
 

@@ -37,6 +37,10 @@ export function invoiceRemainingAmount(invoice: Invoice): number {
 
 export function invoicePaymentEvents(invoices: Invoice[]): PaymentEvent[] {
   return invoices.flatMap((invoice) => {
+    // A cancelled invoice is retained for audit purposes, but its historical
+    // payments are no longer active sales settlements. Any available money is
+    // represented separately by a client advance.
+    if (invoice.status === "annulée") return [];
     const sign = invoice.type.toLowerCase() === "retour" ? -1 : 1;
     const payments = invoice.payments?.length
       ? invoice.payments

@@ -188,7 +188,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
       byMonth[m].encaissé += sign * invoicePaidAmount(inv);
     });
     const months = Object.entries(byMonth).sort((a,b)=>b[0].localeCompare(a[0])).slice(0,6);
-    const clientPayments = clientInvoices.flatMap(inv => (inv.payments ?? []).map(payment => ({ ...payment, invoiceId:inv.id })))
+    const clientPayments = clientInvoices.filter(inv => inv.status !== "annulée").flatMap(inv => (inv.payments ?? []).map(payment => ({ ...payment, invoiceId:inv.id })))
       .sort((a,b)=>b.paidAt.localeCompare(a.paidAt));
     const paymentHistoryCount = clientPayments.length + clientAdvances.length;
     const visibleInvoices = showAllInvoices ? clientInvoices : clientInvoices.slice(0, 5);
