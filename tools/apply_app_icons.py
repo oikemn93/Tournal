@@ -21,6 +21,7 @@ for size, name in [(192,'icon-maskable-192.png'),(512,'icon-maskable-512.png')]:
     bg.paste(inner, ((size-inner_size)//2, (size-inner_size)//2))
     bg.save(PUBLIC / name, 'PNG', optimize=True)
 
+# Nested public/.gitattributes guarantees this ICO is committed as real bytes.
 square.resize((48,48), Image.Resampling.LANCZOS).save(PUBLIC / 'favicon.ico', 'ICO', sizes=[(16,16),(32,32),(48,48)])
 
 index = ROOT / 'index.html'
