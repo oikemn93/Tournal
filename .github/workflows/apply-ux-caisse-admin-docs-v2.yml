@@ -1,0 +1,40 @@
+name: Apply UX caisse admin docs v2
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/apply-ux-caisse-admin-docs-v2.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Apply source fixes
+        run: python3 tools/apply_ux_caisse_admin_docs.py
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Production build
+        run: pnpm build
+      - name: Commit source fixes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/app/App.tsx src/app/screens/ClientsView.tsx src/app/screens/FacturesView.tsx src/app/utils/invoice.ts
+          git commit -m "feat: fix inventory docs daily caisse and admin access" || exit 0
+          git push
