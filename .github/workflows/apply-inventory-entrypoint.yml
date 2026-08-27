@@ -1,0 +1,51 @@
+name: Apply inventory entrypoint patch
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - scripts/patch-inventory-entrypoint.mjs
+      - .github/workflows/apply-inventory-entrypoint.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-build-commit:
+    if: github.event.head_commit.message == 'chore: apply inventory entrypoint patch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Apply guarded inventory patch
+        run: node scripts/patch-inventory-entrypoint.mjs
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Production build
+        run: pnpm build
+
+      - name: Commit patched entrypoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/app/App.tsx
+          git diff --cached --quiet && exit 0
+          git commit -m "fix: route inventory through Supabase ledger"
+          git push origin HEAD:main
