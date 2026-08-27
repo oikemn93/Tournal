@@ -1,0 +1,172 @@
+from pathlib import Path
+
+
+def replace_once(text: str, old: str, new: str, label: str) -> str:
+    if old not in text:
+        raise RuntimeError(f"anchor missing: {label}")
+    return text.replace(old, new, 1)
+
+
+# Invoice/order/ticket preview helpers.
+path = Path("src/app/utils/invoice.ts")
+s = path.read_text()
+anchor = '''export function openInvoicePDF(inv: Invoice, boutique: Boutique, clients: Client[]) {
+  const html = buildInvoicePDFHtml(inv, boutique, clients);
+  const w = window.open("", "_blank", "width=900,height=700");
+  if (!w) return;
+  w.document.open();
+  w.document.write(hardenGeneratedHtml(html));
+  w.document.close();
+  w.focus();
+  setTimeout(() => w.print(), 500);
+}
+'''
+extra = anchor + '''
+export function openOrderDocument(inv: Invoice, boutique: Boutique, clients: Client[]) {
+  const base = buildInvoicePDFHtml(inv, boutique, clients);
+  const html = base
+    .replace(`<title>Facture ${inv.id}`, `<title>Bon de commande ${inv.id}`)
+    .replace('<div class="inv-label">Facture</div>', '<div class="inv-label">Bon de commande</div>');
+  const w = window.open("", "_blank", "width=900,height=700");
+  if (!w) return;
+  w.document.open();
+  w.document.write(hardenGeneratedHtml(html));
+  w.document.close();
+  w.focus();
+}
+
+export function openReceiptPreview(inv: Invoice, boutique: Boutique, fallbackOperator?: string) {
+  const w = window.open("", "_blank", "width=480,height=760");
+  if (!w) return;
+  w.document.open();
+  w.document.write(hardenGeneratedHtml(buildReceiptHtml(inv, boutique, fallbackOperator, true)));
+  w.document.close();
+  w.focus();
+}
+'''
+if "export function openOrderDocument(" not in s:
+    s = replace_once(s, anchor, extra, "invoice document helpers")
+path.write_text(s)
+
+
+# Client workspace: expose PDF, ticket and order document without leaving Clients.
+path = Path("src/app/screens/ClientsView.tsx")
+s = path.read_text()
+import_anchor = 'import { formatPreciseDateTime, invoicePaidAmount, invoiceRemainingAmount } from "../utils/payments";\n'
+if "openOrderDocument" not in s:
+    s = replace_once(
+        s,
+        import_anchor,
+        import_anchor + 'import { openInvoicePDF, openOrderDocument, openReceiptPreview } from "../utils/invoice";\n',
+        "client document import",
+    )
+modal_anchor = '''          <div className="space-y-2">{(viewedInvoice.lines ?? []).map((line,index)=><div key={index} className="flex items-center justify-between rounded-xl bg-muted px-3 py-2 text-xs"><div><p className="font-bold">{line.nom}</p><p className="text-muted-foreground">{line.sellQty ?? line.qty} {line.sellUnit ?? line.unit}</p></div><p className="font-black">{fmt((line.sellQty ?? line.qty) * line.prixUnit)}</p></div>)}</div>
+          {canCollectPayment && invoiceRemainingAmount(viewedInvoice)>0 && <button type="button" onClick={()=>{setPaymentAmount(String(invoiceRemainingAmount(viewedInvoice)));setViewedInvoice(null);setPaymentSummary(null);setPaymentModal(true);}} className="w-full rounded-xl bg-emerald-600 py-3 text-sm font-black text-white">Enregistrer un versement</button>}
+'''
+modal_new = '''          <div className="space-y-2">{(viewedInvoice.lines ?? []).map((line,index)=><div key={index} className="flex items-center justify-between rounded-xl bg-muted px-3 py-2 text-xs"><div><p className="font-bold">{line.nom}</p><p className="text-muted-foreground">{line.sellQty ?? line.qty} {line.sellUnit ?? line.unit}</p></div><p className="font-black">{fmt((line.sellQty ?? line.qty) * line.prixUnit)}</p></div>)}</div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <button type="button" onClick={()=>openInvoicePDF(viewedInvoice,boutique,boutique.clients)} className="rounded-xl border border-border bg-card py-3 px-2 text-xs font-black">📄 Facture PDF</button>
+            <button type="button" onClick={()=>openReceiptPreview(viewedInvoice,boutique,currentUser.nom)} className="rounded-xl border border-border bg-card py-3 px-2 text-xs font-black">🧾 Ticket caisse</button>
+            {viewedInvoice.type.toLowerCase() !== "retour" && <button type="button" onClick={()=>openOrderDocument(viewedInvoice,boutique,boutique.clients)} className="rounded-xl border border-border bg-card py-3 px-2 text-xs font-black">📋 Bon de commande</button>}
+          </div>
+          {canCollectPayment && invoiceRemainingAmount(viewedInvoice)>0 && <button type="button" onClick={()=>{setPaymentAmount(String(invoiceRemainingAmount(viewedInvoice)));setViewedInvoice(null);setPaymentSummary(null);setPaymentModal(true);}} className="w-full rounded-xl bg-emerald-600 py-3 text-sm font-black text-white">Enregistrer un versement</button>}
+'''
+if "📄 Facture PDF" not in s:
+    s = replace_once(s, modal_anchor, modal_new, "client document actions")
+path.write_text(s)
+
+
+# Factures: force daily cash opening when Admin > Fonctionnel > Caisse enables it.
+path = Path("src/app/screens/FacturesView.tsx")
+s = path.read_text()
+reminder_anchor = '''  const openingReminderDue = !!caisseDefaults?.enabled && !isCaisseOpen && hasReachedReminder(caisseDefaults.openingReminderTime);
+  const closingReminderDue = !!caisseDefaults?.enabled && isCaisseOpen && hasReachedReminder(caisseDefaults.closingReminderTime);
+'''
+reminder_new = reminder_anchor + '''  const dakarDay = (value: string | Date) => {
+    const parts = new Intl.DateTimeFormat("fr-FR", { timeZone:"Africa/Dakar", year:"numeric", month:"2-digit", day:"2-digit" }).formatToParts(new Date(value));
+    const get = (type: string) => parts.find(part => part.type === type)?.value ?? "";
+    return `${get("year")}-${get("month")}-${get("day")}`;
+  };
+  const todayDakar = dakarDay(new Date());
+  const caisseOpenedToday = !!(isCaisseOpen && caisseSession && dakarDay(caisseSession.openedAt) === todayDakar);
+  const staleOpenCaisse = !!(isCaisseOpen && caisseSession && !caisseOpenedToday);
+  const dailyCaisseBlocked = !!(canCollectPayment && caisseDefaults?.enabled && !caisseOpenedToday);
+'''
+if "const dailyCaisseBlocked" not in s:
+    s = replace_once(s, reminder_anchor, reminder_new, "daily caisse state")
+
+return_anchor = '''  return (
+    <div data-screen-source="relational-factures" className="space-y-4 pb-24">
+'''
+gate = '''  if (dailyCaisseBlocked) {
+    return <div className="min-h-[72vh] flex items-center justify-center px-4" data-screen-source="daily-caisse-opening-gate">
+      <div className="w-full max-w-xl rounded-3xl border border-red-200 bg-card p-6 sm:p-8 shadow-xl">
+        <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-red-50"><Store size={30} className="text-red-600"/></div>
+        <div className="text-center">
+          <p className="text-xs font-black uppercase tracking-[0.18em] text-red-600">Contrôle quotidien de caisse</p>
+          <h2 className="mt-2 text-2xl font-black">{staleOpenCaisse ? "Clôturez la caisse précédente" : "Ouvrez la caisse avant d'encaisser"}</h2>
+          <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
+            {staleOpenCaisse
+              ? `La session ouverte le ${formatPreciseDateTime(caisseSession?.openedAt)} ne peut pas être utilisée pour les encaissements d'aujourd'hui.`
+              : "Le contrôle quotidien est activé dans Admin → Fonctionnel → Caisse. Aucun encaissement n'est autorisé tant que la caisse du jour n'est pas ouverte."}
+          </p>
+          {caisseDefaults?.openingReminderTime && <p className={`mt-3 text-xs font-bold ${openingReminderDue ? "text-red-600" : "text-amber-700"}`}>{openingReminderDue ? "Rappel d'ouverture atteint" : "Rappel d'ouverture configuré"} · {caisseDefaults.openingReminderTime.slice(0,5)}</p>}
+        </div>
+        {staleOpenCaisse ? (
+          <button type="button" disabled={savingCaisse} onClick={()=>void closeCaisse()} className="mt-6 w-full rounded-2xl bg-red-600 py-4 text-sm font-black text-white disabled:opacity-50">{savingCaisse ? "Clôture…" : "Clôturer la caisse précédente"}</button>
+        ) : (
+          <div className="mt-6 space-y-3">
+            <label className="block text-xs font-black text-muted-foreground">FOND DE CAISSE
+              <input value={fondCaisse} onChange={e=>setFondCaisse(e.target.value)} type="number" min="0" className="mt-2 w-full rounded-2xl border border-border bg-background px-4 py-4 text-center text-xl font-black" autoFocus onKeyDown={e=>e.key==="Enter"&&void openCaisse()}/>
+            </label>
+            <button type="button" disabled={savingCaisse} onClick={()=>void openCaisse()} className="w-full rounded-2xl py-4 text-sm font-black text-white disabled:opacity-50" style={{background:FCT_COLOR}}>{savingCaisse ? "Ouverture…" : "Ouvrir la caisse du jour"}</button>
+            <p className="text-center text-xs text-muted-foreground">Fond par défaut Admin : {fmt(caisseDefaults?.openingFloat ?? 0)}</p>
+          </div>
+        )}
+      </div>
+    </div>;
+  }
+
+'''
+if 'data-screen-source="daily-caisse-opening-gate"' not in s:
+    s = replace_once(s, return_anchor, gate + return_anchor, "daily caisse gate")
+path.write_text(s)
+
+
+# Admin: merge Team and Rights into one flexible workspace.
+path = Path("src/app/App.tsx")
+s = path.read_text()
+cats_old = '{ id:"securite",    icon:"🔒", label:"Sécurité",    subs:[{id:"equipe",label:"Équipe"},{id:"perms",label:"Droits"},{id:"auth",label:"Authentification"}] },'
+cats_new = '{ id:"securite",    icon:"🔒", label:"Sécurité",    subs:[{id:"equipe",label:"Équipe & droits"},{id:"auth",label:"Authentification"}] },'
+if cats_old in s:
+    s = replace_once(s, cats_old, cats_new, "merge team rights nav")
+
+team_anchor = '''              </div>
+            </div>;
+          })}
+          <button onClick={()=>setAddModal(true)} className="w-full rounded-2xl p-3.5 border-2 border-dashed border-border flex items-center gap-3 active:scale-[0.98]">
+'''
+team_insert = '''              </div>
+              <div className="border-t border-border px-3.5 py-3">
+                <button type="button" onClick={()=>{setExpanded(expanded===u.id?null:u.id);setEditingRole(null);}} className="flex w-full items-center justify-between gap-3 rounded-xl bg-muted px-3 py-2.5 text-left">
+                  <span className="text-xs font-black">{expanded===u.id ? "Masquer les accès" : "Gérer rôle & droits"}</span>
+                  <ChevronRight size={15} className="transition-transform" style={{transform:expanded===u.id?"rotate(90deg)":"rotate(0deg)"}}/>
+                </button>
+                {expanded===u.id&&<div className="mt-3 space-y-3">
+                  <div>
+                    <p className="mb-2 text-[11px] font-black tracking-wider text-muted-foreground">RÔLE</p>
+                    {isOwner ? <div className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-black text-amber-700">👑 Propriétaire — rôle protégé</div> : <div className="grid grid-cols-3 gap-2">{ROLES.map(r=><button key={r} type="button" onClick={()=>changeRole(u.id,r)} className="rounded-xl py-2 text-xs font-black" style={{background:a.role===r?boutique.color:"#EEE9D8",color:a.role===r?"#fff":"#6b7280"}}>{r}</button>)}</div>}
+                  </div>
+                  {!isOwner&&<div>
+                    <div className="mb-2 flex items-center justify-between"><p className="text-[11px] font-black tracking-wider text-muted-foreground">DROITS</p><span className="text-[10px] text-muted-foreground">Enregistrés avec les règles serveur existantes</span></div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">{permDefs.map(({id,label,icon})=>{const enabled=!!a.droits[id];return <button key={id} type="button" onClick={()=>toggleDroit(u.id,id)} className="flex items-center gap-2 rounded-xl border border-border px-3 py-2.5 text-left" style={{background:enabled?boutique.color+"12":"transparent"}}><span>{icon}</span><span className="flex-1 text-xs font-bold" style={{color:enabled?boutique.color:"#6b7280"}}>{label}</span><span className="text-[10px] font-black" style={{color:enabled?SEM.success.accent:SEM.neutral.accent}}>{enabled?"ON":"OFF"}</span></button>})}</div>
+                  </div>}
+                </div>}
+              </div>
+            </div>;
+          })}
+          <button onClick={()=>setAddModal(true)} className="w-full rounded-2xl p-3.5 border-2 border-dashed border-border flex items-center gap-3 active:scale-[0.98]">
+'''
+if "Gérer rôle & droits" not in s:
+    s = replace_once(s, team_anchor, team_insert, "team inline rights")
+path.write_text(s)
