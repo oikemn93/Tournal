@@ -11,6 +11,7 @@ permissions:
 
 jobs:
   patch:
+    # Temporary guarded migration job: delete after the source patch lands.
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
