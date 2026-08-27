@@ -1,0 +1,45 @@
+name: Apply app icons
+
+on:
+  push:
+    paths:
+      - tools/apply_app_icons.py
+      - .github/workflows/apply-app-icons.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install image tooling
+        run: python -m pip install --disable-pip-version-check pillow==11.1.0
+      - name: Generate browser and PWA icons
+        run: python tools/apply_app_icons.py
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Production build
+        run: pnpm build
+      - name: Commit icon assets
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html public/favicon.ico public/favicon-16.png public/favicon-32.png public/favicon-48.png public/apple-touch-icon.png public/icon-192.png public/icon-512.png public/icon-maskable-192.png public/icon-maskable-512.png
+          git commit -m "fix: ship real browser and PWA icons" || exit 0
+          git push
