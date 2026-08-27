@@ -67,9 +67,10 @@ async function dataRequest<T>(path: string, init: RequestInit = {}): Promise<T> 
 }
 
 export async function getNotifications(boutiqueId: string, limit = 80) {
-  if (!boutiqueId) return [] as ServerNotification[];
+  const session = readSession();
+  if (!boutiqueId || !session?.user?.id) return [] as ServerNotification[];
   return dataRequest<ServerNotification[]>(
-    `notifications?select=id,user_id,boutique_id,category,title,body,icon,action_tab,action_filter,created_at,read_at,dismissed_at&boutique_id=eq.${encodeURIComponent(boutiqueId)}&dismissed_at=is.null&in_app_enabled=eq.true&order=created_at.desc&limit=${Math.max(1,Math.min(limit,100))}`,
+    `notifications?select=id,user_id,boutique_id,category,title,body,icon,action_tab,action_filter,created_at,read_at,dismissed_at&user_id=eq.${encodeURIComponent(session.user.id)}&boutique_id=eq.${encodeURIComponent(boutiqueId)}&dismissed_at=is.null&in_app_enabled=eq.true&order=created_at.desc&limit=${Math.max(1,Math.min(limit,100))}`,
   );
 }
 
@@ -104,6 +105,11 @@ export function subscribeToNotifications(boutiqueId: string, onChange: () => voi
       if (refreshedSession?.access_token) realtimeClient.realtime.setAuth(refreshedSession.access_token);
     };
     window.addEventListener("tournal:session-refreshed", refreshRealtimeAuth);
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleChange = () => {
+      if (refreshTimer) return;
+      refreshTimer = setTimeout(() => { refreshTimer = null; onChange(); }, 250);
+    };
     const channel = realtimeClient
       .channel(`notifications:${session.user.id}:${boutiqueId}`)
       .on("postgres_changes", {
@@ -111,9 +117,12 @@ export function subscribeToNotifications(boutiqueId: string, onChange: () => voi
         schema: "public",
         table: "notifications",
         filter: `boutique_id=eq.${boutiqueId}`,
-      }, onChange)
-      .subscribe();
+      }, scheduleChange)
+      .subscribe((status) => {
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") console.warn(`Notifications Realtime ${status.toLowerCase()} pour ${boutiqueId}`);
+      });
     return () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
       window.removeEventListener("tournal:session-refreshed", refreshRealtimeAuth);
       void realtimeClient.removeChannel(channel);
     };

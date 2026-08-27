@@ -1425,6 +1425,20 @@ export async function updateClientContact(clientId:number, contact:string|null) 
     body:JSON.stringify({ contact }),
   });
 }
+
+export async function updateClientProfile(params:{ boutiqueId:string; clientId:number; name:string; phone?:string; email?:string; city?:string; address?:string; contact?:string }) {
+  return dataRequest<{client_id:number;name:string;phone:string|null;email:string|null;city:string|null;address:string|null;contact:string|null}>("rpc/update_client_profile", {
+    method:"POST", headers:{ Prefer:"return=representation" },
+    body:JSON.stringify({ p_boutique_id:params.boutiqueId,p_client_id:params.clientId,p_name:params.name,p_phone:params.phone ?? null,p_email:params.email ?? null,p_city:params.city ?? null,p_address:params.address ?? null,p_contact:params.contact ?? null }),
+  });
+}
+
+export async function deleteClientIfUnused(params:{ boutiqueId:string; clientId:number }) {
+  return dataRequest<{client_id:number;name:string;deleted:boolean}>("rpc/delete_client_if_unused", {
+    method:"POST", headers:{ Prefer:"return=representation" },
+    body:JSON.stringify({ p_boutique_id:params.boutiqueId,p_client_id:params.clientId }),
+  });
+}
 export async function createSupplier(params:{ boutiqueId:string; name:string; phone?:string; city?:string }) {
   return dataRequest<{supplier_id:number}>("rpc/create_supplier", { method:"POST", body:JSON.stringify({ p_boutique_id:params.boutiqueId,p_idempotency_key:crypto.randomUUID(),p_nom:params.name,p_tel:params.phone ?? null,p_ville:params.city ?? null }) });
 }
