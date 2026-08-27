@@ -4,15 +4,13 @@ on:
   push:
     branches: [main]
     paths:
-      - scripts/patch-inventory-entrypoint.mjs
-      - .github/workflows/apply-inventory-entrypoint.yml
+      - ".github/workflows/apply-inventory-entrypoint.yml"
 
 permissions:
   contents: write
 
 jobs:
-  patch-build-commit:
-    if: github.event.head_commit.message == 'chore: apply inventory entrypoint patch'
+  patch:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -40,12 +38,10 @@ jobs:
         run: pnpm build
 
       - name: Commit patched entrypoint
-        shell: bash
         run: |
-          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add src/app/App.tsx
-          git diff --cached --quiet && exit 0
+          if git diff --cached --quiet; then exit 0; fi
           git commit -m "fix: route inventory through Supabase ledger"
           git push origin HEAD:main
