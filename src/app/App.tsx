@@ -119,10 +119,15 @@ type Boutique   = {
 
 const SESSION_KEY = "tournal_session";
 const APP_LOCK_KEY = "tournal_app_locked";
+const APP_LAST_ACTIVITY_KEY = "tournal_last_activity_at";
 type StoredSession = { userId: string; boutiqueId: string | null; assignJson: string | null; loginAt?: number };
-const SESSION_EXPIRY_MS = 60 * 60 * 1000; // 60 min idle session default
+const SESSION_EXPIRY_MS = 12 * 60 * 60 * 1000; // 12h idle session default; matches Admin and Supabase fallback
 function saveSession(userId: string, boutiqueId: string | null, assign: BoutiqueAssignment | null) {
-  try { sessionStorage.setItem(SESSION_KEY, JSON.stringify({ userId, boutiqueId, assignJson: assign ? JSON.stringify(assign) : null, loginAt: Date.now() })); } catch {}
+  try {
+    const now = Date.now();
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify({ userId, boutiqueId, assignJson: assign ? JSON.stringify(assign) : null, loginAt: now }));
+    sessionStorage.setItem(APP_LAST_ACTIVITY_KEY, String(now));
+  } catch {}
 }
 function loadSession(): StoredSession | null {
   try {
@@ -131,7 +136,13 @@ function loadSession(): StoredSession | null {
     return JSON.parse(s) as StoredSession;
   } catch { return null; }
 }
-function clearSession() { try { sessionStorage.removeItem(SESSION_KEY); sessionStorage.removeItem(APP_LOCK_KEY); } catch {} }
+function readLastActivityAt() {
+  try {
+    const value = Number(sessionStorage.getItem(APP_LAST_ACTIVITY_KEY));
+    return Number.isFinite(value) && value > 0 ? value : Date.now();
+  } catch { return Date.now(); }
+}
+function clearSession() { try { sessionStorage.removeItem(SESSION_KEY); sessionStorage.removeItem(APP_LOCK_KEY); sessionStorage.removeItem(APP_LAST_ACTIVITY_KEY); } catch {} }
 
 // ─── TECHNICAL LOGGING ───────────────────────────────────────────────────────
 type TechLogCat   = "sync"|"email"|"pdf"|"qz"|"session"|"backend";
@@ -6838,7 +6849,7 @@ function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdat
   const [caisseSaving, setCaisseSaving] = useState(false);
   const [caisseSaved, setCaisseSaved] = useState(false);
   const [caisseSaveError, setCaisseSaveError] = useState<string | null>(null);
-  const sessMinutes = Math.max(5, Math.round(sessValue * (sessUnit === "min" ? 1 : sessUnit === "h" ? 60 : 1440)));
+  const sessMinutes = Math.max(lockMinutes, 5, Math.round(sessValue * (sessUnit === "min" ? 1 : sessUnit === "h" ? 60 : 1440)));
 
   useEffect(() => { setSupplierTermsDays(supplierPaymentTermsDaysInit ?? 30); }, [supplierPaymentTermsDaysInit]);
   useEffect(() => { setClientTermsDays(clientPaymentTermsDaysInit ?? 30); }, [clientPaymentTermsDaysInit]);
@@ -7164,7 +7175,7 @@ function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdat
             </div>
           </div>
           <div className="bg-card rounded-2xl border border-border overflow-hidden">
-            <div className="px-4 py-3 border-b border-border"><p className="font-bold text-sm">Expiration de session</p><p className="text-xs text-muted-foreground mt-0.5">Durée maximale d'inactivité avant une reconnexion complète</p></div>
+            <div className="px-4 py-3 border-b border-border"><p className="font-bold text-sm">Expiration de session</p><p className="text-xs text-muted-foreground mt-0.5">Durée maximale d'inactivité avant une reconnexion complète. Elle ne peut pas être inférieure au délai de verrouillage.</p></div>
             <div className="px-4 py-4 space-y-3">
               <div className="flex items-center gap-2">
                 <input type="number" min={1} value={sessValue}
@@ -8645,7 +8656,7 @@ export default function App() {
   const appSessionRenewalInFlight = useRef<Promise<boolean>|null>(null);
   const appSessionRecoveryInFlight = useRef<Promise<boolean>|null>(null);
   const appSessionHeartbeatAt = useRef(0);
-  const lastUserActivityAt = useRef(Date.now());
+  const lastUserActivityAt = useRef(readLastActivityAt());
   const endingSessionForInactivity = useRef(false);
   // Auth settings come from the relational auth_settings table.
   const [lockTimeoutMs, setLockTimeoutMs] = useState(10 * 60 * 1000);
@@ -9334,34 +9345,53 @@ export default function App() {
 
   useEffect(() => {
     if (screen !== "app" || !appSessionReady) return;
+    const events = ["mousemove", "pointerdown", "keydown", "touchstart", "click", "input", "change", "focusin", "wheel"];
+
+    function armExpiryFromLastActivity() {
+      const elapsed = Date.now() - lastUserActivityAt.current;
+      const remaining = sessionExpiryMs - elapsed;
+      if (logoutTimer.current) clearTimeout(logoutTimer.current);
+      if (remaining <= 0) {
+        endSessionForInactivity();
+        return false;
+      }
+      logoutTimer.current = setTimeout(() => endSessionForInactivity(), remaining);
+      return true;
+    }
+
     function resetTimers() {
+      if (locked) return; // PIN-screen interactions must never extend the business idle session.
       const now = Date.now();
       if (now - lastUserActivityAt.current >= sessionExpiryMs) {
         endSessionForInactivity();
         return;
       }
       lastUserActivityAt.current = now;
-      if (lockTimer.current)   clearTimeout(lockTimer.current);
-      if (logoutTimer.current) clearTimeout(logoutTimer.current);
-      lockTimer.current   = setTimeout(() => {
+      try { sessionStorage.setItem(APP_LAST_ACTIVITY_KEY, String(now)); } catch {}
+      if (lockTimer.current) clearTimeout(lockTimer.current);
+      lockTimer.current = setTimeout(() => {
         const bid = activeBoutiqueIdRef.current;
         if (bid) void lockAppSession(bid).catch(() => undefined);
         try { sessionStorage.setItem(APP_LOCK_KEY, "1"); } catch {}
         setLocked(true);
       }, LOCK_TIMEOUT_MS);
-      logoutTimer.current = setTimeout(() => {
-        endSessionForInactivity();
-      }, sessionExpiryMs);
+      armExpiryFromLastActivity();
       // A live user refreshes the server-side gate at most once per minute.
       // No interval runs in the background, so inactivity can still expire.
-      if (!locked && now - appSessionHeartbeatAt.current >= 60_000) void renewAppSession();
+      if (now - appSessionHeartbeatAt.current >= 60_000) void renewAppSession();
     }
-    const events = ["mousemove", "pointerdown", "keydown", "touchstart", "click", "input", "change", "focusin", "wheel"];
-    events.forEach(e => document.addEventListener(e, resetTimers, { passive: true }));
-    document.addEventListener("scroll", resetTimers, { passive: true, capture: true });
-    resetTimers();
+
+    if (locked) {
+      // Preserve the original idle deadline while the PIN screen is displayed.
+      armExpiryFromLastActivity();
+    } else {
+      events.forEach(e => document.addEventListener(e, resetTimers, { passive: true }));
+      document.addEventListener("scroll", resetTimers, { passive: true, capture: true });
+      resetTimers();
+    }
+
     return () => {
-      if (lockTimer.current)   clearTimeout(lockTimer.current);
+      if (lockTimer.current) clearTimeout(lockTimer.current);
       if (logoutTimer.current) clearTimeout(logoutTimer.current);
       events.forEach(e => document.removeEventListener(e, resetTimers));
       document.removeEventListener("scroll", resetTimers, true);
