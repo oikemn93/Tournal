@@ -23,6 +23,7 @@ import { FournisseursView as RelationalFournisseursView } from "./screens/Fourni
 import { ChargesView as RelationalChargesView } from "./screens/ChargesView";
 import { ComptabiliteView as RelationalComptabiliteView } from "./screens/RapportView";
 import { TransfersView as RelationalTransfersView } from "./screens/TransfersView";
+import { InventoryView as RelationalInventoryView } from "./screens/InventoryView";
 import { SuperAdminUserActions } from "./components/SuperAdminUserActions";
 import { NotificationCenter } from "./components/NotificationCenter";
 import { filterPaymentEventsByPeriod, formatPreciseDateTime, invoicePaymentEvents, invoiceRemainingAmount } from "./utils/payments";
@@ -9700,7 +9701,7 @@ export default function App() {
         {safeTab==="charges"      && canAccess("charges")      && <RelationalChargesView boutique={boutique} onUpdate={updateBoutique} logAction={logAction}/>}
         {safeTab==="compta"       && canAccess("compta")       && <RelationalComptabiliteView boutique={boutique} canSeeMargin={canSeeMargin}/>}
         {safeTab==="inventaire"   && canAccess("inventaire")   && (
-          <InventaireView
+          <RelationalInventoryView
             boutique={boutique}
             currentUser={currentUser!}
             onUpdate={updateBoutique}
