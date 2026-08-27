@@ -9,7 +9,7 @@ import { getSiblings } from "../utils/inventory";
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
-import { applyClientAdvanceToInvoice, createClient, recordClientPayment, updateClientContact, updateClientPaymentTerms, WHOLESALE_MARKER } from "../../lib/api";
+import { applyClientAdvanceToInvoice, cancelPendingInvoice, createClient, recordClientPayment, updateClientContact, updateClientPaymentTerms, WHOLESALE_MARKER } from "../../lib/api";
 import { PhoneField } from "../components/PhoneField";
 import { formatPreciseDateTime, invoicePaidAmount, invoiceRemainingAmount } from "../utils/payments";
 
@@ -28,7 +28,7 @@ function dueLabel(dueDate: string | undefined, remaining: number) {
   return { text:`Échéance le ${dueAtMidnight.toLocaleDateString("fr-FR")}`, color:SEM.neutral.accent, bg:"#f1f5f9" };
 }
 
-export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser, onUpdate, logAction, initialTab, initialClientId, initialInvoiceId, initialInvoiceNotice = "order", onInitialClientOpened, canCreateOrder = false, canCollectPayment = false, canOpenInvoice = false, defaultPaymentTermsDays = 30, onOpenInvoice, onCreateOrder }: {
+export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser, onUpdate, logAction, initialTab, initialClientId, initialInvoiceId, initialInvoiceNotice = "order", onInitialClientOpened, canCreateOrder = false, canCollectPayment = false, canCancelPendingOrder = false, canOpenInvoice = false, defaultPaymentTermsDays = 30, onOpenInvoice, onCreateOrder }: {
   boutique: Boutique; allBoutiques: Boutique[]; platformUsers: PlatformUser[];
   currentUser: PlatformUser;
   onUpdate: (u: Partial<Boutique>) => void;
@@ -40,6 +40,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
   onInitialClientOpened?: () => void;
   canCreateOrder?: boolean;
   canCollectPayment?: boolean;
+  canCancelPendingOrder?: boolean;
   canOpenInvoice?: boolean;
   defaultPaymentTermsDays?: number;
   onOpenInvoice: (invoiceId: string) => void;
@@ -143,6 +144,9 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
   const [termsModalClient, setTermsModalClient] = useState<Client|null>(null);
   const [termsDraft, setTermsDraft] = useState("");
   const [savingTerms, setSavingTerms] = useState(false);
+  const [cancelInvoice, setCancelInvoice] = useState<Invoice|null>(null);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancellingInvoice, setCancellingInvoice] = useState(false);
   const tabDefs: Array<{id:ClientType;label:string;color:string}> = [
     {id:"B2C",      label:"👤 Particuliers", color:"#374151"},
     {id:"B2B",      label:"🏢 Entreprises",  color:"#0e7490"},
@@ -154,10 +158,12 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
   if (detailClient) {
     const c = detailClient;
     const CC = clientColor(c.type);
+    const activeAssignment = currentUser.assignments.find(assignment => assignment.boutiqueId === boutique.id);
+    const canManageAnyPendingOrder = currentUser.isSuperAdmin || activeAssignment?.role === "Propriétaire";
     const clientInvoices = boutique.invoices.filter(inv => inv.clientId === c.id)
       .sort((a,b)=>(b.dateRaw??b.date).localeCompare(a.dateRaw??a.date));
     const isReturn = (invoice: Invoice) => invoice.type.toLowerCase() === "retour";
-    const ventes = clientInvoices.filter(i=>!isReturn(i));
+    const ventes = clientInvoices.filter(i=>!isReturn(i) && i.status !== "annulée");
     const retours = clientInvoices.filter(i=>isReturn(i));
     const totalVentesFacturées = ventes.reduce((s,i)=>s+i.montant,0);
     const totalRetours = retours.reduce((s,i)=>s+i.montant,0);
@@ -174,7 +180,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
 
     // Monthly breakdown
     const byMonth: Record<string,{facturé:number;encaissé:number}> = {};
-    clientInvoices.forEach(inv=>{
+    clientInvoices.filter(inv => inv.status !== "annulée").forEach(inv=>{
       const m = (inv.dateRaw??"").slice(0,7) || inv.date.slice(-7);
       if (!byMonth[m]) byMonth[m]={facturé:0,encaissé:0};
       const sign = isReturn(inv) ? -1 : 1;
@@ -330,6 +336,31 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
       }
     }
 
+    async function confirmClientCancellation() {
+      if (!cancelInvoice || cancellingInvoice) return;
+      setCancellingInvoice(true);
+      try {
+        const result = await cancelPendingInvoice({
+          boutiqueId:boutique.id,
+          invoiceId:cancelInvoice.id,
+          reason:cancelReason,
+          originContext:"client_profile",
+        });
+        onUpdate({ invoices:boutique.invoices.map(invoice => invoice.id === cancelInvoice.id ? {
+          ...invoice,
+          status:"annulée",
+          cancelReason:result.cancel_reason ?? undefined,
+          cancelledAt:result.cancelled_at,
+          cancelledBy:result.cancelled_by ?? undefined,
+        } : invoice) });
+        setCancelInvoice(null);
+      } catch (error) {
+        alert(error instanceof Error ? error.message : "Annulation impossible");
+      } finally {
+        setCancellingInvoice(false);
+      }
+    }
+
     return (
       <div className="space-y-4 pb-24">
         <button onClick={()=>{setDetailClient(null);setHighlightedInvoiceId(null);}} className="flex items-center gap-2 text-muted-foreground active:opacity-70">
@@ -380,6 +411,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
               const maturity = dueLabel(inv.dueDate, remaining);
               const isHighlighted = inv.id === highlightedInvoiceId;
               const canUseAdvance = canCollectPayment && !isReturn && remaining>0 && totalAvoir>0;
+              const canCancel = canCancelPendingOrder && (canManageAnyPendingOrder || inv.operatorId === currentUser.id) && inv.origin === "client_profile" && inv.status === "en attente" && paid <= 0;
               const paymentNotice = isHighlighted && advanceAppliedNotice?.invoiceId === inv.id
                 ? `✓ Avoir déduit : ${fmt(advanceAppliedNotice.amount)}`
                 : null;
@@ -401,6 +433,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
                     ? <button type="button" onClick={()=>onOpenInvoice(inv.id)} className="flex flex-1 min-w-0 items-center gap-3 text-left active:scale-[0.99]">{content}</button>
                     : <div className="flex flex-1 min-w-0 items-center gap-3">{content}</div>}
                   {canUseAdvance&&<button type="button" onClick={()=>applyAdvanceToInvoice(inv)} disabled={!!applyingAdvanceInvoiceId} className="rounded-lg px-2 py-2 text-[11px] font-black disabled:opacity-50" style={{background:"#ccfbf1",color:"#0f766e"}}>{applyingAdvanceInvoiceId===inv.id?"Application…":"🎟️ Utiliser"}</button>}
+                  {canCancel&&<button type="button" onClick={()=>{setCancelReason("");setCancelInvoice(inv);}} className="rounded-lg px-2 py-2 text-[11px] font-black" style={{background:"#fef2f2",color:"#dc2626"}} title="Annuler cette commande">Annuler</button>}
                 </div>
                 {paymentNotice&&<p className="mt-2 rounded-lg px-2 py-1.5 text-xs font-black" style={{background:"#dcfce7",color:SEM.success.accent}}>{paymentNotice}</p>}
               </div>;
@@ -496,6 +529,12 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
           <p className="mb-3 text-xs text-muted-foreground">Laissez vide pour reprendre le délai par défaut de la boutique ({defaultPaymentTermsDays} jours). Ce réglage s’applique aux prochaines factures B2B ou grossistes.</p>
           <Field label="DÉLAI EN JOURS"><input type="number" min="0" max="3650" value={termsDraft} onChange={event=>setTermsDraft(event.target.value)} placeholder={String(defaultPaymentTermsDays)} className={inputCls}/></Field>
           <SubmitBtn color={CC} label={savingTerms?"Enregistrement…":"Enregistrer le délai"} onClick={saveClientTerms} disabled={savingTerms}/>
+        </Modal>}
+        {cancelInvoice&&<Modal title="Annuler la commande" color="#ef4444" onClose={()=>!cancellingInvoice&&setCancelInvoice(null)}>
+          <p className="text-sm text-muted-foreground">Es-tu sûr de vouloir annuler cette commande&nbsp;? Elle sera conservée avec le statut <strong>Annulée</strong>.</p>
+          <div className="mt-3 rounded-xl bg-muted px-3 py-2 text-sm font-bold">{cancelInvoice.id} · {fmt(cancelInvoice.montant)}</div>
+          <Field label="MOTIF D’ANNULATION (optionnel)" color="#ef4444"><input value={cancelReason} onChange={event=>setCancelReason(event.target.value)} placeholder="Erreur de saisie, doublon, client a annulé…" className={inputCls}/></Field>
+          <div className="mt-4 grid grid-cols-2 gap-2"><button type="button" onClick={()=>setCancelInvoice(null)} disabled={cancellingInvoice} className="rounded-xl bg-muted py-3 text-sm font-black disabled:opacity-50">Conserver</button><button type="button" onClick={()=>void confirmClientCancellation()} disabled={cancellingInvoice} className="rounded-xl bg-red-600 py-3 text-sm font-black text-white disabled:opacity-50">{cancellingInvoice?"Annulation…":"Oui, annuler"}</button></div>
         </Modal>}
       </div>
     );

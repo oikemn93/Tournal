@@ -9,15 +9,30 @@ export type PaymentEvent = InvoicePayment & {
   dateRaw: string;
 };
 
+// Amounts travel through user inputs and JSON before reaching Postgres. Keep
+// display and client-side guards in a stable currency precision instead of
+// comparing binary floating-point values directly.
+export const MONEY_EPSILON = 0.01;
+
+export function roundMoney(value: number): number {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.round((numeric + Number.EPSILON) * 100) / 100 : 0;
+}
+
+export function moneyExceeds(value: number, limit: number, epsilon = MONEY_EPSILON): boolean {
+  return roundMoney(value) > roundMoney(limit) + epsilon;
+}
+
 export function invoicePaidAmount(invoice: Invoice): number {
   if (invoice.payments?.length) {
-    return invoice.payments.reduce((sum, payment) => sum + payment.amount, 0);
+    return roundMoney(invoice.payments.reduce((sum, payment) => sum + payment.amount, 0));
   }
-  return invoice.acompte;
+  return roundMoney(invoice.acompte);
 }
 
 export function invoiceRemainingAmount(invoice: Invoice): number {
-  return Math.max(0, invoice.montant - invoicePaidAmount(invoice));
+  if (invoice.status === "annulée") return 0;
+  return roundMoney(Math.max(0, roundMoney(invoice.montant) - invoicePaidAmount(invoice)));
 }
 
 export function invoicePaymentEvents(invoices: Invoice[]): PaymentEvent[] {

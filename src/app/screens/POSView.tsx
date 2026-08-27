@@ -8,14 +8,16 @@ import { silentPrint, buildOrderTicketHtml, buildReceiptHtml, agentPrint, connec
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
-import { createSale, recordMultiPayment, recordPayment, cancelPendingInvoice } from "../../lib/api";
+import { createSale, recordMultiPayment, recordPayment, cancelPendingInvoice, updatePendingInvoice } from "../../lib/api";
 import { getDefaultSaleUnit, getLastSalePrice, getSaleUnitOptions, toBaseSaleQty } from "../utils/sales";
 import { formatPreciseDateTime } from "../utils/payments";
 
-export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente = false, initialClientId, onInitialClientPrepared, onOrderCreated, onUpdate, logAction }: {
+export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente = false, canCancelPendingOrder = false, initialClientId, initialOrderOrigin = "pos", onInitialClientPrepared, onOrderCreated, onUpdate, logAction }: {
   boutique: Boutique; allBoutiques: Boutique[]; currentUser: PlatformUser;
   canEncaissVente?: boolean;
+  canCancelPendingOrder?: boolean;
   initialClientId?: number;
+  initialOrderOrigin?: "pos" | "client_profile";
   onInitialClientPrepared?: () => void;
   onOrderCreated?: (clientId: number, invoiceId: string, notice?: "order"|"payment") => void;
   onUpdate: (u: Partial<Boutique>) => void;
@@ -27,6 +29,8 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
   const activeAssignment = currentUser.assignments.find(assignment => assignment.boutiqueId === boutique.id);
   const canManageAnyPendingOrder = currentUser.isSuperAdmin || activeAssignment?.role === "Propriétaire";
   const canManagePendingOrder = (invoice: Invoice) => canManageAnyPendingOrder || invoice.operatorId === currentUser.id;
+  const canEditPendingOrder = (invoice: Invoice) => canManagePendingOrder(invoice) && invoice.origin !== "client_profile";
+  const canCancelOrder = (invoice: Invoice) => canCancelPendingOrder && canManagePendingOrder(invoice) && invoice.origin !== "client_profile";
 
   // Order taking
   const [search, setSearch] = useState("");
@@ -76,6 +80,10 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
   const [submittingOrder, setSubmittingOrder] = useState(false);
   const [printJob, setPrintJob] = useState<{status:"printing"|"ok"|"fail"|"fallback";html:string;label:string}|null>(null);
   const [cancelBusy, setCancelBusy] = useState<string|null>(null); // invoiceId en cours d'annulation
+  const [editingInvoice, setEditingInvoice] = useState<Invoice|null>(null);
+  const [orderOrigin, setOrderOrigin] = useState<"pos"|"client_profile">("pos");
+  const [cancelConfirmation, setCancelConfirmation] = useState<Invoice|null>(null);
+  const [cancelReason, setCancelReason] = useState("");
 
   // A known client can start a command from their card without opening the
   // invoice screen. Keep the canonical ID so the command is attached to the
@@ -87,6 +95,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
       setClientNom(client.nom);
       setClientTel(client.tel || "+221 ");
       setSelectedClientId(client.id);
+      setOrderOrigin(initialOrderOrigin);
     }
     onInitialClientPrepared?.();
   }, [initialClientId, boutique.clients, onInitialClientPrepared]);
@@ -181,6 +190,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
         clientId:expressClient?.id,
         client:expressClient?.nom ?? "Client comptoir",
         clientTel:expressClient?.tel,
+        origin:orderOrigin,
         lines:[line],
       });
       if (!canEncaissVente) {
@@ -188,7 +198,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
         const newInv: Invoice = {
           id:saved.invoice_id, clientId:saved.client_id ?? expressClient?.id, client:expressClient?.nom ?? "Client comptoir", clientTel:expressClient?.tel, lines:[line], montant:saved.total, acompte:0,
           date:today(), dateRaw:new Date().toISOString(), dueDate:saved.due_date ?? undefined, status:"en attente", type:"vente",
-          operatorId:currentUser.id, operatorNom:currentUser.nom, operatorColor:currentUser.color,
+          operatorId:currentUser.id, operatorNom:currentUser.nom, operatorColor:currentUser.color, origin:orderOrigin,
         };
         onUpdate({ invoices:[...invoices, newInv] });
         logAction("Commande express", `${newInv.id} · ${expressModal.nom} · ${fmt(saved.total)} · en attente`, "🛒");
@@ -224,7 +234,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
         id:saved.invoice_id, clientId:saved.client_id ?? expressClient?.id, client:expressClient?.nom ?? "Client comptoir", clientTel:expressClient?.tel, lines:[line], montant:saved.total, acompte:paid.acompte,
         date:today(), dateRaw:new Date().toISOString(), dueDate:saved.due_date ?? undefined, status:"payé", type:"vente",
         operatorId:currentUser.id, operatorNom:currentUser.nom, operatorColor:currentUser.color, paymentMethod:advanceAmount >= saved.total ? "Avoir client" : expMethod,
-        payments:paidPayments,
+        payments:paidPayments, origin:orderOrigin,
       };
       const saleEntries: StockEntry[] = paid.stock_deducted
         ? [{ id:Date.now(), productId:line.productId, qty:-line.qty, unit:line.unit, montantDu:0, date:today(), fournisseur:`Vente ${saved.invoice_id}`, invoiceId:saved.invoice_id }]
@@ -303,18 +313,34 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
     }));
   }
 
+  function askCancelOrder(inv: Invoice) {
+    if (!canCancelOrder(inv)) {
+      alert(inv.origin === "client_profile"
+        ? "Cette commande a été créée depuis Clients. Gérez-la depuis la fiche client."
+        : "Vous n’avez pas le droit d’annuler cette commande.");
+      return;
+    }
+    setCancelReason("");
+    setCancelConfirmation(inv);
+  }
+
   async function handleCancelOrder(inv: Invoice): Promise<boolean> {
     if (cancelBusy) return false;
-    if (!canManagePendingOrder(inv)) {
-      alert("Vous pouvez uniquement annuler les commandes que vous avez créées.");
+    if (!canCancelOrder(inv)) {
+      alert("Vous n’avez pas le droit d’annuler cette commande.");
       return false;
     }
     setCancelBusy(inv.id);
     try {
-      const result = await cancelPendingInvoice({ boutiqueId:boutique.id, invoiceId:inv.id });
-      if (!result.deleted) throw new Error("Annulation non confirmée");
-      onUpdate({ invoices: invoices.filter(i => i.id !== inv.id) });
-      logAction("Commande annulée", `${inv.id} · ${inv.client} · ${fmt(inv.montant)}`, "🗑️");
+      const result = await cancelPendingInvoice({ boutiqueId:boutique.id, invoiceId:inv.id, reason:cancelReason, originContext:"pos" });
+      onUpdate({ invoices: invoices.map(invoice => invoice.id === inv.id ? {
+        ...invoice,
+        status:"annulée",
+        cancelReason:result.cancel_reason ?? undefined,
+        cancelledAt:result.cancelled_at,
+        cancelledBy:result.cancelled_by ?? undefined,
+      } : invoice) });
+      setCancelConfirmation(null);
       return true;
     } catch (err) {
       alert(err instanceof Error ? err.message : "Annulation impossible");
@@ -325,7 +351,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
   }
 
   function handleEditOrder(inv: Invoice) {
-    if (!canManagePendingOrder(inv)) {
+    if (!canEditPendingOrder(inv)) {
       alert("Vous pouvez uniquement modifier les commandes que vous avez créées.");
       return;
     }
@@ -340,17 +366,15 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
     setClientNom(inv.client === "Client comptoir" ? "" : inv.client);
     setClientTel(inv.clientTel ?? "+221 ");
     setSelectedClientId(inv.clientId);
-    // Cancel the existing order then switch to produits tab so user can complete checkout
-    void handleCancelOrder(inv).then((cancelled) => {
-      if (!cancelled) return;
-      setPosTab("produits");
-      setCheckoutOpen(true);
-    });
+    setEditingInvoice(inv);
+    setOrderOrigin(inv.origin ?? "pos");
+    setPosTab("produits");
+    setCheckoutOpen(true);
   }
 
   function resetCheckout() {
     setCart([]); setClientNom(""); setClientTel("+221 "); setSelectedClientId(undefined);
-    setCheckoutOpen(false); setDone(false); setLastInv(null);
+    setCheckoutOpen(false); setDone(false); setLastInv(null); setEditingInvoice(null); setOrderOrigin("pos");
   }
 
   async function checkout() {
@@ -359,19 +383,23 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
     const orderLines = cart.map(i => ({ productId: i.productId, nom: i.nom, qty: i.qty, unit: i.unit, prixUnit: i.prixUnit, sellUnit: i.sellUnit, sellQty: i.sellQty }));
     setSubmittingOrder(true);
     try {
-      const saved = await createSale({ boutiqueId:boutique.id, clientId:selectedClientId, client, clientTel:clientTel.trim() || undefined, lines:orderLines });
+      const saved = editingInvoice
+        ? await updatePendingInvoice({ boutiqueId:boutique.id, invoiceId:editingInvoice.id, clientId:selectedClientId, client, clientTel:clientTel.trim() || undefined, lines:orderLines })
+        : await createSale({ boutiqueId:boutique.id, clientId:selectedClientId, client, clientTel:clientTel.trim() || undefined, origin:orderOrigin, lines:orderLines });
       const newInv: Invoice = {
+        ...(editingInvoice ?? {}),
         id:saved.invoice_id, clientId:saved.client_id ?? selectedClientId, client, clientTel:clientTel.trim() || undefined, lines:orderLines,
         montant:saved.total, acompte:0, date:today(), dateRaw:new Date().toISOString(), dueDate:saved.due_date ?? undefined,
-        status:"en attente", type:"vente", operatorId:currentUser.id, operatorNom:currentUser.nom, operatorColor:currentUser.color,
+        status:"en attente", type:"vente", operatorId:editingInvoice?.operatorId ?? currentUser.id, operatorNom:editingInvoice?.operatorNom ?? currentUser.nom, operatorColor:editingInvoice?.operatorColor ?? currentUser.color, origin:editingInvoice?.origin ?? orderOrigin,
       };
-      onUpdate({ invoices:[...invoices, newInv] });
-      logAction("Commande PDV", `${newInv.id} · ${client} · ${fmt(saved.total)}`, "🛒");
+      onUpdate({ invoices:editingInvoice ? invoices.map(invoice => invoice.id === editingInvoice.id ? newInv : invoice) : [...invoices, newInv] });
+      if (!editingInvoice) logAction("Commande PDV", `${newInv.id} · ${client} · ${fmt(saved.total)}`, "🛒");
       setTimeout(() => doPrint(buildOrderTicketHtml(newInv, boutique, currentUser.nom), "Bon de commande"), 200);
-      if (selectedClientId != null && newInv.clientId != null) {
+      if (!editingInvoice && orderOrigin === "client_profile" && selectedClientId != null && newInv.clientId != null) {
         onOrderCreated?.(newInv.clientId, newInv.id);
         return;
       }
+      setEditingInvoice(null);
       setLastInv(newInv);
       setDone(true);
     } catch (error) {
@@ -549,6 +577,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
                   <div className="flex-1 min-w-0">
                     <p className="font-black text-base truncate">{inv.client}</p>
                     <p className="text-sm text-muted-foreground">{inv.id} · {(inv.lines?.length ?? 0)} article(s)</p>
+                    {inv.origin === "client_profile" && <p className="mt-1 text-[11px] font-bold" style={{color:"#0e7490"}}>Créée depuis Clients</p>}
                   </div>
                   <div className="text-right flex-shrink-0">
                     <p className="font-black text-lg" style={{ color:SEM.warning.accent, fontFamily:"'Nunito', sans-serif" }}>{fmt(inv.montant)}</p>
@@ -570,18 +599,22 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
                     className="flex-1 flex items-center justify-center gap-1.5 py-3 font-bold text-sm active:scale-95" style={{ color:"#6b7280" }}>
                     🖨 Réimprimer
                   </button>
-                  {canManagePendingOrder(inv) ? <>
-                    <button onClick={()=>handleEditOrder(inv)} disabled={!!cancelBusy}
+                  {inv.origin === "client_profile" ? (
+                    <div className="flex-[2] flex items-center justify-center px-3 text-center text-xs font-medium text-muted-foreground" title="Cette commande a été créée depuis Clients, gérez-la depuis cet écran.">
+                      Créée depuis Clients — gérez-la depuis la fiche client
+                    </div>
+                  ) : (canEditPendingOrder(inv) || canCancelOrder(inv)) ? <>
+                    {canEditPendingOrder(inv) && <button onClick={()=>handleEditOrder(inv)} disabled={!!cancelBusy}
                       className="flex-1 flex items-center justify-center gap-1.5 py-3 font-bold text-sm active:scale-95" style={{ color:POS_COLOR }}>
                       <Pencil size={14}/> Modifier
-                    </button>
-                    <button onClick={()=>handleCancelOrder(inv)} disabled={cancelBusy===inv.id}
+                    </button>}
+                    {canCancelOrder(inv) && <button onClick={()=>askCancelOrder(inv)} disabled={cancelBusy===inv.id}
                       className="flex-1 flex items-center justify-center gap-1.5 py-3 font-bold text-sm active:scale-95" style={{ color:"#ef4444" }}>
                       {cancelBusy===inv.id ? "…" : <><Trash2 size={14}/> Annuler</>}
-                    </button>
+                    </button>}
                   </> : (
                     <div className="flex-[2] flex items-center justify-center px-3 text-center text-xs font-medium text-muted-foreground">
-                      Créée par {inv.operatorNom ?? "un autre utilisateur"}
+                      {canManagePendingOrder(inv) ? "Droit d’annulation requis" : `Créée par ${inv.operatorNom ?? "un autre utilisateur"}`}
                     </div>
                   )}
                 </div>
@@ -611,7 +644,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
 
       {/* Checkout modal */}
       {checkoutOpen && (
-        <Modal title="Nouvelle commande" color={POS_COLOR} onClose={resetCheckout}>
+        <Modal title={editingInvoice ? `Modifier ${editingInvoice.id}` : "Nouvelle commande"} color={POS_COLOR} onClose={resetCheckout}>
           {!done ? (<>
             <div className="space-y-2">
               {cart.map(item => {
@@ -676,7 +709,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
               <input value={clientTel} onChange={e=>{ const v=e.target.value; setClientTel(v.startsWith("+221 ")?v:"+221 "); setSelectedClientId(undefined); }} placeholder="+221 77 000 0000" className={inputCls} onKeyDown={e=>e.key==="Enter"&&checkout()}/>
             </Field>
             <button disabled={submittingOrder || cart.length===0} onClick={checkout} className="w-full py-4 rounded-2xl font-black text-base flex items-center justify-center gap-2 active:scale-95 disabled:opacity-60" style={{ background:POS_COLOR, color:"#fff", fontFamily:"'Nunito', sans-serif" }}>
-              <ClipboardList size={18}/> {submittingOrder ? "Enregistrement…" : "Enregistrer la commande"}
+              <ClipboardList size={18}/> {submittingOrder ? "Enregistrement…" : editingInvoice ? "Enregistrer les modifications" : "Enregistrer la commande"}
             </button>
           </>) : (<>
             <div className="flex flex-col items-center gap-3 py-5 rounded-2xl" style={{ background:SEM.success.bg }}>
@@ -711,6 +744,20 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
               + Nouvelle commande
             </button>
           </>)}
+        </Modal>
+      )}
+
+      {cancelConfirmation && (
+        <Modal title="Annuler la commande" color="#ef4444" onClose={()=>{ if (!cancelBusy) setCancelConfirmation(null); }}>
+          <p className="text-sm text-muted-foreground">Es-tu sûr de vouloir annuler cette commande&nbsp;? Elle restera conservée dans l’historique avec le statut <strong>Annulée</strong>.</p>
+          <div className="mt-3 rounded-xl bg-muted px-3 py-2 text-sm font-bold">{cancelConfirmation.id} · {cancelConfirmation.client} · {fmt(cancelConfirmation.montant)}</div>
+          <Field label="MOTIF D’ANNULATION (optionnel)" color="#ef4444">
+            <input value={cancelReason} onChange={event=>setCancelReason(event.target.value)} placeholder="Ex. erreur de saisie, doublon, client a annulé" className={inputCls}/>
+          </Field>
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            <button type="button" onClick={()=>setCancelConfirmation(null)} disabled={!!cancelBusy} className="rounded-xl bg-muted py-3 text-sm font-black disabled:opacity-50">Conserver</button>
+            <button type="button" onClick={()=>void handleCancelOrder(cancelConfirmation)} disabled={!!cancelBusy} className="rounded-xl bg-red-600 py-3 text-sm font-black text-white disabled:opacity-50">{cancelBusy ? "Annulation…" : "Oui, annuler"}</button>
+          </div>
         </Modal>
       )}
 

@@ -26,6 +26,14 @@ let jwtClockSkewWaitInFlight: Promise<void> | null = null;
 type AppSessionRecoveryHandler = () => Promise<boolean>;
 let appSessionRecoveryHandler: AppSessionRecoveryHandler | null = null;
 
+// JSON and JavaScript number inputs can carry a binary floating-point tail.
+// The database still validates every amount, but sending currency at centime
+// precision keeps the client and server on the same financial value.
+function normalizeMoney(value: number): number {
+  const amount = Number(value);
+  return Number.isFinite(amount) ? Math.round((amount + Number.EPSILON) * 100) / 100 : 0;
+}
+
 /**
  * Lets the active application screen restore an expired server-side app
  * session before a protected request is rejected by RLS. The handler is kept
@@ -810,9 +818,13 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string): Promise<T | n
           date:day(i.invoice_date),
           dateRaw:i.invoice_date,
           dueDate:i.due_date ?? undefined,
-          status:paid >= Number(i.montant) ? "payé" : paid > 0 ? "acompte" : i.status === "en_attente" ? "en attente" : i.status,
+          status:i.status === "annulée" ? "annulée" : paid >= Number(i.montant) ? "payé" : paid > 0 ? "acompte" : i.status === "en_attente" ? "en attente" : i.status,
           type:i.type,
           returnOfInvoiceId:i.return_of_invoice_id ?? undefined,
+          origin:i.origin === "client_profile" ? "client_profile" : "pos",
+          cancelReason:i.cancel_reason ?? undefined,
+          cancelledAt:i.cancelled_at ?? undefined,
+          cancelledBy:i.cancelled_by ?? undefined,
           operatorId:i.operator_id ?? undefined,
           operatorNom:i.operator_nom_snapshot ?? operator.nom ?? undefined,
           operatorColor:operator.color ?? undefined,
@@ -1141,7 +1153,7 @@ export async function loadBoutiqueSyncPatch(boutiqueId: string, sourceEvents: Bo
     const paid = invoicePayments.length ? invoicePayments.reduce((sum, payment) => sum + Number(payment.amount), 0) : Number(row.acompte);
     const operator = userById.get(row.operator_id) ?? {};
     const client = clientById.get(row.client_id);
-    return { id:row.id, clientId:row.client_id ?? undefined, client:row.client_nom ?? "Client comptoir", clientTel:row.client_tel ?? undefined, clientType:row.client_type_snapshot ?? client?.type ?? undefined, clientEmailSnapshot:row.client_email_snapshot ?? undefined, clientAdresseSnapshot:row.client_adresse_snapshot ?? undefined, clientVilleSnapshot:row.client_ville_snapshot ?? undefined, clientTypeSnapshot:row.client_type_snapshot ?? undefined, boutiqueNomSnapshot:row.boutique_nom_snapshot ?? undefined, boutiqueVilleSnapshot:row.boutique_ville_snapshot ?? undefined, boutiqueAdresseSnapshot:row.boutique_adresse_snapshot ?? undefined, boutiqueTelSnapshot:row.boutique_tel_snapshot ?? undefined, boutiqueEmailSnapshot:row.boutique_email_snapshot ?? undefined, boutiqueLogoSnapshot:row.boutique_logo_snapshot ?? undefined, montant:Number(row.montant), acompte:paid, date:syncDate(row.invoice_date), dateRaw:row.invoice_date, dueDate:row.due_date ?? undefined, status:paid >= Number(row.montant) ? "payé" : paid > 0 ? "acompte" : row.status === "en_attente" ? "en attente" : row.status, type:row.type, returnOfInvoiceId:row.return_of_invoice_id ?? undefined, operatorId:row.operator_id ?? undefined, operatorNom:row.operator_nom_snapshot ?? operator.nom ?? undefined, operatorColor:operator.color ?? undefined, paymentMethod:row.payment_method ?? undefined, payments:invoicePayments.map(payment => ({ id:payment.id, amount:Number(payment.amount), paymentMethod:payment.payment_method, paidAt:payment.paid_at, recordedAt:payment.recorded_at, operatorId:payment.operator_id ?? undefined, operatorName:payment.operator_name, batchId:payment.batch_id, source:payment.source })), lines:(row.invoice_lines ?? []).map((line:any) => ({ productId:line.product_id, nom:line.nom, qty:Number(line.qty), unit:line.unit ?? "unité", prixUnit:Number(line.prix_unit), prixAchat:line.prix_achat != null ? Number(line.prix_achat) : undefined, sellUnit:line.sell_unit ?? undefined, sellQty:line.sell_qty ? Number(line.sell_qty) : undefined })) };
+    return { id:row.id, clientId:row.client_id ?? undefined, client:row.client_nom ?? "Client comptoir", clientTel:row.client_tel ?? undefined, clientType:row.client_type_snapshot ?? client?.type ?? undefined, clientEmailSnapshot:row.client_email_snapshot ?? undefined, clientAdresseSnapshot:row.client_adresse_snapshot ?? undefined, clientVilleSnapshot:row.client_ville_snapshot ?? undefined, clientTypeSnapshot:row.client_type_snapshot ?? undefined, boutiqueNomSnapshot:row.boutique_nom_snapshot ?? undefined, boutiqueVilleSnapshot:row.boutique_ville_snapshot ?? undefined, boutiqueAdresseSnapshot:row.boutique_adresse_snapshot ?? undefined, boutiqueTelSnapshot:row.boutique_tel_snapshot ?? undefined, boutiqueEmailSnapshot:row.boutique_email_snapshot ?? undefined, boutiqueLogoSnapshot:row.boutique_logo_snapshot ?? undefined, montant:Number(row.montant), acompte:paid, date:syncDate(row.invoice_date), dateRaw:row.invoice_date, dueDate:row.due_date ?? undefined, status:row.status === "annulée" ? "annulée" : paid >= Number(row.montant) ? "payé" : paid > 0 ? "acompte" : row.status === "en_attente" ? "en attente" : row.status, type:row.type, returnOfInvoiceId:row.return_of_invoice_id ?? undefined, origin:row.origin === "client_profile" ? "client_profile" : "pos", cancelReason:row.cancel_reason ?? undefined, cancelledAt:row.cancelled_at ?? undefined, cancelledBy:row.cancelled_by ?? undefined, operatorId:row.operator_id ?? undefined, operatorNom:row.operator_nom_snapshot ?? operator.nom ?? undefined, operatorColor:operator.color ?? undefined, paymentMethod:row.payment_method ?? undefined, payments:invoicePayments.map(payment => ({ id:payment.id, amount:Number(payment.amount), paymentMethod:payment.payment_method, paidAt:payment.paid_at, recordedAt:payment.recorded_at, operatorId:payment.operator_id ?? undefined, operatorName:payment.operator_name, batchId:payment.batch_id, source:payment.source })), lines:(row.invoice_lines ?? []).map((line:any) => ({ productId:line.product_id, nom:line.nom, qty:Number(line.qty), unit:line.unit ?? "unité", prixUnit:Number(line.prix_unit), prixAchat:line.prix_achat != null ? Number(line.prix_achat) : undefined, sellUnit:line.sell_unit ?? undefined, sellQty:line.sell_qty ? Number(line.sell_qty) : undefined })) };
   });
   if (allCharges.length) patch.charges = allCharges.map(row => ({ id:row.id, label:row.label, montant:Number(row.montant), date:syncDate(row.charge_date), dateRaw:row.charge_date, categorie:row.categorie ?? "Autre", recurrence:row.recurrence ?? "unique", note:row.note ?? undefined, fournisseur:row.fournisseur ?? undefined, supplierId:row.supplier_id ?? undefined, paymentMethod:row.payment_method ?? undefined, operatorId:row.operator_id ?? undefined, operatorName:userById.get(row.operator_id)?.nom ?? undefined, status:row.status ?? "paid", paidAmount:Number(row.paid_amount ?? row.montant), transferId:row.transfer_id ?? undefined, source:row.source ?? "manual", dueDate:row.due_date ?? undefined, stockEntryId:row.stock_entry_id ?? undefined }));
   if (sessions.length) patch.caisseSessions = sessions.map(row => ({ id:row.id, openedAt:row.opened_at, closedAt:row.closed_at ?? undefined, fondDeCaisse:Number(row.fond_ouverture ?? 0), openedBy:row.opened_by ?? "", closedBy:row.closed_by ?? "" }));
@@ -1229,11 +1241,19 @@ export async function saveAuthSettings(boutiqueId: string, settings: { lockMinut
   });
 }
 
-export async function createSale(params: { boutiqueId: string; clientId?: number; client: string; clientTel?: string; paymentMethod?: string; lines: Array<{ productId:number; nom:string; qty:number; unit:string; prixUnit:number; sellUnit?:string; sellQty?:number }> }) {
+export async function createSale(params: { boutiqueId: string; clientId?: number; client: string; clientTel?: string; paymentMethod?: string; origin?: "pos"|"client_profile"; lines: Array<{ productId:number; nom:string; qty:number; unit:string; prixUnit:number; sellUnit?:string; sellQty?:number }> }) {
   return dataRequest<{ invoice_id:string; client_id:number|null; total:number; due_date?:string|null }>("rpc/create_sale", {
     method: "POST",
     headers: { Prefer: "return=representation" },
-    body: JSON.stringify({ p_boutique_id:params.boutiqueId, p_idempotency_key:crypto.randomUUID(), p_client_nom:params.client, p_client_tel:params.clientTel ?? null, p_lines:params.lines, p_payment_method:params.paymentMethod ?? null, p_client_id:params.clientId ?? null }),
+    body: JSON.stringify({ p_boutique_id:params.boutiqueId, p_idempotency_key:crypto.randomUUID(), p_client_nom:params.client, p_client_tel:params.clientTel ?? null, p_lines:params.lines, p_payment_method:params.paymentMethod ?? null, p_client_id:params.clientId ?? null, p_origin:params.origin ?? "pos" }),
+  });
+}
+
+/** Changes an unpaid order in place. Its invoice id and sequential number remain immutable. */
+export async function updatePendingInvoice(params: { boutiqueId:string; invoiceId:string; clientId?:number; client:string; clientTel?:string; lines:Array<{productId:number;nom:string;qty:number;unit:string;prixUnit:number;sellUnit?:string;sellQty?:number}> }) {
+  return dataRequest<{ invoice_id:string; client_id:number|null; total:number; due_date?:string|null; updated_at:string }>("rpc/update_pending_sale", {
+    method:"POST", headers:{ Prefer:"return=representation" },
+    body:JSON.stringify({ p_boutique_id:params.boutiqueId, p_invoice_id:params.invoiceId, p_idempotency_key:crypto.randomUUID(), p_client_id:params.clientId ?? null, p_client_nom:params.client, p_client_tel:params.clientTel ?? null, p_lines:params.lines }),
   });
 }
 
@@ -1254,7 +1274,7 @@ export async function closeCaisseSession(params: { boutiqueId:string; sessionId:
 export async function recordPayment(params: { boutiqueId:string; invoiceId:string; amount:number; paymentMethod:string }) {
   return dataRequest<{ invoice_id:string; acompte:number; applied_amount:number; status:string; stock_deducted:boolean; payment:{ id:number; amount:number; payment_method:string; paid_at:string; operator_id:string; operator_name:string; batch_id:string; source:"invoice" } }>("rpc/record_payment", {
     method:"POST", headers:{ Prefer:"return=representation" },
-    body:JSON.stringify({ p_boutique_id:params.boutiqueId, p_invoice_id:params.invoiceId, p_idempotency_key:crypto.randomUUID(), p_amount:params.amount, p_payment_method:params.paymentMethod }),
+    body:JSON.stringify({ p_boutique_id:params.boutiqueId, p_invoice_id:params.invoiceId, p_idempotency_key:crypto.randomUUID(), p_amount:normalizeMoney(params.amount), p_payment_method:params.paymentMethod }),
   });
 }
 
@@ -1265,7 +1285,7 @@ export async function recordMultiPayment(params: { boutiqueId:string; invoiceId:
       p_boutique_id:params.boutiqueId,
       p_invoice_id:params.invoiceId,
       p_idempotency_key:crypto.randomUUID(),
-      p_payments:params.payments,
+      p_payments:params.payments.map(payment => ({ ...payment, amount:normalizeMoney(payment.amount) })),
     }),
   });
 }
@@ -1318,7 +1338,7 @@ export async function recordClientAdvance(params: { boutiqueId:string; clientId:
       p_boutique_id:params.boutiqueId,
       p_client_id:params.clientId,
       p_idempotency_key:crypto.randomUUID(),
-      p_amount:params.amount,
+      p_amount:normalizeMoney(params.amount),
       p_payment_method:params.paymentMethod,
       p_payment_date:params.paymentDate,
       p_note:params.note ?? null,
@@ -1327,13 +1347,15 @@ export async function recordClientAdvance(params: { boutiqueId:string; clientId:
 }
 
 /** Cancel a pending (unpaid) sale atomically. The database enforces the caller's scope. */
-export async function cancelPendingInvoice(params: { boutiqueId:string; invoiceId:string }) {
-  return dataRequest<{ invoice_id:string; deleted:boolean }>("rpc/cancel_pending_sale", {
+export async function cancelPendingInvoice(params: { boutiqueId:string; invoiceId:string; reason?:string; originContext?:"pos"|"client_profile" }) {
+  return dataRequest<{ invoice_id:string; status:"annulée"; cancelled_at:string; cancelled_by:string|null; cancel_reason:string|null }>("rpc/cancel_pending_sale", {
     method:"POST",
     headers:{ Prefer:"return=representation" },
     body:JSON.stringify({
       p_boutique_id:params.boutiqueId,
       p_invoice_id:params.invoiceId,
+      p_reason:params.reason?.trim() || null,
+      p_origin_context:params.originContext ?? "pos",
     }),
   });
 }

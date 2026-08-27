@@ -9,7 +9,7 @@ import { buildReceiptHtml, openInvoicePDF, buildInvoiceMessage, generateInvoiceP
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
-import { formatPreciseDateTime, invoicePaidAmount, invoiceRemainingAmount, invoicePaymentEvents } from "../utils/payments";
+import { formatPreciseDateTime, invoicePaidAmount, invoiceRemainingAmount, invoicePaymentEvents, moneyExceeds, roundMoney } from "../utils/payments";
 import { getDefaultSaleUnit, getLastSalePrice, getSaleUnitOptions, toBaseSaleQty } from "../utils/sales";
 
 // ─── SHARE INVOICE MODAL ──────────────────────────────────────────────────────
@@ -419,16 +419,16 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
   async function submitEncaiss() {
     if (!canCollectPayment || !encaissInv || submittingPayment) return;
     const validSplit = encaissSplit.filter(s => s.amount > 0);
-    const totalSplit = validSplit.reduce((s, e) => s + e.amount, 0);
+    const totalSplit = roundMoney(validSplit.reduce((s, e) => s + e.amount, 0));
     if (validSplit.length === 0 || totalSplit <= 0) return;
-    if (totalSplit > invoiceRemainingAmount(encaissInv)) {
+    if (moneyExceeds(totalSplit, invoiceRemainingAmount(encaissInv))) {
       alert("Le total des paiements dépasse le reste à encaisser.");
       return;
     }
     const requestedAdvance = validSplit
       .filter(entry => entry.method === "Avoir client")
       .reduce((sum, entry) => sum + entry.amount, 0);
-    if (requestedAdvance > availableClientAdvance(encaissInv.clientId)) {
+    if (moneyExceeds(requestedAdvance, availableClientAdvance(encaissInv.clientId))) {
       alert("L'avoir disponible a changé. Actualisez puis réessayez.");
       return;
     }
@@ -673,7 +673,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
     const dueAt = new Date(`${invoice.dueDate.slice(0, 10)}T23:59:59`);
     return Number.isFinite(dueAt.getTime()) && dueAt.getTime() < Date.now();
   };
-  const effectiveStatus = (invoice: Invoice): InvoiceStatus => invoiceIsOverdue(invoice) ? "en retard" : invoice.status;
+  const effectiveStatus = (invoice: Invoice): InvoiceStatus => invoice.status === "annulée" ? "annulée" : invoiceIsOverdue(invoice) ? "en retard" : invoice.status;
   const UNPAID: InvoiceStatus[] = ["en attente","acompte","en retard"];
   // The day filter is bypassed while searching so the search reaches every day.
   const dayActive = dayFilterActive && !invSearch.trim();
@@ -690,6 +690,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
     {id:"payé",     label:"Payé ✓",   color:SEM.success.accent},
     {id:"en attente",label:"Attente", color:SEM.neutral.accent},
     {id:"en retard",label:"Retard",   color:SEM.danger.accent},
+    {id:"annulée", label:"Annulées", color:SEM.danger.accent},
   ];
 
   return (
@@ -756,9 +757,11 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
         {filtered.map(inv=>{
           const [tc,bc]=invBadge(effectiveStatus(inv));
           const isReturn = inv.type === "Retour";
+          const isCancelled = inv.status === "annulée";
+          const canCollectThisInvoice = canCollectPayment && !isReturn && !isCancelled && invoiceRemainingAmount(inv) > 0;
           return (
             <div key={inv.id} className="bg-card rounded-2xl p-4 border border-border" style={isReturn?{borderColor:"#ef444433"}:{}}>
-              <div className="w-full text-left cursor-pointer" onClick={()=>{ if (canCollectPayment && !isReturn && inv.status !== "payé") { setEncaissInv(inv); setEncaissSplit([{ method:"Espèces", amount:invoiceRemainingAmount(inv) }]); } else { setDetailInv(inv); } }}>
+              <div className="w-full text-left cursor-pointer" onClick={()=>{ if (canCollectThisInvoice) { setEncaissInv(inv); setEncaissSplit([{ method:"Espèces", amount:invoiceRemainingAmount(inv) }]); } else { setDetailInv(inv); } }}>
                 <div className="flex items-start justify-between">
                   <div>
                     <div className="flex items-center gap-2">
@@ -770,7 +773,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
                   </div>
                   <div className="flex items-center gap-2 ml-3">
                     <div className="text-right"><p className="text-base font-black" style={{ fontFamily:"'Nunito', sans-serif" }}>{fmt(inv.montant)}</p><span className="text-xs px-2 py-0.5 rounded-full font-bold capitalize inline-block mt-0.5" style={{ background:bc,color:tc }}>{effectiveStatus(inv)}</span></div>
-                    {canCollectPayment && !isReturn && inv.status !== "payé" && (
+                    {canCollectThisInvoice && (
                       <button onClick={e=>{e.stopPropagation();setEncaissInv(inv);setEncaissSplit([{ method:"Espèces", amount:invoiceRemainingAmount(inv) }]);}} className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background:SEM.success.bg }} title="Encaisser">
                         <Wallet size={15} style={{ color:SEM.success.text }}/>
                       </button>
@@ -873,7 +876,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
         })()}
 
         {/* All payments use the same transactional RPC and cashier trace. */}
-        {canCollectPayment && detailInv.status !== "payé" && (
+        {canCollectPayment && detailInv.status !== "payé" && detailInv.status !== "annulée" && detailInv.type !== "Retour" && invoiceRemainingAmount(detailInv) > 0 && (
           <button onClick={()=>{setEncaissInv(detailInv);setEncaissSplit([{method:"Espèces",amount:invoiceRemainingAmount(detailInv)}]);setDetailInv(null);}}
             className="w-full py-4 rounded-2xl font-black text-base flex items-center justify-center gap-2 active:scale-95"
             style={{ background:SEM.success.accent, color:"#fff", fontFamily:"'Nunito', sans-serif" }}>

@@ -3,9 +3,9 @@
 export type Screen         = "login" | "superadmin" | "boutique-select" | "app";
 export type Tab            = "dashboard" | "stock" | "fournisseurs" | "clients" | "factures" | "pos" | "charges" | "compta" | "admin" | "inventaire" | "transferts";
 export type CartItem       = { productId: number; nom: string; img: string; unit: string; qty: number; prixUnit: number; sellUnit?: string; sellQty?: number };
-export type InvoiceStatus  = "payé" | "acompte" | "en attente" | "en retard";
+export type InvoiceStatus  = "payé" | "acompte" | "en attente" | "en retard" | "annulée";
 export type PaymentMethod  = "Espèces" | "Wave" | "Orange Money" | "Autre" | "Avoir client";
-export type Permission     = "dashboard" | "stock" | "fournisseurs" | "clients" | "factures" | "remboursement" | "charges" | "compta" | "vente" | "inventaire" | "marges" | "encaissement_vente";
+export type Permission     = "dashboard" | "stock" | "fournisseurs" | "clients" | "factures" | "remboursement" | "charges" | "compta" | "vente" | "inventaire" | "marges" | "encaissement_vente" | "annulation_commande";
 export type ChargeCategorie = "Loyer" | "Salaires" | "Électricité" | "Transport" | "Achat stock" | "Marketing" | "Taxes" | "Autre";
 export type ClientType     = "B2C" | "B2B" | "Grossiste";
 export type TransferStatus = "en_attente" | "accepté" | "refusé" | "annulé";
@@ -86,6 +86,10 @@ export type Invoice    = {
   status: InvoiceStatus; type: string; returnOfInvoiceId?: string;
   operatorId?: string; operatorNom?: string; operatorColor?: string;
   paymentMethod?: PaymentMethod; paymentSplit?: PaymentEntry[];
+  origin?: "pos" | "client_profile";
+  cancelReason?: string;
+  cancelledAt?: string;
+  cancelledBy?: string;
 };
 
 export type ProductParam = { productId: number; nbPiecesParLot: number; longueurParPiece: number; unitVente: string };

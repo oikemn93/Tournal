@@ -156,6 +156,7 @@ export function invBadge(s: InvoiceStatus): [string,string] {
     "acompte":    [SEM.warning.text, SEM.warning.bg],
     "en attente": [SEM.neutral.text, SEM.neutral.bg],
     "en retard":  [SEM.danger.text,  SEM.danger.bg],
+    "annulée":    [SEM.danger.text,  SEM.danger.bg],
   } as Record<InvoiceStatus,[string,string]>)[s] ?? [SEM.neutral.text, SEM.neutral.bg];
 }
 
