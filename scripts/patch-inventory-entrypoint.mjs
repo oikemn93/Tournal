@@ -11,10 +11,10 @@ if (!source.includes(inventoryImport)) {
   source = source.replace(importAnchor, `${importAnchor}\n${inventoryImport}`);
 }
 
-const legacyRender = "            <InventaireView\n";
-const occurrences = source.split(legacyRender).length - 1;
+const legacyTag = "<InventaireView";
+const occurrences = source.split(legacyTag).length - 1;
 if (occurrences !== 1) throw new Error(`Inventory patch: expected one legacy render, found ${occurrences}`);
-source = source.replace(legacyRender, "            <RelationalInventoryView\n");
+source = source.replace(legacyTag, "<RelationalInventoryView");
 
 fs.writeFileSync(path, source);
 console.log("Inventory entrypoint patched: relational InventoryView is now active.");
