@@ -1317,6 +1317,16 @@ export async function applyClientAdvanceToInvoice(params: { boutiqueId:string; i
   });
 }
 
+export async function applyClientAdvanceFifo(params: { boutiqueId:string; clientId:number; amount?:number }) {
+  return dataRequest<{
+    client_id:number; requested_amount:number; applied_amount:number; remaining_due:number; remaining_advance:number;
+    allocations:Array<{ invoice_id:string; amount:number; acompte:number; status:string; stock_deducted:boolean; payment:{ id:number; amount:number; payment_method:string; paid_at:string; operator_id:string; operator_name:string; batch_id:string; source:"client_advance" }; advance_allocations:Array<{advance_id:number;amount:number}> }>;
+  }>("rpc/apply_client_advance_fifo", {
+    method:"POST", headers:{ Prefer:"return=representation" },
+    body:JSON.stringify({ p_boutique_id:params.boutiqueId, p_client_id:params.clientId, p_idempotency_key:crypto.randomUUID(), p_amount:params.amount ?? null }),
+  });
+}
+
 export async function recordClientPayment(params: { boutiqueId:string; clientId:number; amount:number; paymentMethod:string; paymentDate:string }) {
   return dataRequest<{
     client_id:number; requested_amount:number; applied_amount:number; advance_amount:number; remaining_due:number;

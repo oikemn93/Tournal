@@ -9,7 +9,7 @@ import { getSiblings } from "../utils/inventory";
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
-import { applyClientAdvanceToInvoice, cancelPendingInvoice, createClient, deleteClientIfUnused, recordClientPayment, updateClientContact, updateClientPaymentTerms, updateClientProfile, WHOLESALE_MARKER } from "../../lib/api";
+import { applyClientAdvanceFifo, applyClientAdvanceToInvoice, cancelPendingInvoice, createClient, deleteClientIfUnused, recordClientPayment, updateClientContact, updateClientPaymentTerms, updateClientProfile, WHOLESALE_MARKER } from "../../lib/api";
 import { PhoneField } from "../components/PhoneField";
 import { formatPreciseDateTime, invoicePaidAmount, invoiceRemainingAmount } from "../utils/payments";
 import { openInvoicePDF, openOrderDocument, openReceiptPreview } from "../utils/invoice";
@@ -239,6 +239,41 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
       if (requested <= 0) return;
       setSubmittingPayment(true);
       try {
+        if (paymentMethod === "Avoir client") {
+          if (totalAvoir <= 0) throw new Error("Aucun avoir client disponible");
+          if (requested > totalAvoir + 0.01) throw new Error(`Avoir disponible insuffisant : ${fmt(totalAvoir)}`);
+          if (requested > totalImpayé + 0.01) throw new Error(`Le montant dépasse le solde dû : ${fmt(totalImpayé)}`);
+          const creditResult = await applyClientAdvanceFifo({ boutiqueId:boutique.id, clientId:c.id, amount:requested });
+          const invoiceAllocation = new Map(creditResult.allocations.map(allocation => [allocation.invoice_id, allocation]));
+          const advanceAllocation = new Map<number, number>();
+          creditResult.allocations.forEach(allocation => allocation.advance_allocations.forEach(item => advanceAllocation.set(item.advance_id, (advanceAllocation.get(item.advance_id) ?? 0) + item.amount)));
+          const updatedInvoices = boutique.invoices.map((invoice): Invoice => {
+            const allocation = invoiceAllocation.get(invoice.id);
+            if (!allocation) return invoice;
+            return {
+              ...invoice,
+              clientId:c.id,
+              acompte:allocation.acompte,
+              status:allocation.status === "payée" ? "payé" : "acompte",
+              paymentMethod:"Avoir client",
+              payments:[...(invoice.payments ?? []), {
+                id:allocation.payment.id, amount:allocation.payment.amount, paymentMethod:"Avoir client", paidAt:allocation.payment.paid_at,
+                operatorId:allocation.payment.operator_id, operatorName:allocation.payment.operator_name, batchId:allocation.payment.batch_id, source:"client_advance",
+              }],
+            };
+          });
+          onUpdate({
+            invoices:updatedInvoices,
+            clientAdvances:(boutique.clientAdvances ?? []).map(advance => ({ ...advance, allocatedAmount:(advance.allocatedAmount ?? 0) + (advanceAllocation.get(advance.id) ?? 0) })),
+          });
+          logAction("Avoir utilisé", `${c.nom} · ${fmt(creditResult.applied_amount)} · ${creditResult.allocations.length} facture(s)`, "🎟️");
+          setPaymentSummary({ applied:creditResult.applied_amount, advance:0 });
+          setPaymentDone(true);
+          setTimeout(() => {
+            setPaymentModal(false); setPaymentAmount(""); setPaymentMethod("Espèces"); setPaymentDone(false); setPaymentSummary(null); setSubmittingPayment(false);
+          }, 1000);
+          return;
+        }
         const result = await recordClientPayment({
           boutiqueId:boutique.id,
           clientId:c.id,
@@ -593,9 +628,13 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
             <input value={paymentAmount} onChange={e=>setPaymentAmount(e.target.value)} type="number" min="0" className={inputCls}/>
           </Field>
           <Field label="MODE DE PAIEMENT">
-            <div className="grid grid-cols-2 gap-2">{PAYMENT_METHODS.map(method=><button key={method} onClick={()=>setPaymentMethod(method)} className="py-2.5 rounded-xl text-xs font-bold" style={{background:paymentMethod===method?CC:"#EEE9D8",color:paymentMethod===method?"#fff":"#6b7280"}}>{PM_ICON[method]} {method}</button>)}</div>
+            <div className="grid grid-cols-2 gap-2">
+              {PAYMENT_METHODS.map(method=><button key={method} onClick={()=>setPaymentMethod(method)} className="py-2.5 rounded-xl text-xs font-bold" style={{background:paymentMethod===method?CC:"#EEE9D8",color:paymentMethod===method?"#fff":"#6b7280"}}>{PM_ICON[method]} {method}</button>)}
+              {totalAvoir>0&&<button type="button" onClick={()=>{setPaymentMethod("Avoir client");setPaymentAmount(String(Math.min(totalAvoir,totalImpayé)));}} className="py-2.5 rounded-xl text-xs font-bold" style={{background:paymentMethod==="Avoir client"?SEM.success.accent:SEM.success.bg,color:paymentMethod==="Avoir client"?"#fff":SEM.success.accent}}>🎟️ Avoir client · {fmt(totalAvoir)}</button>}
+            </div>
+            {paymentMethod==="Avoir client"&&<p className="mt-2 rounded-xl px-3 py-2 text-xs font-semibold" style={{background:SEM.success.bg,color:SEM.success.accent}}>Cet avoir a déjà été encaissé auparavant. Son utilisation règle les factures les plus anciennes sans créer une nouvelle entrée de caisse. Maximum utilisable : {fmt(Math.min(totalAvoir,totalImpayé))}.</p>}
           </Field>
-          <Field label="DATE DU PAIEMENT"><input type="date" value={paymentDate} onChange={e=>setPaymentDate(e.target.value)} className={inputCls}/></Field>
+          {paymentMethod!=="Avoir client"&&<Field label="DATE DU PAIEMENT"><input type="date" value={paymentDate} onChange={e=>setPaymentDate(e.target.value)} className={inputCls}/></Field>}
           {paymentDone ? <div className="rounded-2xl p-4 text-center" style={{background:SEM.success.bg,color:SEM.success.accent}}><div className="flex items-center justify-center gap-2 font-black"><CheckCircle size={20}/> Versement enregistré</div>{paymentSummary&&<p className="mt-1 text-xs font-semibold">{paymentSummary.applied>0&&`${fmt(paymentSummary.applied)} réglé`}{paymentSummary.applied>0&&paymentSummary.advance>0&&" · "}{paymentSummary.advance>0&&`${fmt(paymentSummary.advance)} ajouté à l'avoir`}</p>}</div> : <SubmitBtn color={SEM.success.accent} label={submittingPayment?"Enregistrement…":`Enregistrer ${fmt(Number(paymentAmount)||0)}`} onClick={submitClientPayment} disabled={submittingPayment||!Number(paymentAmount)}/>}
         </Modal>}
         {termsModalClient&&<Modal title="Délai de paiement client" color={CC} onClose={()=>!savingTerms&&setTermsModalClient(null)}>
@@ -614,7 +653,8 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
             <button type="button" onClick={()=>openReceiptPreview(viewedInvoice,boutique,currentUser.nom)} className="rounded-xl border border-border bg-card py-3 px-2 text-xs font-black">🧾 Ticket caisse</button>
             {viewedInvoice.type.toLowerCase() !== "retour" && <button type="button" onClick={()=>openOrderDocument(viewedInvoice,boutique,boutique.clients)} className="rounded-xl border border-border bg-card py-3 px-2 text-xs font-black">📋 Bon de commande</button>}
           </div>
-          {canCollectPayment && invoiceRemainingAmount(viewedInvoice)>0 && <button type="button" onClick={()=>{setPaymentAmount(String(invoiceRemainingAmount(viewedInvoice)));setViewedInvoice(null);setPaymentSummary(null);setPaymentModal(true);}} className="w-full rounded-xl bg-emerald-600 py-3 text-sm font-black text-white">Enregistrer un versement</button>}
+          {canCollectPayment && invoiceRemainingAmount(viewedInvoice)>0 && totalAvoir>0 && <button type="button" onClick={()=>void applyAdvanceToInvoice(viewedInvoice)} disabled={!!applyingAdvanceInvoiceId} className="w-full rounded-xl py-3 text-sm font-black disabled:opacity-50" style={{background:SEM.success.bg,color:SEM.success.accent}}>🎟️ Utiliser l'avoir disponible ({fmt(Math.min(totalAvoir,invoiceRemainingAmount(viewedInvoice)))})</button>}
+          {canCollectPayment && invoiceRemainingAmount(viewedInvoice)>0 && <button type="button" onClick={()=>{setPaymentMethod("Espèces");setPaymentAmount(String(invoiceRemainingAmount(viewedInvoice)));setViewedInvoice(null);setPaymentSummary(null);setPaymentModal(true);}} className="w-full rounded-xl bg-emerald-600 py-3 text-sm font-black text-white">Enregistrer un versement</button>}
           <p className="text-xs text-muted-foreground">Le backend applique les versements en FIFO : les factures les plus anciennes sont réglées en premier et tout excédent devient un avoir.</p>
         </Modal>}
         {editClient&&<Modal title="Modifier le client" color={CC} onClose={()=>!savingClient&&setEditClient(null)}>
