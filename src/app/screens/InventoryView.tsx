@@ -9,9 +9,11 @@ import {
   cancelInventorySession,
   finalizeInventorySession,
   getInventorySession,
+  getFifoRealizedMargin,
   listInventorySessions,
   saveInventoryCount,
   startInventorySession,
+  type FifoRealizedMarginReport,
   type InventoryCountingDetail,
   type InventoryLine,
   type InventoryReport,
@@ -88,12 +90,15 @@ function liveReport(lines: InventoryLine[], drafts: Record<number, CountDraft>):
   }, { ...zeroReport });
 }
 
-function ReportCards({ report }: { report: InventoryReport }) {
+function ReportCards({ report, margin, loading }: { report: InventoryReport; margin: FifoRealizedMarginReport | null; loading: boolean }) {
   const variancePositive = report.varianceCost >= 0;
-  return <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+  const marginPositive = Number(margin?.realizedMargin ?? 0) >= 0;
+  return <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
     <div className="rounded-2xl border border-border bg-card p-4"><p className="text-xs font-bold text-muted-foreground">Valeur FIFO théorique</p><p className="mt-1 text-lg font-black">{money(report.theoreticalCost)}</p></div>
     <div className="rounded-2xl border border-border bg-card p-4"><p className="text-xs font-bold text-muted-foreground">Valeur FIFO inventoriée</p><p className="mt-1 text-lg font-black">{money(report.countedCost)}</p></div>
-    <div className="rounded-2xl border border-border bg-card p-4"><p className="text-xs font-bold text-muted-foreground">Écart de valorisation FIFO</p><p className={`mt-1 text-lg font-black ${variancePositive ? "text-emerald-700" : "text-red-700"}`}>{report.varianceCost > 0 ? "+" : ""}{money(report.varianceCost)}</p><p className="text-[11px] text-muted-foreground mt-1">Sans prix de vente théorique</p></div>
+    <div className="rounded-2xl border border-border bg-card p-4"><p className="text-xs font-bold text-muted-foreground">Écart de valorisation FIFO</p><p className={`mt-1 text-lg font-black ${variancePositive ? "text-emerald-700" : "text-red-700"}`}>{report.varianceCost > 0 ? "+" : ""}{money(report.varianceCost)}</p><p className="text-[11px] text-muted-foreground mt-1">Écart physique valorisé en FIFO</p></div>
+    <div className="rounded-2xl border border-border bg-card p-4"><p className="text-xs font-bold text-muted-foreground">Marge réalisée FIFO · 30 j</p><p className={`mt-1 text-lg font-black ${marginPositive ? "text-emerald-700" : "text-red-700"}`}>{loading ? "…" : money(Number(margin?.realizedMargin ?? 0))}</p><p className="text-[11px] text-muted-foreground mt-1">CA réel − coût FIFO consommé</p></div>
+    <div className="rounded-2xl border border-border bg-card p-4"><p className="text-xs font-bold text-muted-foreground">Taux de marge réel · 30 j</p><p className={`mt-1 text-lg font-black ${marginPositive ? "text-emerald-700" : "text-red-700"}`}>{loading ? "…" : `${number(Number(margin?.marginRate ?? 0))} %`}</p>{!loading && Number(margin?.unmatchedLines ?? 0) > 0 && <p className="text-[11px] text-amber-700 mt-1">{margin!.unmatchedLines} ligne(s) sans sortie stock rapprochée</p>}</div>
   </div>;
 }
 
@@ -114,6 +119,8 @@ export function InventoryView({ boutique, currentUser, onUpdate, logAction, init
   const [busy, setBusy] = useState(false);
   const [savingProductId, setSavingProductId] = useState<number | null>(null);
   const [historyLoading, setHistoryLoading] = useState(true);
+  const [marginReport, setMarginReport] = useState<FifoRealizedMarginReport | null>(null);
+  const [marginLoading, setMarginLoading] = useState(false);
   const [asOfLocal, setAsOfLocal] = useState(() => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); });
 
   const products = useMemo(() => boutique.products.slice().sort((a, b) => a.nom.localeCompare(b.nom)), [boutique.products]);
@@ -147,6 +154,27 @@ export function InventoryView({ boutique, currentUser, onUpdate, logAction, init
     if (session) resetDrafts(session);
   }, [session?.id]);
 
+  useEffect(() => {
+    let cancelled = false;
+    if (!session) {
+      setMarginReport(null);
+      setMarginLoading(false);
+      return () => { cancelled = true; };
+    }
+    const to = new Date(session.asOfAt);
+    const from = new Date(to);
+    from.setDate(from.getDate() - 30);
+    setMarginLoading(true);
+    void getFifoRealizedMargin({ boutiqueId: boutique.id, fromAt: from.toISOString(), toAt: to.toISOString() })
+      .then(next => { if (!cancelled) setMarginReport(next); })
+      .catch(error => {
+        console.warn("Marge FIFO réalisée indisponible", error);
+        if (!cancelled) setMarginReport(null);
+      })
+      .finally(() => { if (!cancelled) setMarginLoading(false); });
+    return () => { cancelled = true; };
+  }, [boutique.id, session?.id, session?.asOfAt]);
+
   const countedCount = session?.lines.filter(line => {
     const draft = drafts[line.productId];
     return countedFromDraft(line, draft ?? initialDraft(line)) != null || line.countedQty != null;
@@ -154,6 +182,16 @@ export function InventoryView({ boutique, currentUser, onUpdate, logAction, init
   const totalCount = session?.lines.length ?? 0;
   const allCounted = totalCount > 0 && countedCount === totalCount;
   const report = session?.status === "completed" ? session.report : session ? liveReport(session.lines, drafts) : zeroReport;
+  const scopedMargin = useMemo<FifoRealizedMarginReport | null>(() => {
+    if (!marginReport || !session) return null;
+    const ids = new Set(session.lines.map(line => line.productId));
+    const products = marginReport.products.filter(row => ids.has(row.productId));
+    const revenue = products.reduce((sum, row) => sum + row.revenue, 0);
+    const fifoCost = products.reduce((sum, row) => sum + row.fifoCost, 0);
+    const realizedMargin = revenue - fifoCost;
+    const unmatchedLines = products.reduce((sum, row) => sum + row.unmatchedLines, 0);
+    return { ...marginReport, products, revenue, fifoCost, realizedMargin, unmatchedLines, marginRate: revenue !== 0 ? realizedMargin / revenue * 100 : 0 };
+  }, [marginReport, session]);
 
   async function startSession() {
     if (busy) return;
@@ -369,7 +407,7 @@ export function InventoryView({ boutique, currentUser, onUpdate, logAction, init
         </div>}
       </div>
 
-      <ReportCards report={report}/>
+      <ReportCards report={report} margin={scopedMargin} loading={marginLoading}/>
 
       <div className="space-y-3">
         {session.lines.map(line => {
@@ -379,6 +417,7 @@ export function InventoryView({ boutique, currentUser, onUpdate, logAction, init
           const difference = counted == null ? line.differenceQty : counted - theoretical;
           const conditioningAvailable = line.piecesPerLot > 0;
           const saved = line.countedQty != null;
+          const productMargin = scopedMargin?.products.find(row => row.productId === line.productId);
           return <div key={line.productId} className="rounded-3xl border border-border bg-card p-5 space-y-4">
             <div className="flex items-start justify-between gap-3">
               <div>
@@ -388,6 +427,7 @@ export function InventoryView({ boutique, currentUser, onUpdate, logAction, init
                   {saved && <CheckCircle2 size={16} className="text-emerald-600"/>}
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">Théorique : <strong>{number(theoretical)} {line.unit}</strong> · Coût FIFO moyen {money(theoretical > 0 ? line.fifoTheoreticalCost / theoretical : line.fifoUnitCost)}</p>
+                <p className="text-xs text-muted-foreground mt-1">Marge réalisée FIFO · 30 j : <strong className={Number(productMargin?.realizedMargin ?? 0) >= 0 ? "text-emerald-700" : "text-red-700"}>{marginLoading ? "…" : money(Number(productMargin?.realizedMargin ?? 0))}</strong>{!marginLoading && productMargin ? ` · CA ${money(productMargin.revenue)} · coût FIFO ${money(productMargin.fifoCost)}` : ""}{!marginLoading && Number(productMargin?.unmatchedLines ?? 0) > 0 ? ` · ${productMargin!.unmatchedLines} ligne(s) non rapprochée(s)` : ""}</p>
               </div>
               {difference != null && <span className={`rounded-full px-3 py-1 text-xs font-black ${difference > 0 ? "bg-emerald-50 text-emerald-700" : difference < 0 ? "bg-red-50 text-red-700" : "bg-slate-100 text-slate-700"}`}>
                 Écart {difference > 0 ? "+" : ""}{number(difference)} {line.unit}
