@@ -37,7 +37,7 @@ function normalizeSession(session: any): InventorySession {
     finalTheoreticalQty: line.finalTheoreticalQty == null ? null : Number(line.finalTheoreticalQty),
     countedQty: line.countedQty == null ? null : Number(line.countedQty), differenceQty: line.differenceQty == null ? null : Number(line.differenceQty),
     purchasePrice: Number(line.purchasePrice ?? 0), salePrice: Number(line.salePrice ?? 0),
-    fifoTheoreticalCost: Number(line.fifoTheoreticalCost ?? line.theoreticalQty * line.purchasePrice ?? 0),
+    fifoTheoreticalCost: Number(line.fifoTheoreticalCost ?? (Number(line.theoreticalQty ?? 0) * Number(line.purchasePrice ?? 0))),
     fifoCountedCost: Number(line.fifoCountedCost ?? 0), fifoUnitCost: Number(line.fifoUnitCost ?? 0),
     piecesPerLot: Number(line.piecesPerLot ?? 0), lengthPerPiece: Number(line.lengthPerPiece ?? 0),
     stockEntryId: line.stockEntryId == null ? null : Number(line.stockEntryId), countingDetail: line.countingDetail ?? {},

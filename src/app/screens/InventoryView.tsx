@@ -78,41 +78,22 @@ function liveReport(lines: InventoryLine[], drafts: Record<number, CountDraft>):
     const counted = countedFromDraft(line, drafts[line.productId] ?? initialDraft(line));
     const actual = counted ?? line.countedQty;
     const theoretical = line.finalTheoreticalQty ?? line.theoreticalQty;
-    report.theoreticalCost += theoretical * line.purchasePrice;
-    report.theoreticalSales += theoretical * line.salePrice;
+    report.theoreticalCost += line.fifoTheoreticalCost;
     if (actual != null) {
-      report.countedCost += actual * line.purchasePrice;
-      report.countedSales += actual * line.salePrice;
-      report.varianceCost += (actual - theoretical) * line.purchasePrice;
-      report.varianceSales += (actual - theoretical) * line.salePrice;
+      const unit = theoretical > 0 ? line.fifoTheoreticalCost / theoretical : line.fifoUnitCost;
+      report.countedCost += actual * unit;
+      report.varianceCost += actual * unit - line.fifoTheoreticalCost;
     }
-    report.potentialMargin = report.countedSales - report.countedCost;
     return report;
   }, { ...zeroReport });
 }
 
 function ReportCards({ report }: { report: InventoryReport }) {
   const variancePositive = report.varianceCost >= 0;
-  return <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-    <div className="rounded-2xl border border-border bg-card p-4">
-      <p className="text-xs font-bold text-muted-foreground">Valeur achat inventoriée</p>
-      <p className="mt-1 text-lg font-black">{money(report.countedCost)}</p>
-    </div>
-    <div className="rounded-2xl border border-border bg-card p-4">
-      <p className="text-xs font-bold text-muted-foreground">CA potentiel du stock</p>
-      <p className="mt-1 text-lg font-black">{money(report.countedSales)}</p>
-    </div>
-    <div className="rounded-2xl border border-border bg-card p-4">
-      <p className="text-xs font-bold text-muted-foreground">Marge potentielle</p>
-      <p className="mt-1 text-lg font-black text-emerald-700">{money(report.potentialMargin)}</p>
-    </div>
-    <div className="rounded-2xl border border-border bg-card p-4">
-      <p className="text-xs font-bold text-muted-foreground">Bénéfice / perte inventaire</p>
-      <p className={`mt-1 text-lg font-black ${variancePositive ? "text-emerald-700" : "text-red-700"}`}>
-        {report.varianceCost > 0 ? "+" : ""}{money(report.varianceCost)}
-      </p>
-      <p className="text-[11px] text-muted-foreground mt-1">Écart valorisé au coût d'achat</p>
-    </div>
+  return <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+    <div className="rounded-2xl border border-border bg-card p-4"><p className="text-xs font-bold text-muted-foreground">Valeur FIFO théorique</p><p className="mt-1 text-lg font-black">{money(report.theoreticalCost)}</p></div>
+    <div className="rounded-2xl border border-border bg-card p-4"><p className="text-xs font-bold text-muted-foreground">Valeur FIFO inventoriée</p><p className="mt-1 text-lg font-black">{money(report.countedCost)}</p></div>
+    <div className="rounded-2xl border border-border bg-card p-4"><p className="text-xs font-bold text-muted-foreground">Écart de valorisation FIFO</p><p className={`mt-1 text-lg font-black ${variancePositive ? "text-emerald-700" : "text-red-700"}`}>{report.varianceCost > 0 ? "+" : ""}{money(report.varianceCost)}</p><p className="text-[11px] text-muted-foreground mt-1">Sans prix de vente théorique</p></div>
   </div>;
 }
 
@@ -133,6 +114,7 @@ export function InventoryView({ boutique, currentUser, onUpdate, logAction, init
   const [busy, setBusy] = useState(false);
   const [savingProductId, setSavingProductId] = useState<number | null>(null);
   const [historyLoading, setHistoryLoading] = useState(true);
+  const [asOfLocal, setAsOfLocal] = useState(() => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); });
 
   const products = useMemo(() => boutique.products.slice().sort((a, b) => a.nom.localeCompare(b.nom)), [boutique.products]);
   const categories = useMemo(() => (boutique.categories ?? []).slice().sort((a, b) => a.nom.localeCompare(b.nom)), [boutique.categories]);
@@ -181,7 +163,7 @@ export function InventoryView({ boutique, currentUser, onUpdate, logAction, init
     }
     setBusy(true);
     try {
-      const next = await startInventorySession({ boutiqueId: boutique.id, scopeType, scopeId: scopeType === "all" ? null : scopeId });
+      const next = await startInventorySession({ boutiqueId: boutique.id, scopeType, scopeId: scopeType === "all" ? null : scopeId, asOfAt: new Date(asOfLocal).toISOString() });
       setSession(next);
       resetDrafts(next);
       await refreshHistory();
@@ -336,7 +318,13 @@ export function InventoryView({ boutique, currentUser, onUpdate, logAction, init
     {!session && <div className="rounded-3xl p-5 border border-border bg-card space-y-5">
       <div>
         <h3 className="font-black">Nouveau périmètre d'inventaire</h3>
-        <p className="text-xs text-muted-foreground mt-1">Le stock théorique et les prix sont figés au démarrage pour produire un rapport fiable.</p>
+        <p className="text-xs text-muted-foreground mt-1">Choisissez une date de situation. Le stock théorique est reconstruit à cette date et valorisé en FIFO.</p>
+      </div>
+      <label className="block text-sm font-black">Date et heure de situation
+        <input type="datetime-local" max={(() => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0,16); })()} value={asOfLocal} onChange={event => setAsOfLocal(event.target.value)} className="mt-2 w-full rounded-xl border border-border bg-background p-3"/>
+        <span className="block text-[11px] font-normal text-muted-foreground mt-1">Les mouvements postérieurs restent hors de cette situation et ne sont pas perdus lors de la finalisation.</span>
+      </label>
+      <div>
       </div>
       <div className="grid sm:grid-cols-3 gap-3">
         {([
@@ -368,7 +356,7 @@ export function InventoryView({ boutique, currentUser, onUpdate, logAction, init
           <div>
             <p className="text-xs font-bold text-muted-foreground">{session.status === "completed" ? "Rapport d'inventaire" : "Inventaire en cours"}</p>
             <h3 className="text-xl font-black">{session.scopeLabel}</h3>
-            <p className="text-xs text-muted-foreground mt-1">Démarré le {new Date(session.startedAt).toLocaleString("fr-FR")}{session.operatorName ? ` · ${session.operatorName}` : ""}</p>
+            <p className="text-xs text-muted-foreground mt-1">Situation au {new Date(session.asOfAt).toLocaleString("fr-FR")} · démarré le {new Date(session.startedAt).toLocaleString("fr-FR")}{session.operatorName ? ` · ${session.operatorName}` : ""}</p>
           </div>
           <div className="flex gap-2">
             {session.status === "draft" && <button onClick={cancelCurrent} disabled={busy} className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-700 flex items-center gap-2"><Trash2 size={15}/> Annuler</button>}
@@ -399,7 +387,7 @@ export function InventoryView({ boutique, currentUser, onUpdate, logAction, init
                   {line.categoryName && <span className="rounded-full bg-muted px-2 py-1 text-[10px] font-bold">{line.categoryName}</span>}
                   {saved && <CheckCircle2 size={16} className="text-emerald-600"/>}
                 </div>
-                <p className="text-xs text-muted-foreground mt-1">Théorique : <strong>{number(theoretical)} {line.unit}</strong> · Achat {money(line.purchasePrice)} · Vente {money(line.salePrice)}</p>
+                <p className="text-xs text-muted-foreground mt-1">Théorique : <strong>{number(theoretical)} {line.unit}</strong> · Coût FIFO moyen {money(theoretical > 0 ? line.fifoTheoreticalCost / theoretical : line.fifoUnitCost)}</p>
               </div>
               {difference != null && <span className={`rounded-full px-3 py-1 text-xs font-black ${difference > 0 ? "bg-emerald-50 text-emerald-700" : difference < 0 ? "bg-red-50 text-red-700" : "bg-slate-100 text-slate-700"}`}>
                 Écart {difference > 0 ? "+" : ""}{number(difference)} {line.unit}
@@ -436,8 +424,8 @@ export function InventoryView({ boutique, currentUser, onUpdate, logAction, init
             </> : <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
               <div className="rounded-xl bg-muted p-3"><p className="text-xs text-muted-foreground">Compté</p><p className="font-black">{number(line.countedQty ?? 0)} {line.unit}</p></div>
               <div className="rounded-xl bg-muted p-3"><p className="text-xs text-muted-foreground">Écart</p><p className="font-black">{Number(line.differenceQty ?? 0) > 0 ? "+" : ""}{number(line.differenceQty ?? 0)} {line.unit}</p></div>
-              <div className="rounded-xl bg-muted p-3"><p className="text-xs text-muted-foreground">Impact coût</p><p className="font-black">{money(Number(line.differenceQty ?? 0) * line.purchasePrice)}</p></div>
-              <div className="rounded-xl bg-muted p-3"><p className="text-xs text-muted-foreground">Impact CA</p><p className="font-black">{money(Number(line.differenceQty ?? 0) * line.salePrice)}</p></div>
+              <div className="rounded-xl bg-muted p-3"><p className="text-xs text-muted-foreground">Valeur FIFO</p><p className="font-black">{money(line.fifoCountedCost)}</p></div>
+              <div className="rounded-xl bg-muted p-3"><p className="text-xs text-muted-foreground">Coût FIFO / unité</p><p className="font-black">{money(line.fifoUnitCost)}</p></div>
             </div>}
           </div>;
         })}
@@ -445,7 +433,7 @@ export function InventoryView({ boutique, currentUser, onUpdate, logAction, init
 
       {session.status === "draft" && <div className="sticky bottom-20 rounded-3xl border border-emerald-200 bg-emerald-50 p-4 shadow-xl">
         <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-          <div><p className="font-black">{allCounted ? "Inventaire prêt à finaliser" : `${totalCount - countedCount} produit(s) restant(s)`}</p><p className="text-xs text-emerald-800">La finalisation recalcule le stock théorique courant et applique tous les écarts dans une seule transaction.</p></div>
+          <div><p className="font-black">{allCounted ? "Inventaire prêt à finaliser" : `${totalCount - countedCount} produit(s) restant(s)`}</p><p className="text-xs text-emerald-800">La finalisation applique au stock courant uniquement l’écart constaté à la date de situation, sans écraser les mouvements postérieurs.</p></div>
           <button onClick={finalizeSession} disabled={!allCounted || busy} className="w-full sm:w-auto rounded-2xl bg-emerald-600 px-6 py-4 font-black text-white disabled:opacity-50 flex items-center justify-center gap-2">
             {busy ? <Loader2 size={20} className="animate-spin"/> : <ClipboardCheck size={20}/>} Finaliser l'inventaire
           </button>
