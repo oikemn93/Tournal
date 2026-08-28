@@ -1,0 +1,32 @@
+name: Apply inventory custom period
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/apply-inventory-custom-period.yml]
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: Apply patch
+        run: python tools/patch_inventory_custom_period.py
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Production build
+        run: pnpm build
+      - name: Commit source fix
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/app/screens/InventoryView.tsx
+          git diff --cached --quiet || git commit -m "fix: let users choose inventory margin period"
+          git push
