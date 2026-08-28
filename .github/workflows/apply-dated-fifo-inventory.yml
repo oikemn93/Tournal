@@ -1,5 +1,8 @@
 name: Apply dated FIFO inventory
-on: workflow_dispatch
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/apply-dated-fifo-inventory.yml]
 permissions:
   contents: write
 jobs:
