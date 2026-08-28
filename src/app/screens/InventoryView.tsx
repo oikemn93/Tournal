@@ -5,7 +5,6 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import type { Boutique, PlatformUser, StockEntry } from "../types";
-import { fmt } from "../utils/formatting";
 import {
   cancelInventorySession,
   finalizeInventorySession,
@@ -39,8 +38,12 @@ const zeroReport: InventoryReport = {
   varianceSales: 0,
 };
 
+function number(value: number) {
+  return new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 3 }).format(Number(value) || 0);
+}
+
 function money(value: number) {
-  return `${fmt(Math.round(value))} F`;
+  return `${number(Math.round(value))} F`;
 }
 
 function initialDraft(line: InventoryLine): CountDraft {
@@ -396,10 +399,10 @@ export function InventoryView({ boutique, currentUser, onUpdate, logAction, init
                   {line.categoryName && <span className="rounded-full bg-muted px-2 py-1 text-[10px] font-bold">{line.categoryName}</span>}
                   {saved && <CheckCircle2 size={16} className="text-emerald-600"/>}
                 </div>
-                <p className="text-xs text-muted-foreground mt-1">Théorique : <strong>{fmt(theoretical)} {line.unit}</strong> · Achat {money(line.purchasePrice)} · Vente {money(line.salePrice)}</p>
+                <p className="text-xs text-muted-foreground mt-1">Théorique : <strong>{number(theoretical)} {line.unit}</strong> · Achat {money(line.purchasePrice)} · Vente {money(line.salePrice)}</p>
               </div>
               {difference != null && <span className={`rounded-full px-3 py-1 text-xs font-black ${difference > 0 ? "bg-emerald-50 text-emerald-700" : difference < 0 ? "bg-red-50 text-red-700" : "bg-slate-100 text-slate-700"}`}>
-                Écart {difference > 0 ? "+" : ""}{fmt(difference)} {line.unit}
+                Écart {difference > 0 ? "+" : ""}{number(difference)} {line.unit}
               </span>}
             </div>
 
@@ -412,17 +415,17 @@ export function InventoryView({ boutique, currentUser, onUpdate, logAction, init
               {draft.mode === "conditioning" && conditioningAvailable ? <div className="grid sm:grid-cols-3 gap-3 rounded-2xl bg-amber-50 p-4">
                 <label className="text-xs font-black">Lots
                   <input type="number" min="0" step="1" value={draft.lots} onChange={event => setDrafts(prev => ({ ...prev, [line.productId]: { ...draft, lots: event.target.value } }))} className="mt-1 w-full rounded-xl border border-amber-200 bg-white p-3" placeholder="0"/>
-                  <span className="block text-[10px] font-normal text-muted-foreground mt-1">{fmt(line.piecesPerLot)} pièce(s) / lot</span>
+                  <span className="block text-[10px] font-normal text-muted-foreground mt-1">{number(line.piecesPerLot)} pièce(s) / lot</span>
                 </label>
                 <label className="text-xs font-black">Pièces hors lot
                   <input type="number" min="0" step="1" value={draft.loosePieces} onChange={event => setDrafts(prev => ({ ...prev, [line.productId]: { ...draft, loosePieces: event.target.value } }))} className="mt-1 w-full rounded-xl border border-amber-200 bg-white p-3" placeholder="0"/>
-                  {line.lengthPerPiece > 0 && <span className="block text-[10px] font-normal text-muted-foreground mt-1">{fmt(line.lengthPerPiece)} {line.unit} / pièce</span>}
+                  {line.lengthPerPiece > 0 && <span className="block text-[10px] font-normal text-muted-foreground mt-1">{number(line.lengthPerPiece)} {line.unit} / pièce</span>}
                 </label>
                 <label className="text-xs font-black">Complément {line.unit}
                   <input type="number" min="0" step="any" value={draft.extraQty} onChange={event => setDrafts(prev => ({ ...prev, [line.productId]: { ...draft, extraQty: event.target.value } }))} className="mt-1 w-full rounded-xl border border-amber-200 bg-white p-3" placeholder="0"/>
                   <span className="block text-[10px] font-normal text-muted-foreground mt-1">Quantité libre non conditionnée</span>
                 </label>
-                <div className="sm:col-span-3 text-sm font-black">Total compté : {fmt(conditionedQuantity(line, draft))} {line.unit}</div>
+                <div className="sm:col-span-3 text-sm font-black">Total compté : {number(conditionedQuantity(line, draft))} {line.unit}</div>
               </div> : <label className="block text-sm font-black">Quantité réellement comptée
                 <input inputMode="decimal" type="number" min="0" step="any" value={draft.direct} onChange={event => setDrafts(prev => ({ ...prev, [line.productId]: { ...draft, direct: event.target.value } }))} className="mt-2 w-full rounded-xl border border-border bg-background p-3" placeholder="0"/>
               </label>}
@@ -431,8 +434,8 @@ export function InventoryView({ boutique, currentUser, onUpdate, logAction, init
                 {savingProductId === line.productId ? <Loader2 size={17} className="animate-spin"/> : <Save size={17}/>} Enregistrer ce comptage
               </button>
             </> : <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-              <div className="rounded-xl bg-muted p-3"><p className="text-xs text-muted-foreground">Compté</p><p className="font-black">{fmt(line.countedQty ?? 0)} {line.unit}</p></div>
-              <div className="rounded-xl bg-muted p-3"><p className="text-xs text-muted-foreground">Écart</p><p className="font-black">{Number(line.differenceQty ?? 0) > 0 ? "+" : ""}{fmt(line.differenceQty ?? 0)} {line.unit}</p></div>
+              <div className="rounded-xl bg-muted p-3"><p className="text-xs text-muted-foreground">Compté</p><p className="font-black">{number(line.countedQty ?? 0)} {line.unit}</p></div>
+              <div className="rounded-xl bg-muted p-3"><p className="text-xs text-muted-foreground">Écart</p><p className="font-black">{Number(line.differenceQty ?? 0) > 0 ? "+" : ""}{number(line.differenceQty ?? 0)} {line.unit}</p></div>
               <div className="rounded-xl bg-muted p-3"><p className="text-xs text-muted-foreground">Impact coût</p><p className="font-black">{money(Number(line.differenceQty ?? 0) * line.purchasePrice)}</p></div>
               <div className="rounded-xl bg-muted p-3"><p className="text-xs text-muted-foreground">Impact CA</p><p className="font-black">{money(Number(line.differenceQty ?? 0) * line.salePrice)}</p></div>
             </div>}
