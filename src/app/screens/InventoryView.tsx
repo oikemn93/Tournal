@@ -300,7 +300,7 @@ export function InventoryView({ boutique, currentUser, onUpdate, logAction, init
           productId: line.productId,
           qty: Number(line.differenceQty ?? 0),
           unit: line.unit,
-          montantDu: Number(line.differenceQty ?? 0) * line.purchasePrice,
+          montantDu: line.fifoCountedCost - line.fifoTheoreticalCost,
           date: new Date(completed.finalizedAt ?? Date.now()).toLocaleDateString("fr-FR"),
           recordedAt: completed.finalizedAt ?? new Date().toISOString(),
           fournisseur: `Inventaire ${completed.scopeLabel}`,
