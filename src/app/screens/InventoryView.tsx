@@ -90,15 +90,15 @@ function liveReport(lines: InventoryLine[], drafts: Record<number, CountDraft>):
   }, { ...zeroReport });
 }
 
-function ReportCards({ report, margin, loading }: { report: InventoryReport; margin: FifoRealizedMarginReport | null; loading: boolean }) {
+function ReportCards({ report, margin, loading, periodLabel }: { report: InventoryReport; margin: FifoRealizedMarginReport | null; loading: boolean; periodLabel: string }) {
   const variancePositive = report.varianceCost >= 0;
   const marginPositive = Number(margin?.realizedMargin ?? 0) >= 0;
   return <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
     <div className="rounded-2xl border border-border bg-card p-4"><p className="text-xs font-bold text-muted-foreground">Valeur FIFO théorique</p><p className="mt-1 text-lg font-black">{money(report.theoreticalCost)}</p></div>
     <div className="rounded-2xl border border-border bg-card p-4"><p className="text-xs font-bold text-muted-foreground">Valeur FIFO inventoriée</p><p className="mt-1 text-lg font-black">{money(report.countedCost)}</p></div>
     <div className="rounded-2xl border border-border bg-card p-4"><p className="text-xs font-bold text-muted-foreground">Écart de valorisation FIFO</p><p className={`mt-1 text-lg font-black ${variancePositive ? "text-emerald-700" : "text-red-700"}`}>{report.varianceCost > 0 ? "+" : ""}{money(report.varianceCost)}</p><p className="text-[11px] text-muted-foreground mt-1">Écart physique valorisé en FIFO</p></div>
-    <div className="rounded-2xl border border-border bg-card p-4"><p className="text-xs font-bold text-muted-foreground">Marge réalisée FIFO · 30 j</p><p className={`mt-1 text-lg font-black ${marginPositive ? "text-emerald-700" : "text-red-700"}`}>{loading ? "…" : money(Number(margin?.realizedMargin ?? 0))}</p><p className="text-[11px] text-muted-foreground mt-1">CA réel − coût FIFO consommé</p></div>
-    <div className="rounded-2xl border border-border bg-card p-4"><p className="text-xs font-bold text-muted-foreground">Taux de marge réel · 30 j</p><p className={`mt-1 text-lg font-black ${marginPositive ? "text-emerald-700" : "text-red-700"}`}>{loading ? "…" : `${number(Number(margin?.marginRate ?? 0))} %`}</p>{!loading && Number(margin?.unmatchedLines ?? 0) > 0 && <p className="text-[11px] text-amber-700 mt-1">{margin!.unmatchedLines} ligne(s) sans sortie stock rapprochée</p>}</div>
+    <div className="rounded-2xl border border-border bg-card p-4"><p className="text-xs font-bold text-muted-foreground">Marge réalisée FIFO · {periodLabel}</p><p className={`mt-1 text-lg font-black ${marginPositive ? "text-emerald-700" : "text-red-700"}`}>{loading ? "…" : money(Number(margin?.realizedMargin ?? 0))}</p><p className="text-[11px] text-muted-foreground mt-1">CA réel − coût FIFO consommé</p></div>
+    <div className="rounded-2xl border border-border bg-card p-4"><p className="text-xs font-bold text-muted-foreground">Taux de marge réel · {periodLabel}</p><p className={`mt-1 text-lg font-black ${marginPositive ? "text-emerald-700" : "text-red-700"}`}>{loading ? "…" : `${number(Number(margin?.marginRate ?? 0))} %`}</p>{!loading && Number(margin?.unmatchedLines ?? 0) > 0 && <p className="text-[11px] text-amber-700 mt-1">{margin!.unmatchedLines} ligne(s) sans sortie stock rapprochée</p>}</div>
   </div>;
 }
 
@@ -122,6 +122,8 @@ export function InventoryView({ boutique, currentUser, onUpdate, logAction, init
   const [marginReport, setMarginReport] = useState<FifoRealizedMarginReport | null>(null);
   const [marginLoading, setMarginLoading] = useState(false);
   const [asOfLocal, setAsOfLocal] = useState(() => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); });
+  const [marginFromDate, setMarginFromDate] = useState(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-01`; });
+  const [marginToDate, setMarginToDate] = useState(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; });
 
   const products = useMemo(() => boutique.products.slice().sort((a, b) => a.nom.localeCompare(b.nom)), [boutique.products]);
   const categories = useMemo(() => (boutique.categories ?? []).slice().sort((a, b) => a.nom.localeCompare(b.nom)), [boutique.categories]);
@@ -161,9 +163,16 @@ export function InventoryView({ boutique, currentUser, onUpdate, logAction, init
       setMarginLoading(false);
       return () => { cancelled = true; };
     }
-    const to = new Date(session.asOfAt);
-    const from = new Date(to);
-    from.setDate(from.getDate() - 30);
+    const from = new Date(`${marginFromDate}T00:00:00`);
+    const requestedEndExclusive = new Date(`${marginToDate}T00:00:00`);
+    requestedEndExclusive.setDate(requestedEndExclusive.getDate() + 1);
+    const situation = new Date(session.asOfAt);
+    const to = requestedEndExclusive < situation ? requestedEndExclusive : situation;
+    if (!marginFromDate || !marginToDate || !Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || to <= from) {
+      setMarginReport(null);
+      setMarginLoading(false);
+      return () => { cancelled = true; };
+    }
     setMarginLoading(true);
     void getFifoRealizedMargin({ boutiqueId: boutique.id, fromAt: from.toISOString(), toAt: to.toISOString() })
       .then(next => { if (!cancelled) setMarginReport(next); })
@@ -173,7 +182,7 @@ export function InventoryView({ boutique, currentUser, onUpdate, logAction, init
       })
       .finally(() => { if (!cancelled) setMarginLoading(false); });
     return () => { cancelled = true; };
-  }, [boutique.id, session?.id, session?.asOfAt]);
+  }, [boutique.id, session?.id, session?.asOfAt, marginFromDate, marginToDate]);
 
   const countedCount = session?.lines.filter(line => {
     const draft = drafts[line.productId];
@@ -182,6 +191,13 @@ export function InventoryView({ boutique, currentUser, onUpdate, logAction, init
   const totalCount = session?.lines.length ?? 0;
   const allCounted = totalCount > 0 && countedCount === totalCount;
   const report = session?.status === "completed" ? session.report : session ? liveReport(session.lines, drafts) : zeroReport;
+  const marginPeriodLabel = useMemo(() => {
+    if (!marginFromDate || !marginToDate) return "période choisie";
+    const from = new Date(`${marginFromDate}T00:00:00`);
+    const to = new Date(`${marginToDate}T00:00:00`);
+    if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime())) return "période choisie";
+    return `${from.toLocaleDateString("fr-FR")} → ${to.toLocaleDateString("fr-FR")}`;
+  }, [marginFromDate, marginToDate]);
   const scopedMargin = useMemo<FifoRealizedMarginReport | null>(() => {
     if (!marginReport || !session) return null;
     const ids = new Set(session.lines.map(line => line.productId));
@@ -340,19 +356,6 @@ export function InventoryView({ boutique, currentUser, onUpdate, logAction, init
   }
 
   return <div className="max-w-5xl mx-auto space-y-5" data-screen-source="relational-inventory-v2">
-    <div className="rounded-3xl p-5 border border-border bg-card">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <ClipboardCheck className="text-emerald-600"/>
-          <div>
-            <h2 className="text-xl font-black">Inventaire physique</h2>
-            <p className="text-sm text-muted-foreground">Par produit, par catégorie ou sur tout le stock · comptages et rapports persistés dans Supabase.</p>
-          </div>
-        </div>
-        {onClose && <button type="button" onClick={onClose} className="rounded-xl border border-border px-3 py-2 text-sm font-bold flex items-center gap-2"><ArrowLeft size={16}/> Retour</button>}
-      </div>
-    </div>
-
     {!session && <div className="rounded-3xl p-5 border border-border bg-card space-y-5">
       <div>
         <h3 className="font-black">Nouveau périmètre d'inventaire</h3>
@@ -362,7 +365,15 @@ export function InventoryView({ boutique, currentUser, onUpdate, logAction, init
         <input type="datetime-local" max={(() => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0,16); })()} value={asOfLocal} onChange={event => setAsOfLocal(event.target.value)} className="mt-2 w-full rounded-xl border border-border bg-background p-3"/>
         <span className="block text-[11px] font-normal text-muted-foreground mt-1">Les mouvements postérieurs restent hors de cette situation et ne sont pas perdus lors de la finalisation.</span>
       </label>
-      <div>
+      <div className="rounded-2xl border border-border bg-muted/30 p-4 space-y-3">
+        <div><p className="text-sm font-black">Période d'analyse de la marge</p><p className="text-[11px] text-muted-foreground mt-1">Choisissez librement la période de ventes à comparer au coût FIFO. La période ne dépassera jamais la date de situation de l'inventaire.</p></div>
+        <div className="grid sm:grid-cols-2 gap-3">
+          <label className="text-xs font-black">Du<input type="date" value={marginFromDate} onChange={event => setMarginFromDate(event.target.value)} className="mt-1 w-full rounded-xl border border-border bg-background p-3"/></label>
+          <label className="text-xs font-black">Au<input type="date" value={marginToDate} onChange={event => setMarginToDate(event.target.value)} className="mt-1 w-full rounded-xl border border-border bg-background p-3"/></label>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {[30,90,180,365].map(days => <button key={days} type="button" onClick={() => { const end = new Date(asOfLocal); const start = new Date(end); start.setDate(start.getDate() - days + 1); const f=(d:Date)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; setMarginFromDate(f(start)); setMarginToDate(f(end)); }} className="rounded-lg border border-border bg-background px-3 py-2 text-xs font-bold">{days} j</button>)}
+        </div>
       </div>
       <div className="grid sm:grid-cols-3 gap-3">
         {([
@@ -407,7 +418,15 @@ export function InventoryView({ boutique, currentUser, onUpdate, logAction, init
         </div>}
       </div>
 
-      <ReportCards report={report} margin={scopedMargin} loading={marginLoading}/>
+      <div className="rounded-2xl border border-border bg-card p-4">
+        <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+          <div className="flex-1"><p className="text-sm font-black">Période d'analyse de la marge FIFO</p><p className="text-[11px] text-muted-foreground mt-1">Modifiable à tout moment, sans changer la date de situation ni le comptage.</p></div>
+          <label className="text-xs font-black">Du<input type="date" value={marginFromDate} onChange={event => setMarginFromDate(event.target.value)} className="mt-1 block rounded-xl border border-border bg-background p-2.5"/></label>
+          <label className="text-xs font-black">Au<input type="date" value={marginToDate} onChange={event => setMarginToDate(event.target.value)} className="mt-1 block rounded-xl border border-border bg-background p-2.5"/></label>
+        </div>
+      </div>
+
+      <ReportCards report={report} margin={scopedMargin} loading={marginLoading} periodLabel={marginPeriodLabel}/>
 
       <div className="space-y-3">
         {session.lines.map(line => {
@@ -427,7 +446,7 @@ export function InventoryView({ boutique, currentUser, onUpdate, logAction, init
                   {saved && <CheckCircle2 size={16} className="text-emerald-600"/>}
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">Théorique : <strong>{number(theoretical)} {line.unit}</strong> · Coût FIFO moyen {money(theoretical > 0 ? line.fifoTheoreticalCost / theoretical : line.fifoUnitCost)}</p>
-                <p className="text-xs text-muted-foreground mt-1">Marge réalisée FIFO · 30 j : <strong className={Number(productMargin?.realizedMargin ?? 0) >= 0 ? "text-emerald-700" : "text-red-700"}>{marginLoading ? "…" : money(Number(productMargin?.realizedMargin ?? 0))}</strong>{!marginLoading && productMargin ? ` · CA ${money(productMargin.revenue)} · coût FIFO ${money(productMargin.fifoCost)}` : ""}{!marginLoading && Number(productMargin?.unmatchedLines ?? 0) > 0 ? ` · ${productMargin!.unmatchedLines} ligne(s) non rapprochée(s)` : ""}</p>
+                <p className="text-xs text-muted-foreground mt-1">Marge réalisée FIFO · {marginPeriodLabel} : <strong className={Number(productMargin?.realizedMargin ?? 0) >= 0 ? "text-emerald-700" : "text-red-700"}>{marginLoading ? "…" : money(Number(productMargin?.realizedMargin ?? 0))}</strong>{!marginLoading && productMargin ? ` · CA ${money(productMargin.revenue)} · coût FIFO ${money(productMargin.fifoCost)}` : ""}{!marginLoading && Number(productMargin?.unmatchedLines ?? 0) > 0 ? ` · ${productMargin!.unmatchedLines} ligne(s) non rapprochée(s)` : ""}</p>
               </div>
               {difference != null && <span className={`rounded-full px-3 py-1 text-xs font-black ${difference > 0 ? "bg-emerald-50 text-emerald-700" : difference < 0 ? "bg-red-50 text-red-700" : "bg-slate-100 text-slate-700"}`}>
                 Écart {difference > 0 ? "+" : ""}{number(difference)} {line.unit}
