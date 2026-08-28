@@ -23,19 +23,26 @@ export type FifoRealizedMarginProduct = {
   productId: number;
   productName: string;
   qty: number;
+  grossRevenue: number;
   revenue: number;
   fifoCost: number;
   realizedMargin: number;
+  marginRate: number;
+  markupRate: number;
+  coverageRate: number;
   unmatchedLines: number;
 };
 
 export type FifoRealizedMarginReport = {
   fromAt: string;
   toAt: string;
+  grossRevenue: number;
   revenue: number;
   fifoCost: number;
   realizedMargin: number;
   marginRate: number;
+  markupRate: number;
+  coverageRate: number;
   lineCount: number;
   unmatchedLines: number;
   products: FifoRealizedMarginProduct[];
@@ -70,19 +77,26 @@ function normalizeMarginReport(report: any): FifoRealizedMarginReport {
   return {
     fromAt: String(report?.fromAt ?? ""),
     toAt: String(report?.toAt ?? ""),
+    grossRevenue: Number(report?.grossRevenue ?? report?.revenue ?? 0),
     revenue: Number(report?.revenue ?? 0),
     fifoCost: Number(report?.fifoCost ?? 0),
     realizedMargin: Number(report?.realizedMargin ?? 0),
     marginRate: Number(report?.marginRate ?? 0),
+    markupRate: Number(report?.markupRate ?? 0),
+    coverageRate: Number(report?.coverageRate ?? 100),
     lineCount: Number(report?.lineCount ?? 0),
     unmatchedLines: Number(report?.unmatchedLines ?? 0),
     products: Array.isArray(report?.products) ? report.products.map((row: any) => ({
       productId: Number(row?.productId),
       productName: String(row?.productName ?? ""),
       qty: Number(row?.qty ?? 0),
+      grossRevenue: Number(row?.grossRevenue ?? row?.revenue ?? 0),
       revenue: Number(row?.revenue ?? 0),
       fifoCost: Number(row?.fifoCost ?? 0),
       realizedMargin: Number(row?.realizedMargin ?? 0),
+      marginRate: Number(row?.marginRate ?? 0),
+      markupRate: Number(row?.markupRate ?? 0),
+      coverageRate: Number(row?.coverageRate ?? 100),
       unmatchedLines: Number(row?.unmatchedLines ?? 0),
     })) : [],
   };

@@ -93,12 +93,13 @@ function liveReport(lines: InventoryLine[], drafts: Record<number, CountDraft>):
 function ReportCards({ report, margin, loading, periodLabel }: { report: InventoryReport; margin: FifoRealizedMarginReport | null; loading: boolean; periodLabel: string }) {
   const variancePositive = report.varianceCost >= 0;
   const marginPositive = Number(margin?.realizedMargin ?? 0) >= 0;
-  return <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-    <div className="rounded-2xl border border-border bg-card p-4"><p className="text-xs font-bold text-muted-foreground">Valeur FIFO théorique</p><p className="mt-1 text-lg font-black">{money(report.theoreticalCost)}</p></div>
-    <div className="rounded-2xl border border-border bg-card p-4"><p className="text-xs font-bold text-muted-foreground">Valeur FIFO inventoriée</p><p className="mt-1 text-lg font-black">{money(report.countedCost)}</p></div>
-    <div className="rounded-2xl border border-border bg-card p-4"><p className="text-xs font-bold text-muted-foreground">Écart de valorisation FIFO</p><p className={`mt-1 text-lg font-black ${variancePositive ? "text-emerald-700" : "text-red-700"}`}>{report.varianceCost > 0 ? "+" : ""}{money(report.varianceCost)}</p><p className="text-[11px] text-muted-foreground mt-1">Écart physique valorisé en FIFO</p></div>
-    <div className="rounded-2xl border border-border bg-card p-4"><p className="text-xs font-bold text-muted-foreground">Marge réalisée FIFO · {periodLabel}</p><p className={`mt-1 text-lg font-black ${marginPositive ? "text-emerald-700" : "text-red-700"}`}>{loading ? "…" : money(Number(margin?.realizedMargin ?? 0))}</p><p className="text-[11px] text-muted-foreground mt-1">CA réel − coût FIFO consommé</p></div>
-    <div className="rounded-2xl border border-border bg-card p-4"><p className="text-xs font-bold text-muted-foreground">Taux de marge réel · {periodLabel}</p><p className={`mt-1 text-lg font-black ${marginPositive ? "text-emerald-700" : "text-red-700"}`}>{loading ? "…" : `${number(Number(margin?.marginRate ?? 0))} %`}</p>{!loading && Number(margin?.unmatchedLines ?? 0) > 0 && <p className="text-[11px] text-amber-700 mt-1">{margin!.unmatchedLines} ligne(s) sans sortie stock rapprochée</p>}</div>
+  return <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+    <div className="rounded-2xl border border-border bg-card p-4"><p className="text-xs font-bold text-muted-foreground">Valeur du stock théorique (FIFO)</p><p className="mt-1 text-lg font-black">{money(report.theoreticalCost)}</p></div>
+    <div className="rounded-2xl border border-border bg-card p-4"><p className="text-xs font-bold text-muted-foreground">Valeur du stock compté (FIFO)</p><p className="mt-1 text-lg font-black">{money(report.countedCost)}</p></div>
+    <div className="rounded-2xl border border-border bg-card p-4"><p className="text-xs font-bold text-muted-foreground">Écart de valorisation du stock</p><p className={`mt-1 text-lg font-black ${variancePositive ? "text-emerald-700" : "text-red-700"}`}>{report.varianceCost > 0 ? "+" : ""}{money(report.varianceCost)}</p><p className="text-[11px] text-muted-foreground mt-1">Écart physique valorisé selon les couches FIFO</p></div>
+    <div className="rounded-2xl border border-border bg-card p-4"><p className="text-xs font-bold text-muted-foreground">CA valorisé · {periodLabel}</p><p className="mt-1 text-lg font-black">{loading ? "…" : money(Number(margin?.revenue ?? 0))}</p><p className="text-[11px] text-muted-foreground mt-1">{loading ? "Calcul en cours" : `Couverture des coûts : ${number(Number(margin?.coverageRate ?? 0))} %`}</p></div>
+    <div className="rounded-2xl border border-border bg-card p-4"><p className="text-xs font-bold text-muted-foreground">Marge brute réalisée (FIFO)</p><p className={`mt-1 text-lg font-black ${marginPositive ? "text-emerald-700" : "text-red-700"}`}>{loading ? "…" : money(Number(margin?.realizedMargin ?? 0))}</p><p className="text-[11px] text-muted-foreground mt-1">CA valorisé − coût FIFO des ventes</p></div>
+    <div className="rounded-2xl border border-border bg-card p-4"><p className="text-xs font-bold text-muted-foreground">Taux de marque</p><p className={`mt-1 text-lg font-black ${marginPositive ? "text-emerald-700" : "text-red-700"}`}>{loading ? "…" : `${number(Number(margin?.marginRate ?? 0))} %`}</p><p className="text-[11px] text-muted-foreground mt-1">Marge / CA · Taux de marge sur coût : {loading ? "…" : `${number(Number(margin?.markupRate ?? 0))} %`}</p>{!loading && Number(margin?.unmatchedLines ?? 0) > 0 && <p className="text-[11px] text-amber-700 mt-1">{margin!.unmatchedLines} ligne(s) non valorisée(s)</p>}</div>
   </div>;
 }
 
@@ -202,11 +203,12 @@ export function InventoryView({ boutique, currentUser, onUpdate, logAction, init
     if (!marginReport || !session) return null;
     const ids = new Set(session.lines.map(line => line.productId));
     const products = marginReport.products.filter(row => ids.has(row.productId));
+    const grossRevenue = products.reduce((sum, row) => sum + row.grossRevenue, 0);
     const revenue = products.reduce((sum, row) => sum + row.revenue, 0);
     const fifoCost = products.reduce((sum, row) => sum + row.fifoCost, 0);
     const realizedMargin = revenue - fifoCost;
     const unmatchedLines = products.reduce((sum, row) => sum + row.unmatchedLines, 0);
-    return { ...marginReport, products, revenue, fifoCost, realizedMargin, unmatchedLines, marginRate: revenue !== 0 ? realizedMargin / revenue * 100 : 0 };
+    return { ...marginReport, products, grossRevenue, revenue, fifoCost, realizedMargin, unmatchedLines, marginRate: revenue !== 0 ? realizedMargin / revenue * 100 : 0, markupRate: fifoCost !== 0 ? realizedMargin / fifoCost * 100 : 0, coverageRate: grossRevenue !== 0 ? revenue / grossRevenue * 100 : 100 };
   }, [marginReport, session]);
 
   async function startSession() {
@@ -361,12 +363,12 @@ export function InventoryView({ boutique, currentUser, onUpdate, logAction, init
         <h3 className="font-black">Nouveau périmètre d'inventaire</h3>
         <p className="text-xs text-muted-foreground mt-1">Choisissez une date de situation. Le stock théorique est reconstruit à cette date et valorisé en FIFO.</p>
       </div>
-      <label className="block text-sm font-black">Date et heure de situation
+      <label className="block text-sm font-black">Date de référence du stock
         <input type="datetime-local" max={(() => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0,16); })()} value={asOfLocal} onChange={event => setAsOfLocal(event.target.value)} className="mt-2 w-full rounded-xl border border-border bg-background p-3"/>
         <span className="block text-[11px] font-normal text-muted-foreground mt-1">Les mouvements postérieurs restent hors de cette situation et ne sont pas perdus lors de la finalisation.</span>
       </label>
       <div className="rounded-2xl border border-border bg-muted/30 p-4 space-y-3">
-        <div><p className="text-sm font-black">Période d'analyse de la marge</p><p className="text-[11px] text-muted-foreground mt-1">Choisissez librement la période de ventes à comparer au coût FIFO. La période ne dépassera jamais la date de situation de l'inventaire.</p></div>
+        <div><p className="text-sm font-black">Période d'analyse des ventes et de la marge</p><p className="text-[11px] text-muted-foreground mt-1">Choisissez librement la période de ventes à comparer au coût FIFO. La période ne dépassera jamais la date de situation de l'inventaire.</p></div>
         <div className="grid sm:grid-cols-2 gap-3">
           <label className="text-xs font-black">Du<input type="date" value={marginFromDate} onChange={event => setMarginFromDate(event.target.value)} className="mt-1 w-full rounded-xl border border-border bg-background p-3"/></label>
           <label className="text-xs font-black">Au<input type="date" value={marginToDate} onChange={event => setMarginToDate(event.target.value)} className="mt-1 w-full rounded-xl border border-border bg-background p-3"/></label>
@@ -405,7 +407,7 @@ export function InventoryView({ boutique, currentUser, onUpdate, logAction, init
           <div>
             <p className="text-xs font-bold text-muted-foreground">{session.status === "completed" ? "Rapport d'inventaire" : "Inventaire en cours"}</p>
             <h3 className="text-xl font-black">{session.scopeLabel}</h3>
-            <p className="text-xs text-muted-foreground mt-1">Situation au {new Date(session.asOfAt).toLocaleString("fr-FR")} · démarré le {new Date(session.startedAt).toLocaleString("fr-FR")}{session.operatorName ? ` · ${session.operatorName}` : ""}</p>
+            <p className="text-xs text-muted-foreground mt-1">Stock de référence au {new Date(session.asOfAt).toLocaleString("fr-FR")} · inventaire démarré le {new Date(session.startedAt).toLocaleString("fr-FR")}{session.operatorName ? ` · ${session.operatorName}` : ""}</p>
           </div>
           <div className="flex gap-2">
             {session.status === "draft" && <button onClick={cancelCurrent} disabled={busy} className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-700 flex items-center gap-2"><Trash2 size={15}/> Annuler</button>}
@@ -420,7 +422,7 @@ export function InventoryView({ boutique, currentUser, onUpdate, logAction, init
 
       <div className="rounded-2xl border border-border bg-card p-4">
         <div className="flex flex-col sm:flex-row sm:items-end gap-3">
-          <div className="flex-1"><p className="text-sm font-black">Période d'analyse de la marge FIFO</p><p className="text-[11px] text-muted-foreground mt-1">Modifiable à tout moment, sans changer la date de situation ni le comptage.</p></div>
+          <div className="flex-1"><p className="text-sm font-black">Période d'analyse des ventes et de la marge FIFO</p><p className="text-[11px] text-muted-foreground mt-1">Modifiable à tout moment, sans changer la date de situation ni le comptage.</p></div>
           <label className="text-xs font-black">Du<input type="date" value={marginFromDate} onChange={event => setMarginFromDate(event.target.value)} className="mt-1 block rounded-xl border border-border bg-background p-2.5"/></label>
           <label className="text-xs font-black">Au<input type="date" value={marginToDate} onChange={event => setMarginToDate(event.target.value)} className="mt-1 block rounded-xl border border-border bg-background p-2.5"/></label>
         </div>
@@ -445,8 +447,8 @@ export function InventoryView({ boutique, currentUser, onUpdate, logAction, init
                   {line.categoryName && <span className="rounded-full bg-muted px-2 py-1 text-[10px] font-bold">{line.categoryName}</span>}
                   {saved && <CheckCircle2 size={16} className="text-emerald-600"/>}
                 </div>
-                <p className="text-xs text-muted-foreground mt-1">Théorique : <strong>{number(theoretical)} {line.unit}</strong> · Coût FIFO moyen {money(theoretical > 0 ? line.fifoTheoreticalCost / theoretical : line.fifoUnitCost)}</p>
-                <p className="text-xs text-muted-foreground mt-1">Marge réalisée FIFO · {marginPeriodLabel} : <strong className={Number(productMargin?.realizedMargin ?? 0) >= 0 ? "text-emerald-700" : "text-red-700"}>{marginLoading ? "…" : money(Number(productMargin?.realizedMargin ?? 0))}</strong>{!marginLoading && productMargin ? ` · CA ${money(productMargin.revenue)} · coût FIFO ${money(productMargin.fifoCost)}` : ""}{!marginLoading && Number(productMargin?.unmatchedLines ?? 0) > 0 ? ` · ${productMargin!.unmatchedLines} ligne(s) non rapprochée(s)` : ""}</p>
+                <p className="text-xs text-muted-foreground mt-1">Stock théorique : <strong>{number(theoretical)} {line.unit}</strong> · Coût moyen du stock restant (FIFO) {money(theoretical > 0 ? line.fifoTheoreticalCost / theoretical : line.fifoUnitCost)}</p>
+                <p className="text-xs text-muted-foreground mt-1">Marge brute réalisée (FIFO) · {marginPeriodLabel} : <strong className={Number(productMargin?.realizedMargin ?? 0) >= 0 ? "text-emerald-700" : "text-red-700"}>{marginLoading ? "…" : money(Number(productMargin?.realizedMargin ?? 0))}</strong>{!marginLoading && productMargin ? ` · CA valorisé ${money(productMargin.revenue)} · coût des ventes FIFO ${money(productMargin.fifoCost)} · couverture ${number(productMargin.coverageRate)} %` : ""}{!marginLoading && Number(productMargin?.unmatchedLines ?? 0) > 0 ? ` · ${productMargin!.unmatchedLines} ligne(s) non rapprochée(s)` : ""}</p>
               </div>
               {difference != null && <span className={`rounded-full px-3 py-1 text-xs font-black ${difference > 0 ? "bg-emerald-50 text-emerald-700" : difference < 0 ? "bg-red-50 text-red-700" : "bg-slate-100 text-slate-700"}`}>
                 Écart {difference > 0 ? "+" : ""}{number(difference)} {line.unit}
@@ -481,8 +483,8 @@ export function InventoryView({ boutique, currentUser, onUpdate, logAction, init
                 {savingProductId === line.productId ? <Loader2 size={17} className="animate-spin"/> : <Save size={17}/>} Enregistrer ce comptage
               </button>
             </> : <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-              <div className="rounded-xl bg-muted p-3"><p className="text-xs text-muted-foreground">Compté</p><p className="font-black">{number(line.countedQty ?? 0)} {line.unit}</p></div>
-              <div className="rounded-xl bg-muted p-3"><p className="text-xs text-muted-foreground">Écart</p><p className="font-black">{Number(line.differenceQty ?? 0) > 0 ? "+" : ""}{number(line.differenceQty ?? 0)} {line.unit}</p></div>
+              <div className="rounded-xl bg-muted p-3"><p className="text-xs text-muted-foreground">Stock compté</p><p className="font-black">{number(line.countedQty ?? 0)} {line.unit}</p></div>
+              <div className="rounded-xl bg-muted p-3"><p className="text-xs text-muted-foreground">Écart de stock</p><p className="font-black">{Number(line.differenceQty ?? 0) > 0 ? "+" : ""}{number(line.differenceQty ?? 0)} {line.unit}</p></div>
               <div className="rounded-xl bg-muted p-3"><p className="text-xs text-muted-foreground">Valeur FIFO</p><p className="font-black">{money(line.fifoCountedCost)}</p></div>
               <div className="rounded-xl bg-muted p-3"><p className="text-xs text-muted-foreground">Coût FIFO / unité</p><p className="font-black">{money(line.fifoUnitCost)}</p></div>
             </div>}
