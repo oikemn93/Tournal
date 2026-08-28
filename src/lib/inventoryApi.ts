@@ -19,6 +19,28 @@ export type InventoryReport = {
   potentialMargin: number; varianceCost: number; varianceSales: number;
 };
 
+export type FifoRealizedMarginProduct = {
+  productId: number;
+  productName: string;
+  qty: number;
+  revenue: number;
+  fifoCost: number;
+  realizedMargin: number;
+  unmatchedLines: number;
+};
+
+export type FifoRealizedMarginReport = {
+  fromAt: string;
+  toAt: string;
+  revenue: number;
+  fifoCost: number;
+  realizedMargin: number;
+  marginRate: number;
+  lineCount: number;
+  unmatchedLines: number;
+  products: FifoRealizedMarginProduct[];
+};
+
 export type InventorySession = {
   id: string; boutiqueId?: string; scopeType: InventoryScopeType; scopeId?: string | null; scopeLabel: string;
   status: InventoryStatus; operatorId?: string; operatorName?: string | null; startedAt: string; asOfAt: string;
@@ -44,6 +66,28 @@ function normalizeSession(session: any): InventorySession {
   })) : [] };
 }
 
+function normalizeMarginReport(report: any): FifoRealizedMarginReport {
+  return {
+    fromAt: String(report?.fromAt ?? ""),
+    toAt: String(report?.toAt ?? ""),
+    revenue: Number(report?.revenue ?? 0),
+    fifoCost: Number(report?.fifoCost ?? 0),
+    realizedMargin: Number(report?.realizedMargin ?? 0),
+    marginRate: Number(report?.marginRate ?? 0),
+    lineCount: Number(report?.lineCount ?? 0),
+    unmatchedLines: Number(report?.unmatchedLines ?? 0),
+    products: Array.isArray(report?.products) ? report.products.map((row: any) => ({
+      productId: Number(row?.productId),
+      productName: String(row?.productName ?? ""),
+      qty: Number(row?.qty ?? 0),
+      revenue: Number(row?.revenue ?? 0),
+      fifoCost: Number(row?.fifoCost ?? 0),
+      realizedMargin: Number(row?.realizedMargin ?? 0),
+      unmatchedLines: Number(row?.unmatchedLines ?? 0),
+    })) : [],
+  };
+}
+
 async function rpc<T>(name: string, body: Record<string, unknown>): Promise<T> {
   const session = await refreshSessionIfNeeded();
   const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${name}`, { method: "POST", headers: { apikey: PUBLISHABLE_KEY, Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -63,3 +107,10 @@ export async function startInventorySession(params: { boutiqueId: string; scopeT
 export async function saveInventoryCount(params: { sessionId: string; productId: number; countedQty: number; countingDetail?: InventoryCountingDetail }) { return normalizeSession(await rpc<any>("save_inventory_count", { p_session_id: params.sessionId, p_product_id: params.productId, p_counted_qty: params.countedQty, p_counting_detail: params.countingDetail ?? {} })); }
 export async function finalizeInventorySession(sessionId: string) { return normalizeSession(await rpc<any>("finalize_inventory_session", { p_session_id: sessionId })); }
 export async function cancelInventorySession(sessionId: string) { return normalizeSession(await rpc<any>("cancel_inventory_session", { p_session_id: sessionId })); }
+export async function getFifoRealizedMargin(params: { boutiqueId: string; fromAt: string; toAt: string }): Promise<FifoRealizedMarginReport> {
+  return normalizeMarginReport(await rpc<any>("get_fifo_realized_margin", {
+    p_boutique_id: params.boutiqueId,
+    p_from_at: params.fromAt,
+    p_to_at: params.toAt,
+  }));
+}
