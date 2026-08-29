@@ -27,3 +27,4 @@ jobs:
           git add src/lib/api.ts src/app/screens/TransfersView.tsx src/app/types.ts src/app/constants.ts src/app/App.tsx
           git diff --cached --quiet || git commit -m "fix: harden transfer workflow and permissions"
           git push
+# rerun 2
