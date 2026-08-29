@@ -294,6 +294,8 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
         setTimeout(()=>{setClientReturnInv(null);setClientReturnDone(false);setClientReturnBusy(false);},1200);
       } catch(error) { setClientReturnBusy(false); alert(error instanceof Error?error.message:"Retour impossible"); }
     }
+    const clientCreditRefunds = (boutique.clientCreditRefunds ?? []).filter(refund => refund.clientId === c.id)
+      .sort((a,b)=>b.refundedAt.localeCompare(a.refundedAt));
     const totalVentesFacturées = ventes.reduce((s,i)=>s+i.montant,0);
     const totalRetours = retours.reduce((s,i)=>s+i.montant,0);
     const totalFacturé  = totalVentesFacturées-totalRetours;
@@ -301,8 +303,6 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
     const totalImpayé   = ventes.reduce((s,i)=>s+invoiceRemainingAmount(i),0);
     const clientAdvances = (boutique.clientAdvances ?? []).filter(advance => advance.clientId === c.id)
       .sort((a,b)=>b.paidAt.localeCompare(a.paidAt));
-    const clientCreditRefunds = (boutique.clientCreditRefunds ?? []).filter(refund => refund.clientId === c.id)
-      .sort((a,b)=>b.refundedAt.localeCompare(a.refundedAt));
     const advanceRemaining = (advance: typeof clientAdvances[number]) => Math.max(0, advance.amount - (advance.allocatedAmount ?? 0));
     const totalAvoir = clientAdvances.reduce((sum, advance) => sum + advanceRemaining(advance), 0);
     const clientTermsDays = c.paymentTermsDays ?? defaultPaymentTermsDays;
