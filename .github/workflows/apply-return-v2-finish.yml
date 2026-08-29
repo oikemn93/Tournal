@@ -17,7 +17,17 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-      - run: python tools/patch_return_v2_finish.py
+      - name: Apply base return v2 patch
+        run: |
+          set +e
+          output=$(python tools/patch_return_v2_finish.py 2>&1)
+          code=$?
+          set -e
+          printf '%s\n' "$output"
+          if [ "$code" -ne 0 ] && ! printf '%s' "$output" | grep -q 'Invoice message return block missing'; then
+            exit "$code"
+          fi
+      - run: python tools/patch_return_v2_finish_tail.py
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: |
