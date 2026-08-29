@@ -14,7 +14,7 @@ import { formatPreciseDateTime } from "../utils/payments";
 
 const TRANSFER_COLOR = "#ea580c";
 
-type DraftLine = { productId: number; nom: string; unit: string; qty: number; sellUnit: string; sellQty: number; unitPrice: number };
+type DraftLine = { draftId: string; productId: number; nom: string; unit: string; qty: number; sellUnit: string; sellQty: number; unitPrice: number };
 
 const STATUS: Record<RelationalTransfer["status"], { label: string; color: string; bg: string; icon: typeof Clock }> = {
   pending:   { label:"En attente", color:"#d97706", bg:"#fffbeb", icon:Clock },
@@ -55,7 +55,12 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
 
   const destinations = useMemo(() => {
     const map = new Map<string,{id:string;nom:string;ville?:string;tel?:string;isPartner:boolean}>();
-    for (const b of accountDestinations) map.set(b.id, { id:b.id, nom:b.nom, ville:b.ville, tel:b.tel, isPartner:false });
+    // Never expose unrelated application boutiques in the transfer picker.
+    // Own boutiques remain directly available; every external destination must
+    // first be added manually through the phone-only directory.
+    for (const b of accountDestinations.filter(b => sameOwnerIds.has(b.id))) {
+      map.set(b.id, { id:b.id, nom:b.nom, ville:b.ville, tel:b.tel, isPartner:false });
+    }
     for (const partner of partners) {
       if (!map.has(partner.boutique_id)) map.set(partner.boutique_id, {
         id:partner.boutique_id, nom:partner.nom, ville:partner.ville, tel:partner.tel, isPartner:true,
@@ -140,7 +145,7 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
     if (saving) return;
     setSaving(true);
     try {
-      await addBoutiquePartner(boutique.id, entry.boutique_id);
+      await addBoutiquePartner(boutique.id, entry.boutique_id, directoryQuery);
       const loaded = await getBoutiquePartners(boutique.id);
       setPartners(loaded);
       setDirectoryResults(prev => prev.map(row => row.boutique_id===entry.boutique_id ? {...row,is_partner:true} : row));
@@ -201,9 +206,11 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
     const sellUnit = dLineSellUnit || getDefaultSaleUnit(p, boutique);
     const baseQty = toBaseSaleQty(sellQty, sellUnit, p, boutique);
     const stock = productQty(p.id, boutique.entries);
-    if (!sellQty || sellQty <= 0 || baseQty > stock) return toast.error(`Quantité invalide (stock : ${stock} ${p.unit})`);
+    const alreadyDrafted = draftLines.filter(l => l.productId === p.id).reduce((sum,l) => sum + l.qty, 0);
+    if (!sellQty || sellQty <= 0 || baseQty <= 0) return toast.error("Quantité invalide");
+    if (alreadyDrafted + baseQty > stock) return toast.error(`Stock insuffisant : ${alreadyDrafted + baseQty} ${p.unit} demandés pour ${stock} disponibles`);
     if (price < 0) return toast.error("Prix invalide");
-    setDraftLines(prev => [...prev.filter(l => l.productId !== p.id), { productId: p.id, nom: p.nom, unit: p.unit, qty: baseQty, sellUnit, sellQty, unitPrice: price }]);
+    setDraftLines(prev => [...prev, { draftId:crypto.randomUUID(), productId: p.id, nom: p.nom, unit: p.unit, qty: baseQty, sellUnit, sellQty, unitPrice: price }]);
     setDLineProductId(""); setDLineQty(""); setDLineSellUnit(""); setDLinePrice("");
   }
 
@@ -256,11 +263,16 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
 
   async function confirmReceive() {
     if (!receiving || saving) return;
-    const mappings = (receiving.stock_transfer_lines ?? []).map(line => {
+    const seenNewSourceProducts = new Set<number>();
+    const mappings = (receiving.stock_transfer_lines ?? []).flatMap(line => {
       const selected = receiveMappings[line.id] ?? "new";
-      return selected === "new"
-        ? { transferLineId:line.id, createNew:true }
-        : { transferLineId:line.id, destinationProductId:Number(selected) };
+      if (selected !== "new") return [{ transferLineId:line.id, destinationProductId:Number(selected) }];
+      // For several conditioning lines of the same source product, create the
+      // destination product once. Later lines omit the mapping so the backend
+      // reuses the exact product created by the first line in this transaction.
+      if (seenNewSourceProducts.has(line.source_product_id)) return [];
+      seenNewSourceProducts.add(line.source_product_id);
+      return [{ transferLineId:line.id, createNew:true }];
     });
     setSaving(true);
     try {
@@ -481,7 +493,14 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
             {(receiving.stock_transfer_lines ?? []).map(line => (
               <div key={line.id} className="rounded-2xl border border-border p-3 space-y-2">
                 <div><p className="font-black text-sm">{line.product_name}</p><p className="text-xs text-muted-foreground">{Number(line.sell_qty ?? line.qty)} {line.sell_unit ?? line.unit} · {line.qty} {line.unit} à entrer en stock</p></div>
-                <select value={receiveMappings[line.id] ?? "new"} onChange={e=>setReceiveMappings(prev=>({...prev,[line.id]:e.target.value}))} className={inputCls}>
+                <select value={receiveMappings[line.id] ?? "new"} onChange={e=>{
+                  const value=e.target.value;
+                  setReceiveMappings(prev=>{
+                    const next={...prev};
+                    for (const sibling of receiving.stock_transfer_lines ?? []) if (sibling.source_product_id===line.source_product_id) next[sibling.id]=value;
+                    return next;
+                  });
+                }} className={inputCls}>
                   <option value="new">＋ Créer un nouveau produit</option>
                   {boutique.products.filter(p=>p.unit===line.unit).sort((a,b)=>a.nom.localeCompare(b.nom)).map(p=><option key={p.id} value={p.id}>Affecter à {p.nom} · stock {productQty(p.id,boutique.entries)} {p.unit}</option>)}
                 </select>
@@ -520,15 +539,17 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
                 <input value={destinationSearch} onChange={e=>setDestinationSearch(e.target.value)} placeholder="Rechercher nom, téléphone ou ville…" className={searchInputCls+" pl-9"}/>
               </div>
               <select value={destination} onChange={e => setDestination(e.target.value)} className={inputCls}>
-                <option value="">Choisir une boutique…</option>
+                <option value="">Choisir une boutique autorisée…</option>
                 {filteredDestinations.map(b => {
                   const count = destinationFrequency.get(b.id) ?? 0;
                   const relation = sameOwnerIds.has(b.id) ? "interne" : b.isPartner ? "partenaire commercial" : "commercial";
                   return <option key={b.id} value={b.id}>{b.nom}{b.ville ? ` — ${b.ville}` : ""}{b.tel ? ` · ${b.tel}` : ""} · {relation}{count > 0 ? ` · ${count} transfert${count>1?"s":""}` : ""}</option>;
                 })}
               </select>
-              {destinationBoutique && (
+              {destinationBoutique ? (
                 <p className="text-xs text-muted-foreground px-1">{destinationBoutique.tel ? `Tél. ${destinationBoutique.tel}` : "Téléphone non renseigné"}{destinationBoutique.ville ? ` · ${destinationBoutique.ville}` : ""}</p>
+              ) : (
+                <button type="button" onClick={()=>setDirectoryOpen(true)} className="text-xs font-black px-1 text-left" style={{color:TRANSFER_COLOR}}>Destinataire externe absent ? Ajoutez-le d’abord avec son numéro dans l’annuaire.</button>
               )}
             </div>
           </Field>
@@ -586,13 +607,13 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
               {draftLines.map(l => {
                 const lineAmt = l.sellQty * l.unitPrice;
                 return (
-                  <div key={l.productId} className="flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background:"#f3f4f6" }}>
+                  <div key={l.draftId} className="flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background:"#f3f4f6" }}>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-black truncate">{l.nom}</p>
                       <p className="text-xs text-muted-foreground">{l.sellQty} {l.sellUnit} × {fmt(l.unitPrice)} · {l.qty} {l.unit} stock</p>
                     </div>
                     <p className="font-black text-sm flex-shrink-0" style={{ color:TRANSFER_COLOR }}>{fmt(lineAmt)}</p>
-                    <button onClick={() => setDraftLines(prev => prev.filter(x => x.productId !== l.productId))}
+                    <button onClick={() => setDraftLines(prev => prev.filter(x => x.draftId !== l.draftId))}
                       className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background:"#ef444415" }}>
                       <Trash2 size={11} style={{ color:"#ef4444" }}/>
                     </button>

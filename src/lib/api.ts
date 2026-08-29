@@ -1578,9 +1578,9 @@ export async function getBoutiquePartners(boutiqueId:string) {
     method:"POST", body:JSON.stringify({ p_boutique_id:boutiqueId }),
   });
 }
-export async function addBoutiquePartner(boutiqueId:string, partnerBoutiqueId:string) {
+export async function addBoutiquePartner(boutiqueId:string, partnerBoutiqueId:string, phone:string) {
   return dataRequest<{boutique_id:string;nom:string;ville:string|null;tel:string|null}>("rpc/add_boutique_partner", {
-    method:"POST", body:JSON.stringify({ p_boutique_id:boutiqueId, p_partner_boutique_id:partnerBoutiqueId }),
+    method:"POST", body:JSON.stringify({ p_boutique_id:boutiqueId, p_partner_boutique_id:partnerBoutiqueId, p_phone:phone }),
   });
 }
 export async function removeBoutiquePartner(boutiqueId:string, partnerBoutiqueId:string) {
