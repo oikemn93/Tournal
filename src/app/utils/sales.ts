@@ -7,25 +7,29 @@ function normalizedUnit(value?: string): string {
   return raw;
 }
 
+/**
+ * Conditioning options shared by every selling surface.
+ * Unit/piece is deliberately first: a new sale must always start in unit mode,
+ * while lot and length-based modes remain explicit user choices.
+ */
 export function getSaleUnitOptions(product: Product, boutique: Boutique): string[] {
   const category = (boutique.categories ?? []).find(c => c.nom === product.categorie);
   if (!category || category.nbPiecesParLot <= 0) return [product.unit];
 
-  const options = ["Lot", "Pièce"];
   const baseUnit = category.unitVente || product.unit;
+  const options = ["Pièce", "Lot"];
   if (normalizedUnit(baseUnit) !== "piece") options.push(baseUnit);
-  return options;
+  return Array.from(new Set(options));
 }
 
 export function getDefaultSaleUnit(product: Product, boutique: Boutique): string {
   const category = (boutique.categories ?? []).find(c => c.nom === product.categorie);
   const baseUnit = category?.unitVente ?? product.unit;
   const options = getSaleUnitOptions(product, boutique);
-  const normalizedBase = normalizedUnit(baseUnit);
 
-  if (normalizedBase === "piece" && options.includes("Pièce")) return "Pièce";
-  if (["yards", "metres"].includes(normalizedBase) && options.includes(baseUnit)) return baseUnit;
-  if (options.includes("Pièce")) return "Pièce";
+  // The business default is always the smallest sellable unit when a product
+  // has conditioning metadata. A lot is never selected implicitly.
+  if (category?.nbPiecesParLot && options.includes("Pièce")) return "Pièce";
   return options.includes(baseUnit) ? baseUnit : (options[0] ?? product.unit);
 }
 
@@ -45,6 +49,19 @@ export function toBaseSaleQty(sellQty: number, sellUnit: string, product: Produc
       : sellQty * (category.longueurParPiece || 1);
   }
   return sellQty;
+}
+
+export function getSaleUnitLabel(product: Product, boutique: Boutique, sellUnit: string): string {
+  const category = (boutique.categories ?? []).find(c => c.nom === product.categorie);
+  if (!category) return sellUnit;
+  if (sellUnit === "Lot") {
+    const length = category.longueurParPiece > 0 ? ` × ${category.longueurParPiece} ${category.unitVente}` : "";
+    return `Lot (${category.nbPiecesParLot} pièces${length})`;
+  }
+  if (sellUnit === "Pièce" && category.longueurParPiece > 0 && normalizedUnit(category.unitVente) !== "piece") {
+    return `Pièce (${category.longueurParPiece} ${category.unitVente})`;
+  }
+  return sellUnit;
 }
 
 export function getLastSalePrice(productId: number, invoices: Invoice[], sellUnit: string): number | null {
