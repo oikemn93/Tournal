@@ -10,7 +10,7 @@ import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
 import { formatPreciseDateTime, invoicePaidAmount, invoiceRemainingAmount as baseInvoiceRemainingAmount, invoicePaymentEvents, moneyExceeds, roundMoney } from "../utils/payments";
-import { getDefaultSaleUnit, getLastSalePrice, getSaleUnitOptions, toBaseSaleQty } from "../utils/sales";
+import { getDefaultSaleUnit, getLastSalePrice, getSaleUnitOptions, getSaleUnitLabel, toBaseSaleQty } from "../utils/sales";
 
 // ─── SHARE INVOICE MODAL ──────────────────────────────────────────────────────
 
@@ -1045,10 +1045,10 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
               {products.map(p=><option key={p.id} value={p.id}>{p.nom} (stock: {productQty(p.id,entries)} {p.unit})</option>)}
             </select>
             {getInvSellOptions(lPid).length>1&&(()=>{
-              const cat2=(boutique.categories??[]).find(c=>c.nom===products.find(p=>p.id===lPid)?.categorie);
+              const prod=products.find(p=>p.id===lPid);
               const effUnit=lSellUnit||invDefaultUnit(lPid);
               return(<div className="flex gap-2 flex-wrap">{getInvSellOptions(lPid).map(u=>{
-                const lbl=u==="Lot"?(cat2?'Lot ('+cat2.nbPiecesParLot+'p)':'Lot'):u==="Pièce"?"Pièce":u;
+                const lbl=prod ? getSaleUnitLabel(prod,boutique,u) : u;
                 return(<button key={u} onClick={()=>{ setLSellUnit(u); setLQty(""); const last=getLastSalePrice(lPid,invoices,u); setLPrix(last!=null?String(last):""); }} className="flex-1 py-2 rounded-xl text-xs font-bold whitespace-nowrap"
                   style={{ background:effUnit===u?"#1f2937":"#EEE9D8", color:effUnit===u?"#fff":"#374151" }}>{lbl}</button>);
               })}</div>);

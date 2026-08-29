@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import type { Boutique, PlatformUser } from "../types";
 import { acceptStockTransfer, cancelStockTransfer, createStockTransfer, getStockTransfers, rejectStockTransfer, searchBoutiqueDirectory, getBoutiquePartners, addBoutiquePartner, removeBoutiquePartner, subscribeToStockTransfers, type RelationalTransfer, type BoutiqueDirectoryEntry } from "../../lib/api";
 import { productQty } from "../utils/inventory";
-import { getLastSalePrice } from "../utils/sales";
+import { getDefaultSaleUnit, getLastSalePrice, getSaleUnitLabel, getSaleUnitOptions, toBaseSaleQty } from "../utils/sales";
 import { fmt } from "../utils/formatting";
 import { SEM, inputCls, searchInputCls } from "../constants";
 import { Modal } from "../components/Modal";
@@ -14,7 +14,7 @@ import { formatPreciseDateTime } from "../utils/payments";
 
 const TRANSFER_COLOR = "#ea580c";
 
-type DraftLine = { productId: number; nom: string; unit: string; qty: number; unitPrice: number; discountPercent: number };
+type DraftLine = { productId: number; nom: string; unit: string; qty: number; sellUnit: string; sellQty: number; unitPrice: number; discountPercent: number };
 
 const STATUS: Record<RelationalTransfer["status"], { label: string; color: string; bg: string; icon: typeof Clock }> = {
   pending:   { label:"En attente", color:"#d97706", bg:"#fffbeb", icon:Clock },
@@ -69,6 +69,7 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
   const [draftLines, setDraftLines] = useState<DraftLine[]>([]);
   const [dLineProductId, setDLineProductId] = useState("");
   const [dLineQty, setDLineQty] = useState("");
+  const [dLineSellUnit, setDLineSellUnit] = useState("");
   const [dLinePrice, setDLinePrice] = useState("");
   const [dLineDiscount, setDLineDiscount] = useState("0");
 
@@ -100,7 +101,7 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
   }, [destinations, destinationSearch, destinationFrequency]);
 
   const draftTotal = useMemo(
-    () => draftLines.reduce((s, l) => s + l.qty * l.unitPrice * (1 - l.discountPercent / 100), 0),
+    () => draftLines.reduce((s, l) => s + l.sellQty * l.unitPrice * (1 - l.discountPercent / 100), 0),
     [draftLines],
   );
 
@@ -159,34 +160,55 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
     finally { setSaving(false); }
   }
 
+  function transferSuggestedPrice(p: (typeof availableProducts)[number], sellUnit: string) {
+    const lastSale = getLastSalePrice(p.id, boutique.invoices, sellUnit);
+    if (lastSale != null) return lastSale;
+    const receipts = boutique.entries.filter(e => e.productId === p.id && e.qty > 0 && e.montantDu > 0);
+    const receivedQty = receipts.reduce((sum, e) => sum + e.qty, 0);
+    const basePrice = p.prixVente && p.prixVente > 0
+      ? p.prixVente
+      : receivedQty > 0 ? receipts.reduce((sum, e) => sum + e.montantDu, 0) / receivedQty : 0;
+    const factor = toBaseSaleQty(1, sellUnit, p, boutique);
+    return basePrice > 0 ? basePrice * factor : null;
+  }
+
   function selectProduct(pid: string) {
     setDLineProductId(pid);
     setDLineQty("");
     const p = availableProducts.find(p => p.id === Number(pid));
-    if (!p) { setDLinePrice(""); return; }
-    const lastSale = getLastSalePrice(p.id, boutique.invoices, p.unit);
-    const receipts = boutique.entries.filter(e => e.productId === p.id && e.qty > 0 && e.montantDu > 0);
-    const receivedQty = receipts.reduce((sum, e) => sum + e.qty, 0);
-    const weightedCost = receivedQty > 0 ? receipts.reduce((sum, e) => sum + e.montantDu, 0) / receivedQty : null;
-    const suggested = lastSale ?? weightedCost ?? p.prixVente ?? null;
+    if (!p) { setDLineSellUnit(""); setDLinePrice(""); return; }
+    const defaultUnit = getDefaultSaleUnit(p, boutique);
+    setDLineSellUnit(defaultUnit);
+    const suggested = transferSuggestedPrice(p, defaultUnit);
+    setDLinePrice(suggested != null && suggested > 0 ? String(Math.round(suggested)) : "");
+  }
+
+  function selectTransferUnit(unit: string) {
+    setDLineSellUnit(unit);
+    setDLineQty("");
+    const p = availableProducts.find(p => p.id === Number(dLineProductId));
+    if (!p) return;
+    const suggested = transferSuggestedPrice(p, unit);
     setDLinePrice(suggested != null && suggested > 0 ? String(Math.round(suggested)) : "");
   }
 
   function addDraftLine() {
     const p = availableProducts.find(p => p.id === Number(dLineProductId));
     if (!p) return toast.error("Produit invalide");
-    const q = Number(dLineQty), price = Number(dLinePrice), disc = Number(dLineDiscount);
+    const sellQty = Number(dLineQty), price = Number(dLinePrice), disc = Number(dLineDiscount);
+    const sellUnit = dLineSellUnit || getDefaultSaleUnit(p, boutique);
+    const baseQty = toBaseSaleQty(sellQty, sellUnit, p, boutique);
     const stock = productQty(p.id, boutique.entries);
-    if (!q || q <= 0 || q > stock) return toast.error(`Quantité invalide (stock : ${stock} ${p.unit})`);
+    if (!sellQty || sellQty <= 0 || baseQty > stock) return toast.error(`Quantité invalide (stock : ${stock} ${p.unit})`);
     if (price < 0) return toast.error("Prix invalide");
     if (disc < 0 || disc > 100) return toast.error("Remise invalide (0-100%)");
-    setDraftLines(prev => [...prev.filter(l => l.productId !== p.id), { productId: p.id, nom: p.nom, unit: p.unit, qty: q, unitPrice: price, discountPercent: disc }]);
-    setDLineProductId(""); setDLineQty(""); setDLinePrice(""); setDLineDiscount("0");
+    setDraftLines(prev => [...prev.filter(l => l.productId !== p.id), { productId: p.id, nom: p.nom, unit: p.unit, qty: baseQty, sellUnit, sellQty, unitPrice: price, discountPercent: disc }]);
+    setDLineProductId(""); setDLineQty(""); setDLineSellUnit(""); setDLinePrice(""); setDLineDiscount("0");
   }
 
   function resetDraft() {
     setDestination(""); setDestinationSearch(""); setNote(""); setDraftLines([]);
-    setDLineProductId(""); setDLineQty(""); setDLinePrice(""); setDLineDiscount("0");
+    setDLineProductId(""); setDLineQty(""); setDLineSellUnit(""); setDLinePrice(""); setDLineDiscount("0");
     setNewModal(false);
   }
 
@@ -196,7 +218,7 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
     try {
       const result = await createStockTransfer({
         fromBoutiqueId: boutique.id, toBoutiqueId: destination,
-        lines: draftLines.map(l => ({ productId: l.productId, qty: l.qty, unitPrice: l.unitPrice, discountPercent: l.discountPercent })),
+        lines: draftLines.map(l => ({ productId: l.productId, qty: l.qty, sellUnit:l.sellUnit, sellQty:l.sellQty, unitPrice: l.unitPrice, discountPercent: l.discountPercent })),
         note: note.trim() || undefined,
       });
       toast.success(
@@ -282,7 +304,7 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
           {(t.stock_transfer_lines ?? []).map((l, i) => (
             <div key={i} className="flex justify-between text-xs px-2.5 py-1.5 rounded-xl" style={{ background:"#f3f4f6" }}>
               <span className="font-semibold truncate flex-1">{l.product_name}</span>
-              <span className="text-muted-foreground ml-2 flex-shrink-0">{l.qty} {l.unit} × {fmt(Number(l.prix_unit))}{l.discount_percent > 0 ? ` −${l.discount_percent}%` : ""}</span>
+              <span className="text-muted-foreground ml-2 flex-shrink-0">{Number(l.sell_qty ?? l.qty)} {l.sell_unit ?? l.unit} × {fmt(Number(l.prix_unit))}{l.discount_percent > 0 ? ` −${l.discount_percent}%` : ""}{l.sell_unit ? ` · ${l.qty} ${l.unit} stock` : ""}</span>
             </div>
           ))}
         </div>
@@ -471,11 +493,30 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
                 <option value="">Produit…</option>
                 {availableProducts.map(p => <option key={p.id} value={p.id}>{p.nom} — stock : {productQty(p.id, boutique.entries)} {p.unit}</option>)}
               </select>
+              {dLineProductId && (() => {
+                const product = availableProducts.find(p => p.id === Number(dLineProductId));
+                if (!product) return null;
+                const options = getSaleUnitOptions(product, boutique);
+                return options.length > 1 ? (
+                  <div>
+                    <p className="text-[10px] font-black tracking-wider text-muted-foreground mb-1.5">CONDITIONNEMENT · UNITÉ PAR DÉFAUT</p>
+                    <div className="flex gap-2 flex-wrap">
+                      {options.map(unit => <button key={unit} type="button" onClick={() => selectTransferUnit(unit)} className="flex-1 min-w-[100px] py-2 rounded-xl text-xs font-black" style={{background:dLineSellUnit===unit?TRANSFER_COLOR:TRANSFER_COLOR+"18",color:dLineSellUnit===unit?"#fff":TRANSFER_COLOR}}>{getSaleUnitLabel(product,boutique,unit)}</button>)}
+                    </div>
+                  </div>
+                ) : null;
+              })()}
               <div className="grid grid-cols-3 gap-2">
-                <input type="number" min="0.01" step="any" value={dLineQty} onChange={e => setDLineQty(e.target.value)} placeholder="Quantité" className={inputCls}/>
-                <div><input type="number" min="0" step="any" value={dLinePrice} onChange={e => setDLinePrice(e.target.value)} placeholder="Prix cession" className={inputCls}/><p className="text-[10px] text-muted-foreground mt-1 px-1">Dernier prix vendu, sinon coût moyen stock</p></div>
+                <input type="number" min="0.01" step="any" value={dLineQty} onChange={e => setDLineQty(e.target.value)} placeholder={dLineSellUnit ? `Qté ${dLineSellUnit}` : "Quantité"} className={inputCls}/>
+                <div><input type="number" min="0" step="any" value={dLinePrice} onChange={e => setDLinePrice(e.target.value)} placeholder="Prix cession" className={inputCls}/><p className="text-[10px] text-muted-foreground mt-1 px-1">Prix par conditionnement sélectionné</p></div>
                 <input type="number" min="0" max="100" step="any" value={dLineDiscount} onChange={e => setDLineDiscount(e.target.value)} placeholder="Remise %" className={inputCls}/>
               </div>
+              {dLineProductId && Number(dLineQty)>0 && (() => {
+                const product = availableProducts.find(p => p.id === Number(dLineProductId));
+                if (!product || !dLineSellUnit) return null;
+                const base = toBaseSaleQty(Number(dLineQty),dLineSellUnit,product,boutique);
+                return base === Number(dLineQty) && dLineSellUnit === product.unit ? null : <p className="text-xs font-bold px-2" style={{color:TRANSFER_COLOR}}>{Number(dLineQty)} {dLineSellUnit} = {base} {product.unit} prélevés du stock</p>;
+              })()}
               <button onClick={addDraftLine} className="w-full py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5"
                 style={{ background:TRANSFER_COLOR+"18", color:TRANSFER_COLOR }}>
                 <Plus size={14}/> Ajouter la ligne
@@ -487,12 +528,12 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
           {draftLines.length > 0 && (
             <div className="space-y-1.5">
               {draftLines.map(l => {
-                const lineAmt = l.qty * l.unitPrice * (1 - l.discountPercent / 100);
+                const lineAmt = l.sellQty * l.unitPrice * (1 - l.discountPercent / 100);
                 return (
                   <div key={l.productId} className="flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background:"#f3f4f6" }}>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-black truncate">{l.nom}</p>
-                      <p className="text-xs text-muted-foreground">{l.qty} {l.unit} × {fmt(l.unitPrice)}{l.discountPercent > 0 ? ` −${l.discountPercent}%` : ""}</p>
+                      <p className="text-xs text-muted-foreground">{l.sellQty} {l.sellUnit} × {fmt(l.unitPrice)}{l.discountPercent > 0 ? ` −${l.discountPercent}%` : ""} · {l.qty} {l.unit} stock</p>
                     </div>
                     <p className="font-black text-sm flex-shrink-0" style={{ color:TRANSFER_COLOR }}>{fmt(lineAmt)}</p>
                     <button onClick={() => setDraftLines(prev => prev.filter(x => x.productId !== l.productId))}

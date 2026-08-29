@@ -9,7 +9,7 @@ import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
 import { createSale, recordMultiPayment, recordPayment, cancelPendingInvoice, updatePendingInvoice } from "../../lib/api";
-import { getDefaultSaleUnit, getLastSalePrice, getSaleUnitOptions, toBaseSaleQty } from "../utils/sales";
+import { getDefaultSaleUnit, getLastSalePrice, getSaleUnitOptions, getSaleUnitLabel, toBaseSaleQty } from "../utils/sales";
 import { formatPreciseDateTime } from "../utils/payments";
 
 export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente = false, canCancelPendingOrder = false, initialClientId, initialOrderOrigin = "pos", initialEditingInvoice, onInitialClientPrepared, onOrderCreated, onUpdate, logAction }: {
@@ -901,7 +901,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
                 {getSellOptions(addModal).map(u => (
                   <button key={u} onClick={() => { setAddSellUnit(u); setAddQty(""); const last = getLastSalePrice(addModal.id, invoices, u); setAddPrice(last != null ? String(last) : ""); }} className="flex-1 py-3 rounded-xl text-sm font-bold"
                     style={{ background: addSellUnit === u ? POS_COLOR : POS_COLOR+"22", color: addSellUnit === u ? "#fff" : POS_COLOR }}>
-                    {u}
+                    {getSaleUnitLabel(addModal, boutique, u)}
                   </button>
                 ))}
               </div>
