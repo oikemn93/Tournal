@@ -53,6 +53,19 @@ export type ClientAdvance = {
   note?: string;
 };
 
+export type ClientCreditRefund = {
+  id: number;
+  clientId: number;
+  amount: number;
+  paymentMethod: Exclude<PaymentMethod, "Avoir client">;
+  refundedAt: string;
+  date: string;
+  dateRaw: string;
+  operatorId?: string;
+  operatorName: string;
+  note?: string;
+};
+
 export type PaymentEntry = { method: PaymentMethod; amount: number };
 
 export type AuditEntry = {
@@ -84,7 +97,7 @@ export type Invoice    = {
   montant: number; acompte: number; date: string; dateRaw?: string;
   dueDate?: string;
   status: InvoiceStatus; type: string; returnOfInvoiceId?: string; creditNoteNumber?: number;
-  returnRefundAmount?: number; returnReceivableReduction?: number; returnCreditRestore?: number;
+  returnRefundAmount?: number; returnReceivableReduction?: number; returnCreditRestore?: number; returnClientCreditAmount?: number;
   operatorId?: string; operatorNom?: string; operatorColor?: string;
   paymentMethod?: PaymentMethod; paymentSplit?: PaymentEntry[];
   origin?: "pos" | "client_profile";
@@ -125,6 +138,7 @@ export type Boutique = {
   products: Product[]; entries: StockEntry[]; suppliers: Supplier[];
   clients: Client[]; invoices: Invoice[]; auditLog: AuditEntry[]; charges: Charge[];
   clientAdvances?: ClientAdvance[];
+  clientCreditRefunds?: ClientCreditRefund[];
   productParams?: ProductParam[];
   categories?: Category[];
   pendingTransfers?: PendingTransfer[];

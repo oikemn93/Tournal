@@ -23,7 +23,7 @@ export function buildInvoiceMessage(inv: Invoice, boutique: Boutique): string {
   if (isReturn) {
     const refund=Number(inv.returnRefundAmount ?? invoicePaidAmount(inv));
     const receivable=Number(inv.returnReceivableReduction ?? 0);
-    const restored=Number(inv.returnCreditRestore ?? 0);
+    const restored=Number(inv.returnClientCreditAmount ?? inv.returnCreditRestore ?? 0);
     return `*AVOIR DE RETOUR ${inv.id}* — ${boutique.nom}\n` +
       (inv.returnOfInvoiceId ? `↩️ Retour sur facture ${inv.returnOfInvoiceId}\n` : "") +
       `📋 Client: ${inv.client}\n` +
@@ -31,7 +31,7 @@ export function buildInvoiceMessage(inv: Invoice, boutique: Boutique): string {
       `\n↩️ Valeur de l'avoir: ${fmt(inv.montant)}\n` +
       (refund>0 ? `💸 Remboursé: ${fmt(refund)}\n` : "") +
       (receivable>0 ? `🧾 Créance annulée: ${fmt(receivable)}\n` : "") +
-      (restored>0 ? `🎟️ Avoir client restauré: ${fmt(restored)}\n` : "") +
+      (restored>0 ? `🎟️ Avoir client créé: ${fmt(restored)}\n` : "") +
       (refund>0 && inv.paymentMethod ? `💳 Mode de remboursement: ${inv.paymentMethod}\n` : "") +
       `📅 ${inv.date}\nCet avoir atteste du retour de marchandise et de son règlement comptable.`;
   }
@@ -55,7 +55,7 @@ export function buildInvoicePDFHtml(inv: Invoice, boutique: Boutique, clients: C
   const reste = isReturn ? 0 : Math.max(0, inv.montant - inv.acompte);
   const returnRefund = isReturn ? Number(inv.returnRefundAmount ?? invoicePaidAmount(inv)) : 0;
   const returnReceivable = isReturn ? Number(inv.returnReceivableReduction ?? 0) : 0;
-  const returnCredit = isReturn ? Number(inv.returnCreditRestore ?? 0) : 0;
+  const returnCredit = isReturn ? Number(inv.returnClientCreditAmount ?? inv.returnCreditRestore ?? 0) : 0;
   const lines = inv.lines ?? [];
   const subtotal = lines.reduce((s, l) => s + lineTotal(l), 0);
   const accent = isReturn ? "#dc2626" : boutique.color;
@@ -243,7 +243,7 @@ export function buildInvoicePDFHtml(inv: Invoice, boutique: Boutique, clients: C
       ${!isReturn && inv.acompte > 0 ? `<div class="totals-row" style="margin-top:4px;"><span>Total encaissé</span><span>${fmtF(inv.acompte)}</span></div>` : ""}
       ${isReturn && returnRefund>0 ? `<div class="totals-row" style="margin-top:4px;"><span>Remboursé</span><span>${fmtF(returnRefund)}</span></div>` : ""}
       ${isReturn && returnReceivable>0 ? `<div class="totals-row"><span>Créance annulée</span><span>${fmtF(returnReceivable)}</span></div>` : ""}
-      ${isReturn && returnCredit>0 ? `<div class="totals-row"><span>Avoir client restauré</span><span>${fmtF(returnCredit)}</span></div>` : ""}
+      ${isReturn && returnCredit>0 ? `<div class="totals-row"><span>Avoir client créé</span><span>${fmtF(returnCredit)}</span></div>` : ""}
       ${reste > 0 && inv.acompte > 0 ? `<div class="totals-reste"><span class="totals-reste-label">Reste dû</span><span class="totals-reste-value">${fmtF(reste)}</span></div>` : ""}
       ${reste > 0 && inv.acompte === 0 ? `<div class="totals-reste"><span class="totals-reste-label">Montant impayé</span><span class="totals-reste-value">${fmtF(reste)}</span></div>` : ""}
     </div>
@@ -488,7 +488,7 @@ export function buildReceiptHtml(inv: Invoice, boutique: Boutique, fallbackOpera
   const reste = isReturn ? 0 : Math.max(0, inv.montant - inv.acompte);
   const returnRefund = isReturn ? Number(inv.returnRefundAmount ?? invoicePaidAmount(inv)) : 0;
   const returnReceivable = isReturn ? Number(inv.returnReceivableReduction ?? 0) : 0;
-  const returnCredit = isReturn ? Number(inv.returnCreditRestore ?? 0) : 0;
+  const returnCredit = isReturn ? Number(inv.returnClientCreditAmount ?? inv.returnCreditRestore ?? 0) : 0;
   const lines = inv.lines ?? [];
   const paymentEvents = [...(inv.payments ?? [])].sort((a,b) => a.paidAt.localeCompare(b.paidAt));
   const lastPayment = paymentEvents.length ? paymentEvents[paymentEvents.length - 1] : undefined;
@@ -585,7 +585,7 @@ ${lines.map(l => `
   ${isReturn ? `
   ${returnRefund>0?`<div class="row"><span class="label">Remboursé</span><span class="value">${fnum(returnRefund)}&nbsp;F</span></div>`:""}
   ${returnReceivable>0?`<div class="row"><span class="label">Créance annulée</span><span class="value">${fnum(returnReceivable)}&nbsp;F</span></div>`:""}
-  ${returnCredit>0?`<div class="row"><span class="label">Avoir client restauré</span><span class="value">${fnum(returnCredit)}&nbsp;F</span></div>`:""}
+  ${returnCredit>0?`<div class="row"><span class="label">Avoir client créé</span><span class="value">${fnum(returnCredit)}&nbsp;F</span></div>`:""}
   ${returnRefund>0&&inv.paymentMethod ? `<div class="row"><span class="label">Mode de remboursement</span><span class="value">${inv.paymentMethod}</span></div>` : ""}
   <div style="text-align:right;margin-top:1.5mm;"><span class="status">AVOIR</span></div>
   ` : `

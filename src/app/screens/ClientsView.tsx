@@ -279,13 +279,14 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
         const credit:Invoice={
           id:persisted.return_invoice_id,clientId:clientReturnInv.clientId,client:clientReturnInv.client,clientTel:clientReturnInv.clientTel,clientType:clientReturnInv.clientType,
           lines:returnLines.map(line=>({...line,sourceInvoiceLineId:line.id})),montant:Number(persisted.total),acompte:Number(persisted.refund_amount??0),date:today(),dateRaw:persisted.returned_at,status:"payé",type:"Retour",returnOfInvoiceId:clientReturnInv.id,
-          creditNoteNumber:persisted.credit_note_number,returnRefundAmount:Number(persisted.refund_amount??0),returnReceivableReduction:Number(persisted.receivable_reduction??0),returnCreditRestore:Number(persisted.credit_restore??0),
+          creditNoteNumber:persisted.credit_note_number,returnRefundAmount:Number(persisted.refund_amount??0),returnReceivableReduction:Number(persisted.receivable_reduction??0),returnCreditRestore:Number(persisted.credit_restore??0),returnClientCreditAmount:Number(persisted.client_credit_amount??persisted.credit_restore??0),
           operatorId:currentUser.id,operatorNom:currentUser.nom,operatorColor:currentUser.color,paymentMethod:persisted.refund_method as PaymentMethod|undefined,
           payments:persisted.payment?[{id:persisted.payment.id,amount:persisted.payment.amount,paymentMethod:persisted.payment.payment_method as PaymentMethod,paidAt:persisted.payment.paid_at,operatorId:persisted.payment.operator_id,operatorName:persisted.payment.operator_name,batchId:persisted.payment.batch_id,source:persisted.payment.source}]:[],
         };
-        const restoredAdvance=persisted.credit_restore>0&&persisted.restored_advance_id&&clientReturnInv.clientId!=null?{
-          id:Number(persisted.restored_advance_id),clientId:clientReturnInv.clientId,amount:Number(persisted.credit_restore),allocatedAmount:0,paymentMethod:"Autre" as PaymentMethod,
-          paidAt:persisted.returned_at,recordedAt:persisted.returned_at,operatorId:currentUser.id,operatorName:currentUser.nom,note:`Avoir restauré par ${persisted.return_invoice_id} sur ${clientReturnInv.id}`,
+        const returnedCredit=Number(persisted.client_credit_amount??persisted.credit_restore??0);
+        const restoredAdvance=returnedCredit>0&&persisted.restored_advance_id&&clientReturnInv.clientId!=null?{
+          id:Number(persisted.restored_advance_id),clientId:clientReturnInv.clientId,amount:returnedCredit,allocatedAmount:0,paymentMethod:"Autre" as PaymentMethod,
+          paidAt:persisted.returned_at,recordedAt:persisted.returned_at,operatorId:currentUser.id,operatorName:currentUser.nom,note:`Avoir créé par ${persisted.return_invoice_id} sur ${clientReturnInv.id}`,
         }:null;
         onUpdate({invoices:[...boutique.invoices,credit],...(restoredAdvance?{clientAdvances:[...(boutique.clientAdvances??[]),restoredAdvance]}:{})});
         logAction("Retour articles",`${persisted.return_invoice_id} ← ${clientReturnInv.id} · ${returnLines.length} ligne(s) · ${fmt(Number(persisted.total))}`,"↩️");
@@ -296,10 +297,12 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
     const totalVentesFacturées = ventes.reduce((s,i)=>s+i.montant,0);
     const totalRetours = retours.reduce((s,i)=>s+i.montant,0);
     const totalFacturé  = totalVentesFacturées-totalRetours;
-    const totalEncaissé = ventes.reduce((s,i)=>s+invoicePaidAmount(i),0)-retours.reduce((s,i)=>s+invoicePaidAmount(i),0);
+    const totalEncaissé = ventes.reduce((s,i)=>s+invoicePaidAmount(i),0)-retours.reduce((s,i)=>s+invoicePaidAmount(i),0)-clientCreditRefunds.reduce((s,r)=>s+r.amount,0);
     const totalImpayé   = ventes.reduce((s,i)=>s+invoiceRemainingAmount(i),0);
     const clientAdvances = (boutique.clientAdvances ?? []).filter(advance => advance.clientId === c.id)
       .sort((a,b)=>b.paidAt.localeCompare(a.paidAt));
+    const clientCreditRefunds = (boutique.clientCreditRefunds ?? []).filter(refund => refund.clientId === c.id)
+      .sort((a,b)=>b.refundedAt.localeCompare(a.refundedAt));
     const advanceRemaining = (advance: typeof clientAdvances[number]) => Math.max(0, advance.amount - (advance.allocatedAmount ?? 0));
     const totalAvoir = clientAdvances.reduce((sum, advance) => sum + advanceRemaining(advance), 0);
     const clientTermsDays = c.paymentTermsDays ?? defaultPaymentTermsDays;
@@ -318,7 +321,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
     const months = Object.entries(byMonth).sort((a,b)=>b[0].localeCompare(a[0])).slice(0,6);
     const clientPayments = clientInvoices.filter(inv => inv.status !== "annulée").flatMap(inv => (inv.payments ?? []).map(payment => ({ ...payment, invoiceId:inv.id })))
       .sort((a,b)=>b.paidAt.localeCompare(a.paidAt));
-    const paymentHistoryCount = clientPayments.length + clientAdvances.length;
+    const paymentHistoryCount = clientPayments.length + clientAdvances.length + clientCreditRefunds.length;
     const visibleInvoices = showAllInvoices ? clientInvoices : clientInvoices.slice(0, 5);
 
     async function submitClientPayment() {
@@ -428,10 +431,16 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
         const result = await refundClientAdvance({ boutiqueId:boutique.id, clientId:c.id, amount, paymentMethod:refundCreditMethod });
         const consumed = new Map<number,number>();
         result.allocations.forEach(item => consumed.set(item.advance_id, (consumed.get(item.advance_id) ?? 0) + item.amount));
-        onUpdate({ clientAdvances:(boutique.clientAdvances ?? []).map(advance => ({
-          ...advance,
-          allocatedAmount:(advance.allocatedAmount ?? 0) + (consumed.get(advance.id) ?? 0),
-        })) });
+        onUpdate({
+          clientAdvances:(boutique.clientAdvances ?? []).map(advance => ({
+            ...advance,
+            allocatedAmount:(advance.allocatedAmount ?? 0) + (consumed.get(advance.id) ?? 0),
+          })),
+          clientCreditRefunds:[...(boutique.clientCreditRefunds ?? []),{
+            id:result.refund_id,clientId:c.id,amount:result.amount,paymentMethod:result.payment_method as Exclude<PaymentMethod,"Avoir client">,
+            refundedAt:result.refunded_at,date:today(),dateRaw:result.refunded_at,operatorId:result.operator_id,operatorName:result.operator_name,note:"Remboursement avoir client",
+          }],
+        });
         logAction("Remboursement avoir client", `${c.nom} · ${fmt(result.amount)} · ${result.payment_method}`, "↩️");
         setRefundCreditDone(true);
         setTimeout(()=>{
@@ -688,6 +697,10 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
               </div>)}
             </div>
           </div>}
+          {clientCreditRefunds.length>0&&<div className="mt-4 border-t border-border pt-4">
+            <p className="mb-3 text-xs font-black tracking-wider text-muted-foreground">REMBOURSEMENTS D'AVOIR</p>
+            <div className="space-y-2">{clientCreditRefunds.slice(0,20).map(refund=><div key={refund.id} className="flex items-center justify-between gap-3 text-xs"><div><p className="font-bold">💸 {refund.paymentMethod}</p><p className="text-muted-foreground">{formatPreciseDateTime(refund.refundedAt)} · {refund.operatorName}</p></div><p className="font-black text-red-600">− {fmt(refund.amount)}</p></div>)}</div>
+          </div>}
           </>}
         </section>}
         {totalAvoir>0&&<section className="rounded-2xl p-3.5 border" style={{borderColor:SEM.success.accent+"44",background:SEM.success.bg}}>
@@ -755,7 +768,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
         {refundCreditModal&&<Modal title="Rembourser l'avoir" color={SEM.danger.accent} onClose={()=>{if(!refundingCredit)setRefundCreditModal(false);}}>
           <div className="rounded-xl px-3 py-2 text-xs font-semibold" style={{background:SEM.success.bg,color:SEM.success.accent}}>Avoir disponible : {fmt(totalAvoir)}. Ce remboursement consomme l'avoir du client et crée un mouvement de remboursement traçable.</div>
           <Field label="MONTANT À REMBOURSER"><input value={refundCreditAmount} onChange={e=>setRefundCreditAmount(e.target.value)} type="number" min="0" max={totalAvoir} className={inputCls}/></Field>
-          <Field label="MOYEN DE REMBOURSEMENT"><div className="grid grid-cols-2 gap-2">{PAYMENT_METHODS.map(method=><button key={method} type="button" onClick={()=>setRefundCreditMethod(method)} className="rounded-xl px-3 py-3 text-sm font-bold" style={{background:refundCreditMethod===method?(PM_COLOR[method]??"#6b7280")+"18":"#f9fafb",color:refundCreditMethod===method?(PM_COLOR[method]??"#374151"):"#6b7280",border:refundCreditMethod===method?`2px solid ${(PM_COLOR[method]??"#6b7280")}55`:"2px solid transparent"}}>{PM_ICON[method]} {method}</button>)}</div></Field>
+          <Field label="MOYEN DE REMBOURSEMENT"><div className="grid grid-cols-2 gap-2">{PAYMENT_METHODS.filter(method=>method!=="Avoir client").map(method=><button key={method} type="button" onClick={()=>setRefundCreditMethod(method)} className="rounded-xl px-3 py-3 text-sm font-bold" style={{background:refundCreditMethod===method?(PM_COLOR[method]??"#6b7280")+"18":"#f9fafb",color:refundCreditMethod===method?(PM_COLOR[method]??"#374151"):"#6b7280",border:refundCreditMethod===method?`2px solid ${(PM_COLOR[method]??"#6b7280")}55`:"2px solid transparent"}}>{PM_ICON[method]} {method}</button>)}</div></Field>
           {refundCreditDone?<div className="rounded-xl bg-green-50 p-4 text-center text-sm font-black text-green-700">Avoir remboursé ✓</div>:<SubmitBtn color={SEM.danger.accent} label={refundingCredit?"Remboursement…":"Confirmer le remboursement"} onClick={()=>void submitCreditRefund()} disabled={refundingCredit||(Number(refundCreditAmount)||0)<=0||(Number(refundCreditAmount)||0)>totalAvoir+0.01}/>} 
         </Modal>}
         {paymentModal&&<Modal title="Versement client" color={SEM.success.accent} onClose={()=>{if(!submittingPayment)setPaymentModal(false);}}>
@@ -785,7 +798,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
         {viewedInvoice&&<Modal title={viewedInvoice.type.toLowerCase() === "retour" ? `Avoir de retour ${viewedInvoice.id}` : `Facture ${viewedInvoice.id}`} color={viewedInvoice.type.toLowerCase() === "retour" ? "#dc2626" : CC} onClose={()=>setViewedInvoice(null)}>
           <div className="rounded-2xl border border-border p-3">
             <div className="flex items-center justify-between gap-3"><div><p className="font-black">{viewedInvoice.client}</p><p className="text-xs text-muted-foreground">{formatPreciseDateTime(viewedInvoice.dateRaw) === "—" ? viewedInvoice.date : formatPreciseDateTime(viewedInvoice.dateRaw)}</p></div><FileText size={22} className="text-muted-foreground"/></div>
-            {viewedInvoice.type.toLowerCase()==="retour" ? <div className="mt-3 grid grid-cols-3 gap-2 text-center"><div className="rounded-xl bg-muted p-2"><p className="text-[10px] text-muted-foreground">AVOIR RETOUR</p><p className="text-sm font-black">{fmt(viewedInvoice.montant)}</p></div><div className="rounded-xl bg-amber-50 p-2"><p className="text-[10px] text-amber-700">CRÉANCE ANNULÉE</p><p className="text-sm font-black text-amber-700">{fmt(Number(viewedInvoice.returnReceivableReduction??0))}</p></div><div className="rounded-xl bg-green-50 p-2"><p className="text-[10px] text-green-700">AVOIR CLIENT</p><p className="text-sm font-black text-green-700">{fmt(Number(viewedInvoice.returnCreditRestore??0))}</p></div>{Number(viewedInvoice.returnRefundAmount??0)>0&&<div className="col-span-3 rounded-xl bg-red-50 p-2"><p className="text-[10px] text-red-700">REMBOURSÉ IMMÉDIATEMENT</p><p className="text-sm font-black text-red-700">{fmt(Number(viewedInvoice.returnRefundAmount))}</p></div>}</div> : <div className="mt-3 grid grid-cols-3 gap-2 text-center"><div className="rounded-xl bg-muted p-2"><p className="text-[10px] text-muted-foreground">TOTAL</p><p className="text-sm font-black">{fmt(viewedInvoice.montant)}</p></div><div className="rounded-xl bg-green-50 p-2"><p className="text-[10px] text-green-700">PAYÉ</p><p className="text-sm font-black text-green-700">{fmt(invoicePaidAmount(viewedInvoice))}</p></div><div className="rounded-xl bg-red-50 p-2"><p className="text-[10px] text-red-700">RESTE</p><p className="text-sm font-black text-red-700">{fmt(invoiceRemainingAmount(viewedInvoice))}</p></div></div>}
+            {viewedInvoice.type.toLowerCase()==="retour" ? <div className="mt-3 grid grid-cols-3 gap-2 text-center"><div className="rounded-xl bg-muted p-2"><p className="text-[10px] text-muted-foreground">AVOIR RETOUR</p><p className="text-sm font-black">{fmt(viewedInvoice.montant)}</p></div><div className="rounded-xl bg-amber-50 p-2"><p className="text-[10px] text-amber-700">CRÉANCE ANNULÉE</p><p className="text-sm font-black text-amber-700">{fmt(Number(viewedInvoice.returnReceivableReduction??0))}</p></div><div className="rounded-xl bg-green-50 p-2"><p className="text-[10px] text-green-700">AVOIR CLIENT</p><p className="text-sm font-black text-green-700">{fmt(Number(viewedInvoice.returnClientCreditAmount??viewedInvoice.returnCreditRestore??0))}</p></div>{Number(viewedInvoice.returnRefundAmount??0)>0&&<div className="col-span-3 rounded-xl bg-red-50 p-2"><p className="text-[10px] text-red-700">REMBOURSÉ IMMÉDIATEMENT</p><p className="text-sm font-black text-red-700">{fmt(Number(viewedInvoice.returnRefundAmount))}</p></div>}</div> : <div className="mt-3 grid grid-cols-3 gap-2 text-center"><div className="rounded-xl bg-muted p-2"><p className="text-[10px] text-muted-foreground">TOTAL</p><p className="text-sm font-black">{fmt(viewedInvoice.montant)}</p></div><div className="rounded-xl bg-green-50 p-2"><p className="text-[10px] text-green-700">PAYÉ</p><p className="text-sm font-black text-green-700">{fmt(invoicePaidAmount(viewedInvoice))}</p></div><div className="rounded-xl bg-red-50 p-2"><p className="text-[10px] text-red-700">RESTE</p><p className="text-sm font-black text-red-700">{fmt(invoiceRemainingAmount(viewedInvoice))}</p></div></div>}
           </div>
           <div className="space-y-2">{(viewedInvoice.lines ?? []).map((line,index)=><div key={index} className="flex items-center justify-between rounded-xl bg-muted px-3 py-2 text-xs"><div><p className="font-bold">{line.nom}</p><p className="text-muted-foreground">{line.sellQty ?? line.qty} {line.sellUnit ?? line.unit}</p></div><p className="font-black">{fmt((line.sellQty ?? line.qty) * line.prixUnit)}</p></div>)}</div>
           {canSeeMargin && viewedInvoice.type.toLowerCase() !== "retour" && viewedInvoice.status !== "annulée" && <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3">

@@ -327,7 +327,10 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
       .filter(advance => advance.paidAt >= caisseSession.openedAt)
       .map(advance => ({ paidAt:advance.paidAt, paymentMethod:advance.paymentMethod, signedAmount:advance.amount }))
     : [];
-  const caissePaymentEvents = [...sessionEvents, ...sessionAdvanceEvents];
+  const sessionCreditRefundEvents = isCaisseOpen && caisseSession
+    ? (boutique.clientCreditRefunds ?? []).filter(refund => refund.refundedAt >= caisseSession.openedAt).map(refund => ({ paidAt:refund.refundedAt, paymentMethod:refund.paymentMethod, signedAmount:-refund.amount }))
+    : [];
+  const caissePaymentEvents = [...sessionEvents, ...sessionAdvanceEvents, ...sessionCreditRefundEvents];
   const sessionTotal = caissePaymentEvents.reduce((s, ev) => s + ev.signedAmount, 0);
   const sessionByMethod = PAYMENT_METHODS.map(m => ({
     m,
@@ -542,7 +545,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
     const initQtys: Record<number,number> = {};
     inv.lines.forEach((l,i) => { initQtys[i] = remainingReturnable(inv, l); });
     setReturnQtys(initQtys);
-    setReturnMethod("Espèces");
+    if (inv.clientId == null) setReturnMethod("Espèces");
     setReturnDone(false);
     setReturnInv(inv);
     setDetailInv(null);
@@ -571,7 +574,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
     }
     let persisted;
     try {
-      persisted = await returnSale({ boutiqueId:boutique.id, invoiceId:returnInv.id, refundMethod:returnMethod, lines:returnLines.map(l=>({ sourceLineId:l.id, productId:l.productId, qty:l.qty })) });
+      persisted = await returnSale({ boutiqueId:boutique.id, invoiceId:returnInv.id, ...(returnInv.clientId == null ? { refundMethod:returnMethod } : {}), lines:returnLines.map(l=>({ sourceLineId:l.id, productId:l.productId, qty:l.qty })) });
     } catch (error) {
       alert(error instanceof Error ? error.message : "Retour impossible");
       return;
@@ -583,7 +586,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
       clientType:returnInv.clientType,
       lines: returnLines.map(line=>({ ...line, sourceInvoiceLineId:line.id })), montant: refundTotal, acompte:Number(persisted.refund_amount ?? 0),
       date: today(), dateRaw:persisted.returned_at, status: "payé", type: "Retour", returnOfInvoiceId:returnInv.id,
-      creditNoteNumber:persisted.credit_note_number, returnRefundAmount:Number(persisted.refund_amount ?? 0), returnReceivableReduction:Number(persisted.receivable_reduction ?? 0), returnCreditRestore:Number(persisted.credit_restore ?? 0),
+      creditNoteNumber:persisted.credit_note_number, returnRefundAmount:Number(persisted.refund_amount ?? 0), returnReceivableReduction:Number(persisted.receivable_reduction ?? 0), returnCreditRestore:Number(persisted.credit_restore ?? 0), returnClientCreditAmount:Number(persisted.client_credit_amount ?? persisted.credit_restore ?? 0),
       operatorNom: currentUser.nom, operatorColor: currentUser.color,
       paymentMethod: persisted.refund_method as PaymentMethod,
       payments: persisted.payment ? [{
@@ -1141,7 +1144,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
               </div>
             ) : null;
           })()}
-          {!returnDone && (
+          {!returnDone && returnInv.clientId == null && (
             <div className="space-y-2">
               <p className="text-xs font-black tracking-wider text-muted-foreground">MODE DE REMBOURSEMENT</p>
               <div className="grid grid-cols-2 gap-2">
@@ -1154,6 +1157,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
               <p className="text-xs text-muted-foreground">Le serveur réduit d'abord une éventuelle créance impayée, restaure ensuite l'avoir client utilisé, puis rembourse uniquement le solde réellement encaissé. Le mode ci-dessus ne s'applique qu'à la partie effectivement remboursée.</p>
             </div>
           )}
+          {returnInv.clientId != null && !returnDone && <div className="rounded-xl bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800">Client enregistré : aucune sortie d'argent lors du retour. La créance éventuelle est annulée d'abord, puis le solde devient un avoir client. Le remboursement de cet avoir se fait séparément depuis Clients.</div>}
           {returnDone ? (
             <div className="flex items-center justify-center gap-3 py-4 rounded-2xl" style={{ background:SEM.success.bg }}>
               <CheckCircle size={22} style={{ color:SEM.success.accent }}/>

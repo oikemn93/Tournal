@@ -22,10 +22,11 @@ export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique:
 
   const filtInv = filterByPeriod(invoices, period, customFrom, customTo);
   const filtPayments = filterPaymentEventsByPeriod(invoices, period, customFrom, customTo);
+  const filtCreditRefunds = filterByPeriod(boutique.clientCreditRefunds ?? [], period, customFrom, customTo);
   const filtCh  = filterByPeriod(charges, period, customFrom, customTo);
 
   const invoiceSign = (invoice: typeof filtInv[number]) => invoice.type === "Retour" || invoice.type === "retour" ? -1 : 1;
-  const ca           = filtPayments.reduce((sum,payment)=>sum + payment.signedAmount,0);
+  const ca           = filtPayments.reduce((sum,payment)=>sum + payment.signedAmount,0) - filtCreditRefunds.reduce((sum,refund)=>sum + refund.amount,0);
   const caTotal      = filtInv.reduce((s,i)=>s + invoiceSign(i) * i.montant,0);
   const salePayments = filtPayments.filter(payment=>payment.signedAmount>0);
   const nbVentes     = new Set(salePayments.map(payment=>payment.invoiceId)).size;
@@ -82,10 +83,11 @@ export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique:
   // only when applied to a later invoice.  Keep it distinct from cash methods:
   // it settles a sale but must not be mistaken for a new cash collection.
   const reportPaymentMethods: PaymentMethod[] = [...PAYMENT_METHODS, "Avoir client"];
-  const byMethode = reportPaymentMethods.map(m => ({
-    m, total: filtPayments.filter(payment=>payment.paymentMethod===m).reduce((sum,payment)=>sum + payment.signedAmount,0),
-    count: filtPayments.filter(payment=>payment.paymentMethod===m).length,
-  })).filter(r=>r.count>0);
+  const byMethode = reportPaymentMethods.map(m => {
+    const payments = filtPayments.filter(payment=>payment.paymentMethod===m);
+    const refunds = filtCreditRefunds.filter(refund=>refund.paymentMethod===m);
+    return { m, total:payments.reduce((sum,payment)=>sum + payment.signedAmount,0)-refunds.reduce((sum,refund)=>sum+refund.amount,0), count:payments.length+refunds.length };
+  }).filter(r=>r.count>0);
 
   const byCategorie = CHARGE_CATS.map(cat=>({
     cat, montant: paidCharges.filter(c=>c.categorie===cat).reduce((s,c)=>s+chargeCashAmount(c),0)

@@ -708,7 +708,7 @@ export async function getAuthBootstrap() {
       adresse:b.adresse ?? undefined,
       email:b.email ?? undefined,
       tel:b.tel ?? undefined,
-      products:[], entries:[], suppliers:[], clients:[], clientAdvances:[], invoices:[], auditLog:[], charges:[], categories:[], productParams:[], caisseHistory:[],
+      products:[], entries:[], suppliers:[], clients:[], clientAdvances:[], clientCreditRefunds:[], invoices:[], auditLog:[], charges:[], categories:[], productParams:[], caisseHistory:[],
     })),
     groupes,
   };
@@ -723,13 +723,14 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string): Promise<T | n
     const bid = encodeURIComponent(boutiqueId);
     const boutiqueFilter = `&id=eq.${bid}`;
     const scoped = (column = "boutique_id") => `&${column}=eq.${bid}`;
-    const [boutiques, categories, products, entries, clients, suppliers, invoices, payments, advances, charges, sessions, auditLogs, userScope] = await Promise.all([
+    const [boutiques, categories, products, entries, clients, suppliers, invoices, payments, advances, creditRefunds, charges, sessions, auditLogs, userScope] = await Promise.all([
       dataRequest<any[]>(`boutiques?select=*${boutiqueFilter}&order=nom.asc`),
       dataRequest<any[]>(`categories?select=*${scoped()}`), dataRequest<any[]>(`products?select=*${scoped()}`),
       dataRequestAll<any>(`stock_entries?select=*${scoped()}`, "entry_date.desc,id.desc"), dataRequest<any[]>(`clients?select=*${scoped()}`),
       dataRequest<any[]>(`suppliers?select=*${scoped()}`),
       dataRequest<any[]>(`invoices?select=*,invoice_lines(*)${scoped()}`),
-      dataRequest<any[]>(`invoice_payments?select=*${scoped()}&order=paid_at.asc`), dataRequest<any[]>(`client_advances?select=*${scoped()}&order=paid_at.desc,id.desc`), dataRequest<any[]>(`charges?select=*${scoped()}`),
+      dataRequest<any[]>(`invoice_payments?select=*${scoped()}&order=paid_at.asc`), dataRequest<any[]>(`client_advances?select=*${scoped()}&order=paid_at.desc,id.desc`),
+      dataRequest<any[]>(`client_credit_refunds?select=*${scoped()}&order=refunded_at.desc,id.desc`), dataRequest<any[]>(`charges?select=*${scoped()}`),
       dataRequest<any[]>(`caisse_sessions?select=*${scoped()}`),
       // The administration view presents recent activity. Loading the entire
       // audit trail at every login or Realtime event was the largest avoidable
@@ -789,6 +790,11 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string): Promise<T | n
         paymentMethod:a.payment_method, paidAt:a.paid_at, recordedAt:a.recorded_at,
         operatorId:a.operator_id ?? undefined, operatorName:a.operator_name, note:a.note ?? undefined,
       })),
+      clientCreditRefunds: creditRefunds.filter(r => r.boutique_id === b.id).map(r => ({
+        id:Number(r.id), clientId:Number(r.client_id), amount:Number(r.amount), paymentMethod:r.payment_method,
+        refundedAt:r.refunded_at, date:day(r.refunded_at), dateRaw:r.refunded_at,
+        operatorId:r.operator_id ?? undefined, operatorName:r.operator_name, note:r.note ?? undefined,
+      })),
       suppliers: suppliers.filter(s => s.boutique_id === b.id).map(s => ({ id:s.id, nom:s.nom, ville:s.ville ?? "", lastDelivery:day(s.last_delivery_at), tel:s.tel ?? "", initials:s.initials ?? "", color:s.color ?? "#C9A227", email:s.email ?? undefined, contact:s.contact ?? undefined, notes:s.notes ?? undefined, paymentTermsDays:s.payment_terms_days ?? undefined, linkedBoutiqueId:s.linked_boutique_id ?? undefined })),
       invoices: invoices.filter(i => i.boutique_id === b.id).map(i => {
         const invoicePayments = paymentsByInvoice.get(i.id) ?? [];
@@ -825,6 +831,7 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string): Promise<T | n
           returnRefundAmount:Number(i.return_refund_amount ?? 0),
           returnReceivableReduction:Number(i.return_receivable_reduction ?? 0),
           returnCreditRestore:Number(i.return_credit_restore ?? 0),
+          returnClientCreditAmount:Number(i.return_client_credit_amount ?? i.return_credit_restore ?? 0),
           origin:i.origin === "client_profile" ? "client_profile" : "pos",
           cancelReason:i.cancel_reason ?? undefined,
           cancelledAt:i.cancelled_at ?? undefined,
@@ -1380,8 +1387,8 @@ export async function cancelPendingInvoice(params: { boutiqueId:string; invoiceI
 
 export async function returnSale(params: { boutiqueId:string; invoiceId:string; lines:Array<{sourceLineId?:number;productId:number;qty:number}>; refundMethod?:string }) {
   return dataRequest<{
-    return_invoice_id:string; credit_note_number:number; source_invoice_id:string; total:number; returned_at:string; refund_method:string|null;
-    refund_amount:number; receivable_reduction:number; credit_restore:number; restored_advance_id:number|null;
+    return_invoice_id:string; credit_note_number:number; source_invoice_id:string; total:number; returned_at:string; registered_client:boolean; refund_method:string|null;
+    refund_amount:number; receivable_reduction:number; client_credit_amount:number; credit_restore:number; restored_advance_id:number|null;
     payment:{ id:number; amount:number; payment_method:string; paid_at:string; operator_id:string; operator_name:string; batch_id:string; source:"invoice" } | null;
   }>("rpc/return_sale", {
     method:"POST", headers:{ Prefer:"return=representation" },
