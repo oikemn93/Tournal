@@ -1,0 +1,33 @@
+name: Apply transfer receiving v2
+on:
+  push:
+    paths:
+      - tools/patch_transfer_receiving_v2.py
+      - .github/workflows/apply-transfer-receiving-v2.yml
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: python tools/patch_transfer_receiving_v2.py
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Commit functional patch
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/lib/api.ts src/app/screens/TransfersView.tsx
+          git diff --cached --quiet || git commit -m "feat: improve transfer conditioning and receiving"
+          git push
