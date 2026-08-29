@@ -26,3 +26,4 @@ jobs:
           git add src/app/screens/POSView.tsx src/app/screens/FacturesView.tsx src/app/screens/ClientsView.tsx src/lib/inventoryApi.ts
           git diff --cached --quiet || git commit -m "fix: prevent transient double stock and show invoice FIFO margin"
           git push
+# retry after narrowing stock patch to state updates only
