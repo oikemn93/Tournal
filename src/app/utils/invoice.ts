@@ -21,11 +21,13 @@ export function buildInvoiceMessage(inv: Invoice, boutique: Boutique): string {
   const reste = inv.montant - inv.acompte;
   const lines = inv.lines?.map(l => `  • ${l.nom} × ${lineDispQty(l)} ${lineDispUnit(l)} = ${fmt(lineTotal(l))}`).join("\n") ?? "";
   if (isReturn) {
-    return `*RETOUR / AVOIR ${inv.id}* — ${boutique.nom}\n📋 Client: ${inv.client}\n` +
+    return `*AVOIR DE RETOUR ${inv.id}* — ${boutique.nom}\n` +
+      (inv.returnOfInvoiceId ? `↩️ Retour sur facture ${inv.returnOfInvoiceId}\n` : "") +
+      `📋 Client: ${inv.client}\n` +
       (lines ? `\n${lines}\n` : "") +
       `\n↩️ Montant remboursé: ${fmt(inv.montant)}\n` +
       (inv.paymentMethod ? `💳 Mode de remboursement: ${inv.paymentMethod}\n` : "") +
-      `📅 ${inv.date}\nCe document atteste d'un retour de marchandise.`;
+      `📅 ${inv.date}\nCet avoir atteste du retour de marchandise et du remboursement associé.`;
   }
   return `*Facture ${inv.id}* — ${boutique.nom}\n📋 Client: ${inv.client}\n` +
     (lines ? `\n${lines}\n` : "") +
@@ -69,8 +71,8 @@ export function buildInvoicePDFHtml(inv: Invoice, boutique: Boutique, clients: C
   const statusColor = isReturn ? "#dc2626" : reste <= 0 ? "#16a34a" : inv.acompte > 0 ? "#d97706" : "#dc2626";
   const statusBg    = isReturn ? "#fef2f2" : reste <= 0 ? "#f0fdf4" : inv.acompte > 0 ? "#fffbeb" : "#fef2f2";
   const statusBorder= isReturn ? "#dc2626" : reste <= 0 ? "#16a34a" : inv.acompte > 0 ? "#d97706" : "#dc2626";
-  const statusLabel = isReturn ? "RETOUR"   : reste <= 0 ? "PAYÉ"     : inv.acompte > 0 ? "ACOMPTE VERSÉ" : "IMPAYÉ";
-  const docLabel    = isReturn ? "Avoir / Retour" : "Facture";
+  const statusLabel = isReturn ? "AVOIR"   : reste <= 0 ? "PAYÉ"     : inv.acompte > 0 ? "ACOMPTE VERSÉ" : "IMPAYÉ";
+  const docLabel    = isReturn ? "Avoir de retour" : "Facture";
 
   const lineRows = lines.map(l => {
     const qtyDisp = l.sellQty ?? l.qty;
@@ -183,7 +185,8 @@ export function buildInvoicePDFHtml(inv: Invoice, boutique: Boutique, clients: C
       <div><span class="status-badge">${statusLabel}</span></div>
     </div>
   </div>
-  ${isReturn ? `<div style="text-align:center;margin:0 0 6mm;padding:4px 0;border:2px solid #dc2626;border-radius:4px;color:#dc2626;font-weight:900;letter-spacing:2px;font-size:11pt;">RETOUR DE MARCHANDISE / AVOIR</div>` : ""}
+  ${isReturn && inv.returnOfInvoiceId ? `<div style="margin:-3mm 0 5mm;text-align:right;font-size:8.5pt;font-weight:700;color:#555">Retour sur facture ${inv.returnOfInvoiceId}</div>` : ""}
+  ${isReturn ? `<div style="text-align:center;margin:0 0 6mm;padding:4px 0;border:2px solid #dc2626;border-radius:4px;color:#dc2626;font-weight:900;letter-spacing:2px;font-size:11pt;">AVOIR DE RETOUR / AVOIR</div>` : ""}
   <div class="parties">
     <div class="party">
       <div class="party-label">Émetteur</div>
