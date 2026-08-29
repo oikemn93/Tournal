@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowRightLeft, ArrowUpRight, ArrowDownLeft, Check, FileText, Loader2, Plus, Trash2, X, PackageCheck, PackageX, Clock, Search, Building2, UserPlus, UserMinus } from "lucide-react";
 import { toast } from "sonner";
 import type { Boutique, PlatformUser } from "../types";
-import { acceptStockTransfer, createStockTransfer, getStockTransfers, rejectStockTransfer, searchBoutiqueDirectory, getBoutiquePartners, addBoutiquePartner, removeBoutiquePartner, subscribeToStockTransfers, type RelationalTransfer, type BoutiqueDirectoryEntry } from "../../lib/api";
+import { acceptStockTransfer, cancelStockTransfer, createStockTransfer, getStockTransfers, rejectStockTransfer, searchBoutiqueDirectory, getBoutiquePartners, addBoutiquePartner, removeBoutiquePartner, subscribeToStockTransfers, type RelationalTransfer, type BoutiqueDirectoryEntry } from "../../lib/api";
 import { productQty } from "../utils/inventory";
 import { getLastSalePrice } from "../utils/sales";
 import { fmt } from "../utils/formatting";
@@ -72,7 +72,7 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
   const [dLinePrice, setDLinePrice] = useState("");
   const [dLineDiscount, setDLineDiscount] = useState("0");
 
-  const availableProducts = boutique.products.filter(p => productQty(p.id, boutique.entries) > 0);
+  const availableProducts = boutique.products.filter(p => p.actif !== false && productQty(p.id, boutique.entries) > 0);
   const destinationBoutique = destinations.find(b => b.id === destination);
   const isSameOwner = destination ? sameOwnerIds.has(destination) : null;
   const destinationFrequency = useMemo(() => {
@@ -210,6 +210,17 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
     finally { setSaving(false); }
   }
 
+  async function cancelPendingTransfer(transferId: string) {
+    if (saving) return;
+    setSaving(true);
+    try {
+      await cancelStockTransfer(transferId);
+      toast.success("Transfert annulé — aucun stock modifié");
+      await load();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Annulation impossible"); }
+    finally { setSaving(false); }
+  }
+
   async function decide(transferId: string, decision: "accept" | "reject") {
     if (saving) return;
     setSaving(true);
@@ -294,6 +305,14 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
             <button onClick={() => decide(t.id, "reject")} disabled={saving}
               className="flex-1 flex items-center justify-center gap-2 py-3 font-black text-sm active:scale-95" style={{ color:"#ef4444" }}>
               <X size={14}/> Refuser
+            </button>
+          </div>
+        )}
+        {!isIn && t.status === "pending" && (
+          <div className="border-t border-border">
+            <button onClick={() => void cancelPendingTransfer(t.id)} disabled={saving}
+              className="w-full flex items-center justify-center gap-2 py-3 font-black text-sm active:scale-95 disabled:opacity-50" style={{ color:"#dc2626" }}>
+              {saving ? <Loader2 size={14} className="animate-spin"/> : <X size={14}/>} Annuler le transfert
             </button>
           </div>
         )}

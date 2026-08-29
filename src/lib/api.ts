@@ -1572,6 +1572,9 @@ export async function acceptStockTransfer(transferId: string) {
 export async function rejectStockTransfer(transferId: string) {
   return dataRequest<{transfer_id:string;status:string}>("rpc/reject_stock_transfer", { method:"POST", body:JSON.stringify({ p_transfer_id:transferId,p_idempotency_key:crypto.randomUUID() }) });
 }
+export async function cancelStockTransfer(transferId: string) {
+  return dataRequest<{transfer_id:string;status:string}>("rpc/cancel_stock_transfer", { method:"POST", body:JSON.stringify({ p_transfer_id:transferId,p_idempotency_key:crypto.randomUUID() }) });
+}
 export async function recordTransferChargePayment(params:{boutiqueId:string;chargeId:number;amount:number;paymentMethod:string}) {
   return dataRequest<{charge_id:number;applied_amount:number;paid_amount:number;status:"partial"|"paid";invoice_id:string;payment_id:number}>("rpc/record_transfer_charge_payment", {
     method:"POST", body:JSON.stringify({p_boutique_id:params.boutiqueId,p_charge_id:params.chargeId,p_idempotency_key:crypto.randomUUID(),p_amount:params.amount,p_payment_method:params.paymentMethod}),

@@ -65,7 +65,7 @@ function RelationalMigrationNotice({ title }: { title: string }) {
 type CartItem   = { productId: number; nom: string; img: string; unit: string; qty: number; prixUnit: number; sellUnit?: string; sellQty?: number };
 type InvoiceStatus = "payé" | "acompte" | "en attente" | "en retard" | "annulée";
 type PaymentMethod = "Espèces" | "Wave" | "Orange Money" | "Autre" | "Avoir client";
-type Permission = "dashboard" | "stock" | "fournisseurs" | "clients" | "factures" | "remboursement" | "charges" | "compta" | "vente" | "encaissement_vente" | "inventaire" | "marges" | "annulation_commande" | "decaissement";
+type Permission = "dashboard" | "stock" | "fournisseurs" | "clients" | "factures" | "remboursement" | "charges" | "compta" | "vente" | "encaissement_vente" | "inventaire" | "marges" | "annulation_commande" | "decaissement" | "transferts";
 type InventaireLine = { productId: number; nom: string; unit: string; categorie?: string; theorique: number; compte?: number };
 type InventaireSession = { id: string; date: string; dateRaw: string; userId: string; userNom: string; userColor: string; statut: "en_cours" | "terminé"; perimetre: "tout" | string[]; lines: InventaireLine[]; valeurEcart?: number; chiffreAffaires?: number; benefice?: number };
 type ChargeCategorie = "Loyer" | "Salaires" | "Électricité" | "Transport" | "Achat stock" | "Marketing" | "Taxes" | "Autre";
@@ -191,12 +191,12 @@ const SUP_COLORS  = ["#C9A227","#1E9B1E","#3b82f6","#a855f7","#f97316","#ec4899"
 const USER_COLORS = ["#C9A227","#3b82f6","#1E9B1E","#a855f7","#f97316","#ec4899","#14b8a6","#ef4444"];
 const ROLES       = ["Gérant","Vendeur","Vendeuse","Caissier","Livreur","Autre"];
 const ROLE_PRESETS: Record<string, Record<Permission,boolean>> = {
-  "Gérant":   { dashboard:true,  stock:true,  fournisseurs:true,  clients:true,  factures:true,  remboursement:true,  charges:true,  compta:true,  vente:true,  inventaire:true,  marges:true,  encaissement_vente:true,  annulation_commande:false, decaissement:false },
-  "Vendeur":  { dashboard:true,  stock:true,  fournisseurs:false, clients:true,  factures:true,  remboursement:false, charges:false, compta:false, vente:true,  inventaire:false, marges:false, encaissement_vente:false, annulation_commande:false, decaissement:false },
-  "Vendeuse": { dashboard:true,  stock:true,  fournisseurs:false, clients:true,  factures:true,  remboursement:false, charges:false, compta:false, vente:true,  inventaire:false, marges:false, encaissement_vente:false, annulation_commande:false, decaissement:false },
-  "Caissier": { dashboard:true,  stock:false, fournisseurs:false, clients:true,  factures:true,  remboursement:false, charges:false, compta:false, vente:false, inventaire:false, marges:false, encaissement_vente:true,  annulation_commande:false  },
-  "Livreur":  { dashboard:false, stock:false, fournisseurs:false, clients:false, factures:true,  remboursement:false, charges:false, compta:false, vente:false, inventaire:false, marges:false, encaissement_vente:false, annulation_commande:false, decaissement:false },
-  "Autre":    { dashboard:false, stock:false, fournisseurs:false, clients:false, factures:false, remboursement:false, charges:false, compta:false, vente:false, inventaire:false, marges:false, encaissement_vente:false, annulation_commande:false, decaissement:false },
+  "Gérant":   { dashboard:true,  stock:true,  fournisseurs:true,  clients:true,  factures:true,  remboursement:true,  charges:true,  compta:true,  vente:true,  inventaire:true,  marges:true,  encaissement_vente:true,  annulation_commande:false, transferts:true, decaissement:false },
+  "Vendeur":  { dashboard:true,  stock:true,  fournisseurs:false, clients:true,  factures:true,  remboursement:false, charges:false, compta:false, vente:true,  inventaire:false, marges:false, encaissement_vente:false, annulation_commande:false, transferts:true, decaissement:false },
+  "Vendeuse": { dashboard:true,  stock:true,  fournisseurs:false, clients:true,  factures:true,  remboursement:false, charges:false, compta:false, vente:true,  inventaire:false, marges:false, encaissement_vente:false, annulation_commande:false, transferts:true, decaissement:false },
+  "Caissier": { dashboard:true,  stock:false, fournisseurs:false, clients:true,  factures:true,  remboursement:false, charges:false, compta:false, vente:false, inventaire:false, marges:false, encaissement_vente:true,  annulation_commande:false, transferts:false, decaissement:false },
+  "Livreur":  { dashboard:false, stock:false, fournisseurs:false, clients:false, factures:true,  remboursement:false, charges:false, compta:false, vente:false, inventaire:false, marges:false, encaissement_vente:false, annulation_commande:false, transferts:false, decaissement:false },
+  "Autre":    { dashboard:false, stock:false, fournisseurs:false, clients:false, factures:false, remboursement:false, charges:false, compta:false, vente:false, inventaire:false, marges:false, encaissement_vente:false, annulation_commande:false, transferts:false, decaissement:false },
 };
 const COULEURS    = ["","#C9A227","#3b82f6","#1E9B1E","#ef4444","#a855f7","#f97316","#ec4899","#6b7280","#ffffff","#000000","#8B4513"];
 const CATEGORIES_DEF = ["Wax","Bazin","Soie","Dentelle","Velours","Coton","Lin","Satin","Kente","Bogolan","Autre"];
@@ -1696,7 +1696,7 @@ function BoutiqueSelectScreen({ user, boutiques, assignments, groupes, allUsers,
           <>
             <p className="text-xs font-black text-muted-foreground uppercase tracking-widest px-1 pt-2">Boutiques du groupe</p>
             {groupeBoutiques.map(b=>{
-              const readAssign: BoutiqueAssignment = { boutiqueId:b.id, role:"Compte Mère", droits:{ dashboard:true, stock:true, fournisseurs:true, clients:true, factures:true, remboursement:false, charges:true, compta:true, vente:false, inventaire:false, marges:false, encaissement_vente:false, annulation_commande:false, decaissement:false } };
+              const readAssign: BoutiqueAssignment = { boutiqueId:b.id, role:"Compte Mère", droits:{ dashboard:true, stock:true, fournisseurs:true, clients:true, factures:true, remboursement:false, charges:true, compta:true, vente:false, inventaire:false, marges:false, encaissement_vente:false, annulation_commande:false, decaissement:false, transferts:false } };
               return (
                 <button key={b.id} onClick={()=>onSelect(b,readAssign)} className="w-full bg-card rounded-2xl p-5 border border-border text-left flex items-center gap-4 active:scale-[0.98]" style={{ boxShadow:`inset 3px 0 0 ${b.color}` }}>
                   <div className="w-16 h-16 rounded-2xl flex-shrink-0 flex items-center justify-center text-xl font-black" style={{ background:b.color+"22", color:b.color, fontFamily:"'Nunito', sans-serif" }}>{b.initials}</div>
@@ -8609,7 +8609,7 @@ ${invLines}
 const ALL_NAV: Array<{ id:Tab; label:string; Icon:typeof LayoutDashboard; color:string; perm?:Permission; adminOnly?:boolean }> = [
   { id:"dashboard",    label:"Accueil",   Icon:LayoutDashboard, color:"#C9A227",        perm:"dashboard" },
   { id:"stock",        label:"Stock",     Icon:Package,          color:"#3b82f6",        perm:"stock" },
-  { id:"transferts",   label:"Transferts",Icon:RefreshCw,        color:"#f97316",        perm:"stock" },
+  { id:"transferts",   label:"Transferts",Icon:RefreshCw,        color:"#f97316",        perm:"transferts" },
   { id:"inventaire",   label:"Inventaire",Icon:ClipboardCheck,   color:"#10b981",        perm:"inventaire" },
   { id:"fournisseurs", label:"Fournis.",  Icon:Truck,            color:"#f97316",        perm:"fournisseurs" },
   { id:"clients",      label:"Clients",   Icon:Users,            color:SEM.success.accent, perm:"clients" },
@@ -9469,7 +9469,7 @@ export default function App() {
     }
   }
   function handleEnterBoutiqueAsAdmin(b: Boutique) {
-    const assign: BoutiqueAssignment = { boutiqueId:b.id, role:"Propriétaire", droits:{ dashboard:true, stock:true, fournisseurs:true, clients:true, factures:true, remboursement:true, charges:true, compta:true, vente:true, inventaire:true, marges:true, encaissement_vente:true, annulation_commande:true, decaissement:true } };
+    const assign: BoutiqueAssignment = { boutiqueId:b.id, role:"Propriétaire", droits:{ dashboard:true, stock:true, fournisseurs:true, clients:true, factures:true, remboursement:true, charges:true, compta:true, vente:true, inventaire:true, marges:true, encaissement_vente:true, annulation_commande:true, decaissement:true, transferts:true } };
     activeBoutiqueIdRef.current=b.id; setActiveBoutiqueId(b.id); setActiveAssign(assign); setTab("dashboard"); setBusinessLoading(true); setScreen("app");
     void loadAuthSettings(b.id);
     setTimeout(()=>{ void hydrateBoutique(b.id); },0);
@@ -9494,7 +9494,7 @@ export default function App() {
       const color = SUP_COLORS[boutiques.length%SUP_COLORS.length];
       const initials = nom.split(" ").map(w=>w[0]).slice(0,2).join("").toUpperCase();
       setBoutiques(prev=>[...prev,{ id:boutiqueId, nom, ville, color, initials, products:[], entries:[], suppliers:[], clients:[], invoices:[], auditLog:[], charges:[] }]);
-      const ownerAssign: BoutiqueAssignment = { boutiqueId, role:"Propriétaire", droits:{ dashboard:true, stock:true, fournisseurs:true, clients:true, factures:true, remboursement:true, charges:true, compta:true, vente:true, inventaire:true, marges:true, encaissement_vente:true, annulation_commande:true, decaissement:true } };
+      const ownerAssign: BoutiqueAssignment = { boutiqueId, role:"Propriétaire", droits:{ dashboard:true, stock:true, fournisseurs:true, clients:true, factures:true, remboursement:true, charges:true, compta:true, vente:true, inventaire:true, marges:true, encaissement_vente:true, annulation_commande:true, decaissement:true, transferts:true } };
       setPlatformUsers(prev=>prev.map(u=>u.id!==ownerId?u:{...u,assignments:[...u.assignments,ownerAssign]}));
       toast.success("Boutique créée");
     } catch (error) {
@@ -9758,7 +9758,7 @@ export default function App() {
             onClose={()=>setTab("dashboard")}
           />
         )}
-        {safeTab==="transferts"   && canAccess("stock")        && <RelationalTransfersView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} currentUser={currentUser!}/>}
+        {safeTab==="transferts"   && canAccess("transferts")        && <RelationalTransfersView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} currentUser={currentUser!}/>}
         {safeTab==="admin"        && isOwner                  && (
         <AdminView
             boutique={boutique}
