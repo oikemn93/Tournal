@@ -177,6 +177,9 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
     [clients],
   );
   const isClientRecordOnlyInvoice = (invoice: Invoice) => {
+    // Credit notes/returns are accounting documents and stay visible in Factures,
+    // even when the source sale belongs to a registered client.
+    if (invoice.type.toLowerCase() === "retour") return false;
     if (invoice.clientId == null) return false;
     const clientType = registeredClientTypes.get(invoice.clientId) ?? invoice.clientType ?? invoice.clientTypeSnapshot;
     return clientType === "B2C" || clientType === "B2B" || clientType === "Grossiste";
@@ -202,7 +205,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
     Math.max(0, line.qty - (returnedByInvoiceProduct.get(`${inv.id}::${line.productId}`) ?? 0));
   const invoiceHasReturnable = (inv: Invoice) =>
     !!inv.lines && inv.lines.some(l => remainingReturnable(inv, l) > 0);
-  const [statusFilter,setStatusFilter] = useState<InvoiceStatus|"all"|"impayé">(initialStatus ?? "all");
+  const [statusFilter,setStatusFilter] = useState<InvoiceStatus|"all"|"impayé"|"retours">(initialStatus ?? "all");
   const [invSearch, setInvSearch] = useState("");
   const [modal,setModal]   = useState(false);
   const [shareInv,setShareInv]   = useState<Invoice|null>(null);
@@ -684,15 +687,25 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
   const effectiveStatus = (invoice: Invoice): InvoiceStatus => invoice.status === "annulée" ? "annulée" : invoiceIsOverdue(invoice) ? "en retard" : invoice.status;
   const UNPAID: InvoiceStatus[] = ["en attente","acompte","en retard"];
   // The day filter is bypassed while searching so the search reaches every day.
-  const dayActive = dayFilterActive && !invSearch.trim();
+  const dayActive = dayFilterActive && !invSearch.trim() && statusFilter !== "retours";
   const filtered = [...invoices]
     .sort((a,b)=>(b.dateRaw??b.date).localeCompare(a.dateRaw??a.date))
     .filter(i => !isClientRecordOnlyInvoice(i))
-    .filter(i => (statusFilter==="all"||statusFilter==="impayé"?statusFilter==="impayé"?UNPAID.includes(effectiveStatus(i)):true:effectiveStatus(i)===statusFilter)
-      && (i.client.toLowerCase().includes(invSearch.toLowerCase())||i.id.toLowerCase().includes(invSearch.toLowerCase()))
-      && (!dayActive||(i.dateRaw??"").slice(0,10)===selectedDay));
-  const pills: Array<{id:InvoiceStatus|"all"|"impayé";label:string;color:string}> = [
+    .filter(i => {
+      const matchesStatus = statusFilter === "all"
+        ? true
+        : statusFilter === "impayé"
+          ? UNPAID.includes(effectiveStatus(i))
+          : statusFilter === "retours"
+            ? i.type.toLowerCase() === "retour"
+            : effectiveStatus(i) === statusFilter;
+      return matchesStatus
+        && (i.client.toLowerCase().includes(invSearch.toLowerCase())||i.id.toLowerCase().includes(invSearch.toLowerCase()))
+        && (!dayActive||(i.dateRaw??"").slice(0,10)===selectedDay);
+    });
+  const pills: Array<{id:InvoiceStatus|"all"|"impayé"|"retours";label:string;color:string}> = [
     {id:"all",      label:"Tout",     color:SEM.neutral.accent},
+    {id:"retours",  label:"↩ Retours / avoirs", color:"#dc2626"},
     {id:"impayé",   label:"Impayés",  color:SEM.danger.accent},
     {id:"acompte",  label:"Acompte",  color:SEM.warning.accent},
     {id:"payé",     label:"Payé ✓",   color:SEM.success.accent},
@@ -787,7 +800,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
       </div>
 
       <div className="flex gap-2" style={{ overflowX:"auto", scrollbarWidth:"none" }}>
-        {pills.map(s=><button key={s.id} onClick={()=>{setStatusFilter(s.id as InvoiceStatus|"all"|"impayé"); if (s.id==="impayé" || s.id==="en retard") setDayFilterActive(false);}} className="px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap flex-shrink-0" style={{ background:statusFilter===s.id?s.color:s.color+"22", color:statusFilter===s.id?"#fff":s.color }}>{s.label}</button>)}
+        {pills.map(s=><button key={s.id} onClick={()=>{setStatusFilter(s.id as InvoiceStatus|"all"|"impayé"|"retours"); if (s.id==="impayé" || s.id==="en retard" || s.id==="retours") setDayFilterActive(false);}} className="px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap flex-shrink-0" style={{ background:statusFilter===s.id?s.color:s.color+"22", color:statusFilter===s.id?"#fff":s.color }}>{s.label}</button>)}
       </div>
       <p className="text-xs text-muted-foreground px-1">Les factures des clients B2C et B2B enregistrés sont consultables depuis leur fiche client.</p>
       <div className="space-y-3">
@@ -828,7 +841,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
       </div>
 
       {/* Invoice detail modal */}
-      {detailInv&&<Modal title={detailInv.id} color="#374151" onClose={()=>setDetailInv(null)}>
+      {detailInv&&<Modal title={detailInv.type === "Retour" ? `Avoir de retour ${detailInv.id}` : detailInv.id} color={detailInv.type === "Retour" ? "#dc2626" : "#374151"} onClose={()=>setDetailInv(null)}>
         <div className="flex items-start justify-between">
           <div>
             <p className="font-bold">{detailInv.client}</p>
@@ -842,6 +855,20 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
           </div>
           <span className="text-xs px-2 py-1 rounded-full font-bold capitalize" style={{ background:invBadge(detailInv.status)[1], color:invBadge(detailInv.status)[0] }}>{detailInv.status}</span>
         </div>
+        {detailInv.type === "Retour" && detailInv.returnOfInvoiceId && (
+          <div className="rounded-xl px-3 py-2 text-xs font-black flex items-center gap-2" style={{background:"#fef2f2",color:"#b91c1c"}}>
+            <RotateCcw size={14}/> Retour sur facture {detailInv.returnOfInvoiceId}
+          </div>
+        )}
+        {detailInv.type !== "Retour" && (() => {
+          const linkedReturns = invoices.filter(item => item.returnOfInvoiceId === detailInv.id);
+          if (!linkedReturns.length) return null;
+          const returnedAmount = linkedReturns.reduce((sum,item)=>sum+item.montant,0);
+          return <div className="rounded-xl px-3 py-2 text-xs font-black flex items-center justify-between gap-2" style={{background:"#fef2f2",color:"#b91c1c"}}>
+            <span className="flex items-center gap-2"><RotateCcw size={14}/> {linkedReturns.length} retour{linkedReturns.length>1?"s":""} enregistré{linkedReturns.length>1?"s":""}</span>
+            <span>{fmt(returnedAmount)}</span>
+          </div>;
+        })()}
         {detailInv.lines&&detailInv.lines.length>0&&(
           <div>
             <p className="text-xs font-black tracking-wider text-muted-foreground mb-2">PRODUITS FACTURÉS</p>

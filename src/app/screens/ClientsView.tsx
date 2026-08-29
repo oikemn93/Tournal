@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Search, MapPin, Phone, Lock, Store, ChevronRight, Plus, ArrowLeft, FilePlus, Wallet, CheckCircle, CalendarClock, Edit2, Trash2, FileText } from "lucide-react";
+import { Search, MapPin, Phone, Lock, Store, ChevronRight, Plus, ArrowLeft, FilePlus, Wallet, CheckCircle, CalendarClock, Edit2, Trash2, FileText, RotateCcw } from "lucide-react";
 import type { Boutique, Client, ClientType, Invoice, PaymentMethod, PlatformUser } from "../types";
 import { SEM, inputCls, searchInputCls } from "../constants";
 import { fmt, today, ini } from "../utils/formatting";
@@ -78,6 +78,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
   const [adresse,setAdresse]=useState(""); const [email,setEmail]=useState(""); const [contact,setContact]=useState("");
   const marginAssignment = currentUser.assignments.find(assignment => assignment.boutiqueId === boutique.id);
   const canSeeMargin = currentUser.isSuperAdmin || !!marginAssignment?.droits?.marges;
+  const canReturn = currentUser.isSuperAdmin || !!marginAssignment?.droits?.remboursement;
   useEffect(() => {
     let cancelled = false;
     if (!viewedInvoice || !canSeeMargin || viewedInvoice.type.toLowerCase() === "retour" || viewedInvoice.status === "annulée" || invoicePaidAmount(viewedInvoice) <= 0) {
@@ -525,7 +526,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
         </section>}
         <section className="bg-card rounded-2xl p-3.5 border border-border" aria-label="Factures et commandes du client">
           <div className="flex items-center justify-between gap-3 mb-3">
-            <div><p className="text-xs font-black tracking-wider text-muted-foreground">FACTURES & COMMANDES</p><p className="text-xs text-muted-foreground mt-0.5">Les plus récentes sont affichées en premier.</p></div>
+            <div><p className="text-xs font-black tracking-wider text-muted-foreground">FACTURES, COMMANDES & RETOURS</p><p className="text-xs text-muted-foreground mt-0.5">Ventes, avoirs de retour et commandes, du plus récent au plus ancien.</p></div>
             <span className="rounded-lg px-2 py-1 text-xs font-black" style={{background:CC+"18",color:CC}}>{clientInvoices.length}</span>
           </div>
           {highlightedInvoiceId && <div className="mb-3 rounded-xl px-3 py-2 text-xs font-bold" style={{background:SEM.success.bg,color:SEM.success.accent}}>{highlightedInvoiceNotice === "payment" ? `✓ Encaissement enregistré : ${highlightedInvoiceId}` : `✓ Nouvelle commande enregistrée : ${highlightedInvoiceId}`}</div>}
@@ -541,12 +542,13 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
               const canUseAdvance = canCollectPayment && !isReturn && remaining>0 && totalAvoir>0;
               const canCancel = canCancelPendingOrder && (canManageAnyPendingOrder || inv.operatorId === currentUser.id) && inv.origin === "client_profile" && inv.status === "en attente" && paid <= 0;
               const canEdit = canCreateOrder && (canManageAnyPendingOrder || inv.operatorId === currentUser.id) && inv.origin === "client_profile" && inv.status === "en attente" && paid <= 0;
+              const canReturnInvoice = canReturn && !isReturn && inv.status !== "annulée" && paid > 0 && (inv.lines?.length ?? 0) > 0;
               const paymentNotice = isHighlighted && advanceAppliedNotice?.invoiceId === inv.id
                 ? `✓ Avoir déduit : ${fmt(advanceAppliedNotice.amount)}`
                 : null;
               const content = <>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2"><p className="text-xs font-black text-muted-foreground">{inv.id}</p><span className="text-xs px-1.5 py-0.5 rounded font-bold capitalize" style={{ background:bc,color:tc }}>{inv.status}</span>{isReturn&&<span className="text-xs px-1.5 py-0.5 rounded font-bold" style={{ background:"#ef444415",color:"#ef4444" }}>Retour</span>}</div>
+                  <div className="flex items-center gap-2"><p className="text-xs font-black text-muted-foreground">{inv.id}</p><span className="text-xs px-1.5 py-0.5 rounded font-bold capitalize" style={{ background:bc,color:tc }}>{inv.status}</span>{isReturn&&<span className="text-xs px-1.5 py-0.5 rounded font-bold inline-flex items-center gap-1" style={{ background:"#ef444415",color:"#ef4444" }}><RotateCcw size={10}/> Avoir de retour</span>}</div>
                   <p className="text-xs text-muted-foreground mt-0.5">{formatPreciseDateTime(inv.dateRaw) === "—" ? inv.date : formatPreciseDateTime(inv.dateRaw)} · {inv.type}</p>
                   {inv.paymentMethod&&<p className="text-xs text-muted-foreground">{PM_ICON[inv.paymentMethod]} {inv.paymentMethod}</p>}
                   {maturity&&<p className="mt-1 inline-flex rounded px-1.5 py-0.5 text-[11px] font-bold" style={{background:maturity.bg,color:maturity.color}}>{maturity.text}</p>}
@@ -562,6 +564,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
                     ? <button type="button" onClick={()=>setViewedInvoice(inv)} className="flex flex-1 min-w-0 items-center gap-3 text-left active:scale-[0.99]">{content}</button>
                     : <div className="flex flex-1 min-w-0 items-center gap-3">{content}</div>}
                   {canUseAdvance&&<button type="button" onClick={()=>applyAdvanceToInvoice(inv)} disabled={!!applyingAdvanceInvoiceId} className="rounded-lg px-2 py-2 text-[11px] font-black disabled:opacity-50" style={{background:"#ccfbf1",color:"#0f766e"}}>{applyingAdvanceInvoiceId===inv.id?"Application…":"🎟️ Utiliser"}</button>}
+                  {canReturnInvoice&&<button type="button" onClick={()=>onOpenInvoice(inv.id)} className="rounded-lg px-2 py-2 text-[11px] font-black inline-flex items-center gap-1" style={{background:"#fef2f2",color:"#dc2626"}} title="Retourner des articles"><RotateCcw size={12}/> Retour</button>}
                   {canEdit&&<button type="button" onClick={()=>{setEditingClientInvoice(inv);setOrderClient(c);}} className="rounded-lg px-2 py-2 text-[11px] font-black" style={{background:"#eff6ff",color:"#1d4ed8"}}>Modifier</button>}
                   {canCancel&&<button type="button" onClick={()=>{setCancelReason("");setCancelInvoice(inv);}} className="rounded-lg px-2 py-2 text-[11px] font-black" style={{background:"#fef2f2",color:"#dc2626"}} title="Annuler cette commande">Annuler</button>}
                 </div>
@@ -664,7 +667,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
           <Field label="DÉLAI EN JOURS"><input type="number" min="0" max="3650" value={termsDraft} onChange={event=>setTermsDraft(event.target.value)} placeholder={String(defaultPaymentTermsDays)} className={inputCls}/></Field>
           <SubmitBtn color={CC} label={savingTerms?"Enregistrement…":"Enregistrer le délai"} onClick={saveClientTerms} disabled={savingTerms}/>
         </Modal>}
-        {viewedInvoice&&<Modal title={`Facture ${viewedInvoice.id}`} color={CC} onClose={()=>setViewedInvoice(null)}>
+        {viewedInvoice&&<Modal title={viewedInvoice.type.toLowerCase() === "retour" ? `Avoir de retour ${viewedInvoice.id}` : `Facture ${viewedInvoice.id}`} color={viewedInvoice.type.toLowerCase() === "retour" ? "#dc2626" : CC} onClose={()=>setViewedInvoice(null)}>
           <div className="rounded-2xl border border-border p-3">
             <div className="flex items-center justify-between gap-3"><div><p className="font-black">{viewedInvoice.client}</p><p className="text-xs text-muted-foreground">{formatPreciseDateTime(viewedInvoice.dateRaw) === "—" ? viewedInvoice.date : formatPreciseDateTime(viewedInvoice.dateRaw)}</p></div><FileText size={22} className="text-muted-foreground"/></div>
             <div className="mt-3 grid grid-cols-3 gap-2 text-center"><div className="rounded-xl bg-muted p-2"><p className="text-[10px] text-muted-foreground">TOTAL</p><p className="text-sm font-black">{fmt(viewedInvoice.montant)}</p></div><div className="rounded-xl bg-green-50 p-2"><p className="text-[10px] text-green-700">PAYÉ</p><p className="text-sm font-black text-green-700">{fmt(invoicePaidAmount(viewedInvoice))}</p></div><div className="rounded-xl bg-red-50 p-2"><p className="text-[10px] text-red-700">RESTE</p><p className="text-sm font-black text-red-700">{fmt(invoiceRemainingAmount(viewedInvoice))}</p></div></div>
@@ -685,6 +688,8 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
             <button type="button" onClick={()=>openReceiptPreview(viewedInvoice,boutique,currentUser.nom)} className="rounded-xl border border-border bg-card py-3 px-2 text-xs font-black">🧾 Ticket caisse</button>
             {viewedInvoice.type.toLowerCase() !== "retour" && <button type="button" onClick={()=>openOrderDocument(viewedInvoice,boutique,boutique.clients)} className="rounded-xl border border-border bg-card py-3 px-2 text-xs font-black">📋 Bon de commande</button>}
           </div>
+          {viewedInvoice.type.toLowerCase() === "retour" && viewedInvoice.returnOfInvoiceId && <div className="rounded-xl bg-red-50 px-3 py-2 text-xs font-black text-red-700 inline-flex items-center gap-2"><RotateCcw size={14}/> Retour sur facture {viewedInvoice.returnOfInvoiceId}</div>}
+          {canReturn && viewedInvoice.type.toLowerCase() !== "retour" && viewedInvoice.status !== "annulée" && invoicePaidAmount(viewedInvoice) > 0 && (viewedInvoice.lines?.length ?? 0) > 0 && <button type="button" onClick={()=>{const id=viewedInvoice.id;setViewedInvoice(null);onOpenInvoice(id);}} className="w-full rounded-xl bg-red-50 py-3 text-sm font-black text-red-700 inline-flex items-center justify-center gap-2"><RotateCcw size={16}/> Retourner des articles</button>}
           {canCreateOrder && viewedInvoice.origin === "client_profile" && viewedInvoice.status === "en attente" && invoicePaidAmount(viewedInvoice) <= 0 && (canManageAnyPendingOrder || viewedInvoice.operatorId === currentUser.id) && <button type="button" onClick={()=>{setViewedInvoice(null);setEditingClientInvoice(viewedInvoice);setOrderClient(c);}} className="w-full rounded-xl bg-blue-50 py-3 text-sm font-black text-blue-700">Modifier la commande</button>}
           {canCollectPayment && invoiceRemainingAmount(viewedInvoice)>0 && totalAvoir>0 && <button type="button" onClick={()=>void applyAdvanceToInvoice(viewedInvoice)} disabled={!!applyingAdvanceInvoiceId} className="w-full rounded-xl py-3 text-sm font-black disabled:opacity-50" style={{background:SEM.success.bg,color:SEM.success.accent}}>🎟️ Utiliser l'avoir disponible ({fmt(Math.min(totalAvoir,invoiceRemainingAmount(viewedInvoice)))})</button>}
           {canCollectPayment && invoiceRemainingAmount(viewedInvoice)>0 && <button type="button" onClick={()=>{setPaymentMethod("Espèces");setPaymentAmount(String(invoiceRemainingAmount(viewedInvoice)));setViewedInvoice(null);setPaymentSummary(null);setPaymentModal(true);}} className="w-full rounded-xl bg-emerald-600 py-3 text-sm font-black text-white">Enregistrer un versement</button>}
