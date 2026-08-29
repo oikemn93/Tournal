@@ -4,7 +4,7 @@ import type { Invoice, Boutique, Client, CaisseSession } from "../types";
 import { lineDispQty, lineDispUnit, lineTotal } from "./inventory";
 import { PAYMENT_METHODS, PM_ICON } from "../constants";
 import { fmt } from "./formatting";
-import { invoicePaymentEvents } from "./payments";
+import { invoicePaidAmount, invoicePaymentEvents } from "./payments";
 
 const GENERATED_DOC_CSP = "default-src 'none'; script-src 'none'; connect-src 'none'; img-src data: blob:; media-src 'none'; object-src 'none'; frame-src 'none'; child-src 'none'; base-uri 'none'; form-action 'none'; style-src 'unsafe-inline'; font-src data:";
 
@@ -21,13 +21,19 @@ export function buildInvoiceMessage(inv: Invoice, boutique: Boutique): string {
   const reste = inv.montant - inv.acompte;
   const lines = inv.lines?.map(l => `  • ${l.nom} × ${lineDispQty(l)} ${lineDispUnit(l)} = ${fmt(lineTotal(l))}`).join("\n") ?? "";
   if (isReturn) {
+    const refund=Number(inv.returnRefundAmount ?? invoicePaidAmount(inv));
+    const receivable=Number(inv.returnReceivableReduction ?? 0);
+    const restored=Number(inv.returnCreditRestore ?? 0);
     return `*AVOIR DE RETOUR ${inv.id}* — ${boutique.nom}\n` +
       (inv.returnOfInvoiceId ? `↩️ Retour sur facture ${inv.returnOfInvoiceId}\n` : "") +
       `📋 Client: ${inv.client}\n` +
       (lines ? `\n${lines}\n` : "") +
-      `\n↩️ Montant remboursé: ${fmt(inv.montant)}\n` +
-      (inv.paymentMethod ? `💳 Mode de remboursement: ${inv.paymentMethod}\n` : "") +
-      `📅 ${inv.date}\nCet avoir atteste du retour de marchandise et du remboursement associé.`;
+      `\n↩️ Valeur de l'avoir: ${fmt(inv.montant)}\n` +
+      (refund>0 ? `💸 Remboursé: ${fmt(refund)}\n` : "") +
+      (receivable>0 ? `🧾 Créance annulée: ${fmt(receivable)}\n` : "") +
+      (restored>0 ? `🎟️ Avoir client restauré: ${fmt(restored)}\n` : "") +
+      (refund>0 && inv.paymentMethod ? `💳 Mode de remboursement: ${inv.paymentMethod}\n` : "") +
+      `📅 ${inv.date}\nCet avoir atteste du retour de marchandise et de son règlement comptable.`;
   }
   return `*Facture ${inv.id}* — ${boutique.nom}\n📋 Client: ${inv.client}\n` +
     (lines ? `\n${lines}\n` : "") +
@@ -46,7 +52,10 @@ export function buildInvoicePDFHtml(inv: Invoice, boutique: Boutique, clients: C
   const clientRecord = inv.clientId != null
     ? clients.find(c => c.id === inv.clientId)
     : clients.find(c => c.nom === inv.client);
-  const reste = Math.max(0, inv.montant - inv.acompte);
+  const reste = isReturn ? 0 : Math.max(0, inv.montant - inv.acompte);
+  const returnRefund = isReturn ? Number(inv.returnRefundAmount ?? invoicePaidAmount(inv)) : 0;
+  const returnReceivable = isReturn ? Number(inv.returnReceivableReduction ?? 0) : 0;
+  const returnCredit = isReturn ? Number(inv.returnCreditRestore ?? 0) : 0;
   const lines = inv.lines ?? [];
   const subtotal = lines.reduce((s, l) => s + lineTotal(l), 0);
   const accent = isReturn ? "#dc2626" : boutique.color;
@@ -228,10 +237,13 @@ export function buildInvoicePDFHtml(inv: Invoice, boutique: Boutique, clients: C
     <div class="totals-inner">
       ${lines.length > 1 ? `<div class="totals-row"><span>Sous-total</span><span>${fmtF(subtotal)}</span></div>` : ""}
       <div class="totals-total">
-        <span class="totals-total-label">${isReturn ? "Montant remboursé" : "Total facture"}</span>
+        <span class="totals-total-label">${isReturn ? "Valeur de l'avoir" : "Total facture"}</span>
         <span class="totals-total-value">${isReturn ? "- " : ""}${fmtF(inv.montant)}</span>
       </div>
       ${!isReturn && inv.acompte > 0 ? `<div class="totals-row" style="margin-top:4px;"><span>Total encaissé</span><span>${fmtF(inv.acompte)}</span></div>` : ""}
+      ${isReturn && returnRefund>0 ? `<div class="totals-row" style="margin-top:4px;"><span>Remboursé</span><span>${fmtF(returnRefund)}</span></div>` : ""}
+      ${isReturn && returnReceivable>0 ? `<div class="totals-row"><span>Créance annulée</span><span>${fmtF(returnReceivable)}</span></div>` : ""}
+      ${isReturn && returnCredit>0 ? `<div class="totals-row"><span>Avoir client restauré</span><span>${fmtF(returnCredit)}</span></div>` : ""}
       ${reste > 0 && inv.acompte > 0 ? `<div class="totals-reste"><span class="totals-reste-label">Reste dû</span><span class="totals-reste-value">${fmtF(reste)}</span></div>` : ""}
       ${reste > 0 && inv.acompte === 0 ? `<div class="totals-reste"><span class="totals-reste-label">Montant impayé</span><span class="totals-reste-value">${fmtF(reste)}</span></div>` : ""}
     </div>
@@ -239,7 +251,7 @@ export function buildInvoicePDFHtml(inv: Invoice, boutique: Boutique, clients: C
   ${(paymentRows.length > 0 || inv.operatorNom || cashier || paidAtFormatted) ? `
   <div class="payment-block">
     ${paymentRows.length > 0 ? `
-      <div class="payment-title">${isReturn ? "Mode de remboursement" : paymentRows.length > 1 ? "Modes de paiement" : "Mode de paiement"}</div>
+      <div class="payment-title">${isReturn ? "Remboursement effectué" : paymentRows.length > 1 ? "Modes de paiement" : "Mode de paiement"}</div>
       ${paymentRows.map(payment => `<div class="payment-row"><span>${payment.method}</span><strong>${fmtF(payment.amount)}</strong></div>`).join("")}
     ` : ""}
     <div class="payment-meta">
@@ -251,7 +263,7 @@ export function buildInvoicePDFHtml(inv: Invoice, boutique: Boutique, clients: C
   <div class="footer">
     <div class="footer-note">
       Document régénéré depuis les données de la facture ${inv.id} — ${new Date().toLocaleDateString("fr-FR", { day:"2-digit", month:"long", year:"numeric" })}.<br/>
-      ${isReturn ? "Ce document atteste d'un retour de marchandise (avoir). Conservez-le pour vos archives." : "Ce document tient lieu de facture. Conservez-le pour vos archives."}
+      ${isReturn ? "Ce document atteste du retour et de son règlement : remboursement, annulation de créance et/ou restauration d'avoir client selon le cas. Conservez-le pour vos archives." : "Ce document tient lieu de facture. Conservez-le pour vos archives."}
     </div>
     <div class="footer-thanks">Merci pour votre confiance.</div>
   </div>
@@ -473,7 +485,10 @@ export async function agentPrint(html: string, printer?: string): Promise<"ok"|"
 
 export function buildReceiptHtml(inv: Invoice, boutique: Boutique, fallbackOperator?: string, isDuplicate?: boolean): string {
   const isReturn = inv.type === "Retour";
-  const reste = Math.max(0, inv.montant - inv.acompte);
+  const reste = isReturn ? 0 : Math.max(0, inv.montant - inv.acompte);
+  const returnRefund = isReturn ? Number(inv.returnRefundAmount ?? invoicePaidAmount(inv)) : 0;
+  const returnReceivable = isReturn ? Number(inv.returnReceivableReduction ?? 0) : 0;
+  const returnCredit = isReturn ? Number(inv.returnCreditRestore ?? 0) : 0;
   const lines = inv.lines ?? [];
   const paymentEvents = [...(inv.payments ?? [])].sort((a,b) => a.paidAt.localeCompare(b.paidAt));
   const lastPayment = paymentEvents.length ? paymentEvents[paymentEvents.length - 1] : undefined;
@@ -506,7 +521,7 @@ export function buildReceiptHtml(inv: Invoice, boutique: Boutique, fallbackOpera
 <html><head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width"/>
-<title>Ticket ${inv.id}</title>
+<title>${isReturn ? "Avoir de retour" : "Ticket"} ${inv.id}</title>
 <style>
   @page { size: 80mm auto; margin: 4mm 4mm 8mm 4mm; }
   * { margin: 0; padding: 0; box-sizing: border-box; color: #000 !important; }
@@ -534,12 +549,13 @@ export function buildReceiptHtml(inv: Invoice, boutique: Boutique, fallbackOpera
   ${boutique.adresse ? `<div class="small">${boutique.adresse}</div>` : ""}
   ${boutique.tel ? `<div class="small">Tél : ${boutique.tel}</div>` : ""}
   ${boutique.email ? `<div class="small">${boutique.email}</div>` : ""}
-  ${isReturn ? `<div class="bold big" style="margin-top:2mm;border:2px solid #000;padding:1mm 2mm;">RETOUR / AVOIR</div>` : ""}
+  ${isReturn ? `<div class="bold big" style="margin-top:2mm;border:2px solid #000;padding:1mm 2mm;">AVOIR DE RETOUR</div>` : ""}
   ${isDuplicate ? `<div class="bold" style="margin-top:2mm;border:2px solid #000;padding:1mm 2mm;letter-spacing:2px;">DUPLICATA</div>` : ""}
 </div>
 <div class="sep-solid"></div>
 <div class="row"><span class="label">N°</span><span class="value">${inv.id}</span></div>
-<div class="row"><span class="label">Commande</span><span class="value">${saleDateLabel}</span></div>
+<div class="row"><span class="label">${isReturn ? "Retour" : "Commande"}</span><span class="value">${saleDateLabel}</span></div>
+${isReturn && inv.returnOfInvoiceId ? `<div class="row"><span class="label">Facture source</span><span class="value">${inv.returnOfInvoiceId}</span></div>` : ""}
 ${paidDateLabel ? `<div class="row"><span class="label">Encaissement</span><span class="value">${paidDateLabel}</span></div>` : ""}
 ${isDuplicate ? `<div class="row"><span class="label">Réimpression</span><span class="value">${printedLabel}</span></div>` : ""}
 <div class="row"><span class="label">Client</span><span class="value">${inv.client}${inv.clientTel ? " · " + inv.clientTel : ""}</span></div>
@@ -561,20 +577,17 @@ ${lines.map(l => `
 ` : ""}
 <div class="total-block">
   <div class="row">
-    <span class="label bold">${isReturn ? "TOTAL REMBOURSÉ" : "TOTAL"}</span>
+    <span class="label bold">${isReturn ? "VALEUR DE L'AVOIR" : "TOTAL"}</span>
     <span class="value">${isReturn ? "- " : ""}${fnum(inv.montant)}&nbsp;F CFA</span>
   </div>
 </div>
 <div style="margin:2mm 0;">
   ${isReturn ? `
-  <div class="row">
-    <span class="label">Montant remboursé</span>
-    <span class="value">${fnum(inv.montant)}&nbsp;F</span>
-  </div>
-  ${inv.paymentMethod ? `<div class="row"><span class="label">Mode de remboursement</span><span class="value">${inv.paymentMethod}</span></div>` : ""}
-  <div style="text-align:right;margin-top:1.5mm;">
-    <span class="status">RETOUR</span>
-  </div>
+  ${returnRefund>0?`<div class="row"><span class="label">Remboursé</span><span class="value">${fnum(returnRefund)}&nbsp;F</span></div>`:""}
+  ${returnReceivable>0?`<div class="row"><span class="label">Créance annulée</span><span class="value">${fnum(returnReceivable)}&nbsp;F</span></div>`:""}
+  ${returnCredit>0?`<div class="row"><span class="label">Avoir client restauré</span><span class="value">${fnum(returnCredit)}&nbsp;F</span></div>`:""}
+  ${returnRefund>0&&inv.paymentMethod ? `<div class="row"><span class="label">Mode de remboursement</span><span class="value">${inv.paymentMethod}</span></div>` : ""}
+  <div style="text-align:right;margin-top:1.5mm;"><span class="status">AVOIR</span></div>
   ` : `
   <div class="row">
     <span class="label">Total facture</span>

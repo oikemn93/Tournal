@@ -7,7 +7,7 @@ import { productQty, productMontant, productSupplierOutstanding, stockEntrySuppl
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
-import { correctSupplierReceipt, createProduct, recordStockMovement, updateProduct } from "../../lib/api";
+import { correctSupplierReceipt, createProduct, recordStockMovement, setProductActive, updateProduct } from "../../lib/api";
 import { formatPreciseDateTime } from "../utils/payments";
 
 function sortStockEntriesNewestFirst(a: StockEntry, b: StockEntry) {
@@ -292,6 +292,17 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter, initia
     } finally {
       setStockCorrectionBusy(null);
     }
+  }
+
+  async function toggleProductArchive() {
+    if (!detail) return;
+    const next=detail.actif===false;
+    try {
+      await setProductActive({boutiqueId:boutique.id,productId:detail.id,active:next});
+      const updated={...detail,actif:next};
+      onUpdate({products:products.map(product=>product.id===detail.id?updated:product)}); setDetail(updated);
+      logAction(next?"Produit réactivé":"Produit archivé",detail.nom,next?"♻️":"📦");
+    } catch(error){alert(error instanceof Error?error.message:"Archivage impossible");}
   }
 
   const filtered = products.filter(p => {

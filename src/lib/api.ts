@@ -768,7 +768,7 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string): Promise<T | n
         nbPiecesParLot: Number(c.pieces_per_lot ?? 0),
         longueurParPiece: Number(c.length_per_piece ?? 0),
       })),
-      products: products.filter(p => p.boutique_id === b.id).map(p => ({ id:p.id, nom:p.nom, img:p.image_url ?? "", unit:p.unit, fournisseur:p.supplier_name ?? "", categorie:categoryById.get(p.category_id)?.nom, prixVente:Number(p.prix_vente ?? 0), prixAchat:Number(p.prix_achat ?? 0) })),
+      products: products.filter(p => p.boutique_id === b.id).map(p => ({ id:p.id, nom:p.nom, img:p.image_url ?? "", unit:p.unit, fournisseur:p.supplier_name ?? "", categorie:categoryById.get(p.category_id)?.nom, prixVente:Number(p.prix_vente ?? 0), prixAchat:Number(p.prix_achat ?? 0), actif:p.actif !== false })),
       productParams: products.filter(p => p.boutique_id === b.id && (p.pieces_per_lot != null || p.length_per_piece != null)).map(p => ({
         productId: p.id,
         nbPiecesParLot: Number(p.pieces_per_lot ?? 0),
@@ -818,7 +818,7 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string): Promise<T | n
           date:day(i.invoice_date),
           dateRaw:i.invoice_date,
           dueDate:i.due_date ?? undefined,
-          status:i.status === "annulée" ? "annulée" : paid >= Number(i.montant) ? "payé" : paid > 0 ? "acompte" : i.status === "en_attente" ? "en attente" : i.status,
+          status:i.status === "annulée" ? "annulée" : i.type === "Retour" ? "payé" : paid >= Number(i.montant) ? "payé" : paid > 0 ? "acompte" : i.status === "en_attente" ? "en attente" : i.status,
           type:i.type,
           returnOfInvoiceId:i.return_of_invoice_id ?? undefined,
           creditNoteNumber:i.credit_note_number != null ? Number(i.credit_note_number) : undefined,
@@ -1137,7 +1137,7 @@ export async function loadBoutiqueSyncPatch(boutiqueId: string, sourceEvents: Bo
   const patch: BoutiqueSyncPatch = { deleted };
   if (categories.length) patch.categories = categories.map(row => ({ id:row.id, nom:row.nom, unitVente:row.unit_vente ?? "pièces", nbPiecesParLot:Number(row.pieces_per_lot ?? 0), longueurParPiece:Number(row.length_per_piece ?? 0) }));
   if (products.length) {
-    patch.products = products.map(row => ({ id:row.id, nom:row.nom, img:row.image_url ?? "", unit:row.unit, fournisseur:row.supplier_name ?? "", categorie:categoryById.get(row.category_id)?.nom, prixVente:Number(row.prix_vente ?? 0), prixAchat:Number(row.prix_achat ?? 0) }));
+    patch.products = products.map(row => ({ id:row.id, nom:row.nom, img:row.image_url ?? "", unit:row.unit, fournisseur:row.supplier_name ?? "", categorie:categoryById.get(row.category_id)?.nom, prixVente:Number(row.prix_vente ?? 0), prixAchat:Number(row.prix_achat ?? 0), actif:row.actif !== false }));
     patch.productParams = products.filter(row => row.pieces_per_lot != null || row.length_per_piece != null).map(row => ({ productId:row.id, nbPiecesParLot:Number(row.pieces_per_lot ?? 0), longueurParPiece:Number(row.length_per_piece ?? 0), unitVente:row.unit }));
   }
   if (entries.length) patch.entries = entries.map(row => ({ id:row.id, productId:row.product_id, qty:Number(row.qty), unit:"unité", montantDu:receiptAmountByEntryId.get(row.id) ?? Number(row.qty) * Number(row.prix_unit ?? 0), movementType:row.type ?? undefined, date:syncDate(row.entry_date), recordedAt:row.entry_date, fournisseur:row.note ?? "", supplierId:row.supplier_id ?? undefined, reference:row.reference ?? undefined, operatorId:row.operator_id ?? undefined, operatorName:userById.get(row.operator_id)?.nom ?? undefined, invoiceId:undefined }));
@@ -1471,6 +1471,13 @@ export async function recordSupplierPayment(params:{ boutiqueId:string; supplier
 }
 export async function createProduct(params:{ boutiqueId:string; name:string; unit:string; categoryId?:string; purchasePrice?:number; salePrice?:number }) {
   return dataRequest<{product_id:number}>("rpc/create_product", { method:"POST", body:JSON.stringify({ p_boutique_id:params.boutiqueId,p_idempotency_key:crypto.randomUUID(),p_nom:params.name,p_unit:params.unit,p_category_id:params.categoryId ?? null,p_prix_achat:params.purchasePrice ?? 0,p_prix_vente:params.salePrice ?? 0 }) });
+}
+
+export async function setProductActive(params:{ boutiqueId:string; productId:number; active:boolean }) {
+  const updated = await dataRequest<Array<{ id:number }>>(`products?id=eq.${params.productId}&boutique_id=eq.${encodeURIComponent(params.boutiqueId)}&select=id`, {
+    method:"PATCH", headers:{ Prefer:"return=representation" }, body:JSON.stringify({ actif:params.active }),
+  });
+  if (updated.length !== 1) throw new Error("Archivage refusé ou produit introuvable");
 }
 
 export async function updateProduct(params:{ boutiqueId:string; productId:number; name:string; categoryId?:string|null; purchasePrice:number }) {

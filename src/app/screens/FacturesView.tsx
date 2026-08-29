@@ -9,7 +9,7 @@ import { buildReceiptHtml, openInvoicePDF, buildInvoiceMessage, generateInvoiceP
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
-import { formatPreciseDateTime, invoicePaidAmount, invoiceRemainingAmount, invoicePaymentEvents, moneyExceeds, roundMoney } from "../utils/payments";
+import { formatPreciseDateTime, invoicePaidAmount, invoiceRemainingAmount as baseInvoiceRemainingAmount, invoicePaymentEvents, moneyExceeds, roundMoney } from "../utils/payments";
 import { getDefaultSaleUnit, getLastSalePrice, getSaleUnitOptions, toBaseSaleQty } from "../utils/sales";
 
 // ─── SHARE INVOICE MODAL ──────────────────────────────────────────────────────
@@ -219,6 +219,15 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
     line.qty - (line.id != null ? (returnedBySourceLine.get(line.id) ?? 0) : (legacyReturnedByInvoiceProduct.get(`${inv.id}::${line.productId}`) ?? 0)),
   );
   const invoiceHasReturnable = (inv: Invoice) => !!inv.lines && inv.lines.some(l => remainingReturnable(inv, l) > 0);
+  const returnReceivableBySource = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const credit of invoices) {
+      if (credit.type.toLowerCase() !== "retour" || !credit.returnOfInvoiceId) continue;
+      map.set(credit.returnOfInvoiceId, (map.get(credit.returnOfInvoiceId) ?? 0) + Number(credit.returnReceivableReduction ?? 0));
+    }
+    return map;
+  }, [invoices]);
+  const invoiceRemainingAmount = (inv: Invoice) => Math.max(0, roundMoney(baseInvoiceRemainingAmount(inv) - (returnReceivableBySource.get(inv.id) ?? 0)));
   const [statusFilter,setStatusFilter] = useState<InvoiceStatus|"all"|"impayé"|"retours">(initialStatus ?? "all");
   const [invSearch, setInvSearch] = useState("");
   const [modal,setModal]   = useState(false);
@@ -588,13 +597,13 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
         source:persisted.payment.source,
       }] : [],
     };
-    // Restore stock
-    const restoreEntries: StockEntry[] = returnLines.map((l,i) => ({
-      id: Date.now() + i, productId: l.productId, qty: l.qty, unit: l.unit,
-      montantDu: 0, movementType:"retour", date: today(), fournisseur: `Retour ${returnInv.id}`,
-    }));
     // return_sale already persisted the stock restoration; realtime refreshes entries.
-    onUpdate({ invoices: [...invoices, retInv] });
+    const restoredAdvance = persisted.credit_restore > 0 && persisted.restored_advance_id && returnInv.clientId != null ? {
+      id:Number(persisted.restored_advance_id), clientId:returnInv.clientId, amount:Number(persisted.credit_restore), allocatedAmount:0,
+      paymentMethod:"Autre" as PaymentMethod, paidAt:persisted.returned_at, recordedAt:persisted.returned_at,
+      operatorId:currentUser.id, operatorName:currentUser.nom, note:`Avoir restauré par ${retId} sur ${returnInv.id}`,
+    } : null;
+    onUpdate({ invoices: [...invoices, retInv], ...(restoredAdvance ? { clientAdvances:[...(boutique.clientAdvances ?? []),restoredAdvance] } : {}) });
     logAction("Retour articles", `${retId} ← ${returnInv.id} · ${returnLines.length} article(s) · ${fmt(refundTotal)}`, "↩️");
     setReturnDone(true);
     setTimeout(() => { setReturnInv(null); setReturnDone(false); }, 1600);

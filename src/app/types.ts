@@ -71,7 +71,7 @@ export type PlatformUser = {
   groupeId?: string; isCompteMere?: boolean; mustChangePassword?: boolean;
 };
 
-export type Product    = { id: number; nom: string; img: string; unit: string; fournisseur: string; categorie?: string; couleur?: string; prixVente?: number; prixAchat?: number; alertOk?: number; alertLow?: number };
+export type Product    = { id: number; nom: string; img: string; unit: string; fournisseur: string; categorie?: string; couleur?: string; prixVente?: number; prixAchat?: number; actif?: boolean; alertOk?: number; alertLow?: number };
 export type StockEntry = { id: number; productId: number; qty: number; unit: string; montantDu: number; date: string; fournisseur: string; supplierId?: number; movementType?: "achat"|"ajustement"|"retour"|"inventaire"|string; recordedAt?: string; invoiceId?: string; nbLots?: number; nbPieces?: number; longueurPiece?: number; sku?: string; reference?: string; operatorId?: string; operatorName?: string; isTransfertInterne?: boolean };
 export type Supplier   = { id: number; nom: string; ville: string; lastDelivery: string; tel: string; initials: string; color: string; email?: string; contact?: string; notes?: string; paymentTermsDays?: number; linkedBoutiqueId?: string };
 export type Client     = { id: number; nom: string; type: ClientType; tel: string; total: number; last: string; ville: string; adresse?: string; email?: string; contact?: string; paymentTermsDays?: number; linkedBoutiqueId?: string };

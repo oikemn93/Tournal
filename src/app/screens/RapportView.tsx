@@ -1,21 +1,24 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { BookOpen, Wallet, FileText, Download } from "lucide-react";
 import type { Boutique, DashPeriod, ChargeCategorie, PaymentMethod } from "../types";
 import { SEM, inputCls, PAYMENT_METHODS, PM_ICON, PM_COLOR, CHARGE_CATS, CHARGE_COLORS } from "../constants";
 import { fmt } from "../utils/formatting";
-import { invBadge, lineDispQty, lineDispUnit, lineTotal, filterByPeriod, invoiceMargin, supplierBalance } from "../utils/inventory";
+import { invBadge, lineDispQty, lineDispUnit, lineTotal, filterByPeriod, supplierBalance } from "../utils/inventory";
 import { Modal } from "../components/Modal";
 import { filterPaymentEventsByPeriod, formatPreciseDateTime, invoicePaidAmount, invoiceRemainingAmount } from "../utils/payments";
+import { getFifoRealizedMargin, type FifoRealizedMarginReport } from "../../lib/inventoryApi";
 
 export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique: Boutique; canSeeMargin?: boolean }) {
   const RC = boutique.color;
   const { invoices } = boutique;
-  const { entries, products } = boutique;
+  const { entries } = boutique;
   const charges = boutique.charges ?? [];
   const [period, setPeriod] = useState<DashPeriod>("jour");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const [exportModal, setExportModal] = useState<"summary"|"full"|null>(null);
+  const [serverMargin, setServerMargin] = useState<FifoRealizedMarginReport|null>(null);
+  const [marginLoading, setMarginLoading] = useState(false);
 
   const filtInv = filterByPeriod(invoices, period, customFrom, customTo);
   const filtPayments = filterPaymentEventsByPeriod(invoices, period, customFrom, customTo);
@@ -48,16 +51,32 @@ export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique:
   const totalCharges = paidCharges.reduce((s,c)=>s+chargeCashAmount(c),0);
   const chargesExploitation = paidCharges.filter(c=>c.categorie!=="Achat stock").reduce((s,c)=>s+chargeCashAmount(c),0);
 
-  // Product margin (sale price − FIFO cost of goods), returns counted negatively.
-  // Only computed/shown for users with the "Voir les marges" right.
-  const margeVentesData = filtInv.reduce((acc,inv)=>{
-    const m = invoiceMargin(inv, entries, products);
-    if (m.hasData) { acc.marge += m.marge; acc.ca += m.ca; acc.cost += m.cost; acc.has = true; }
-    return acc;
-  }, { marge:0, ca:0, cost:0, has:false });
-  const margeVentes    = margeVentesData.marge;
-  const tauxMargeVentes= margeVentesData.ca !== 0 ? Math.round(margeVentes/Math.abs(margeVentesData.ca)*100) : 0;
-  const resultatApresCharges = margeVentes - chargesExploitation;
+  const marginPeriod = useMemo(() => {
+    const now=new Date(); let from:Date; let to=new Date(now.getTime()+1);
+    if(period==="jour"){from=new Date(now);from.setHours(0,0,0,0);}
+    else if(period==="semaine"){from=new Date(now);from.setDate(now.getDate()-7);}
+    else if(period==="mois"){from=new Date(now.getFullYear(),now.getMonth(),1);}
+    else if(period==="annee"){from=new Date(now.getFullYear(),0,1);}
+    else {from=customFrom?new Date(`${customFrom}T00:00:00`):new Date(now);to=customTo?new Date(`${customTo}T23:59:59.999`):to;}
+    return {fromAt:from.toISOString(),toAt:to.toISOString()};
+  },[period,customFrom,customTo]);
+  useEffect(()=>{
+    let cancelled=false;
+    if(!canSeeMargin){setServerMargin(null);return ()=>{cancelled=true;};}
+    setMarginLoading(true);
+    void getFifoRealizedMargin({boutiqueId:boutique.id,...marginPeriod})
+      .then(report=>{if(!cancelled)setServerMargin(report);})
+      .catch(error=>{console.warn("Marge FIFO serveur indisponible",error);if(!cancelled)setServerMargin(null);})
+      .finally(()=>{if(!cancelled)setMarginLoading(false);});
+    return ()=>{cancelled=true;};
+  },[boutique.id,canSeeMargin,marginPeriod.fromAt,marginPeriod.toAt]);
+  const margeVentesData={marge:serverMargin?.realizedMargin??0,ca:serverMargin?.revenue??0,cost:serverMargin?.fifoCost??0,has:!!serverMargin};
+  const margeVentes=margeVentesData.marge;
+  const tauxMargeVentes=serverMargin?.marginRate??0;
+  const resultatApresCharges=margeVentes-chargesExploitation;
+  const marginCoverageWarning=canSeeMargin&&serverMargin&&(serverMargin.coverageRate<99.99||serverMargin.unmatchedLines>0)
+    ? `Couverture FIFO ${new Intl.NumberFormat("fr-FR",{maximumFractionDigits:1}).format(serverMargin.coverageRate)} % · ${serverMargin.unmatchedLines} ligne(s) sans coût fiable`
+    : null;
 
   // Credits are created by an overpayment and become an "Avoir client" payment
   // only when applied to a later invoice.  Keep it distinct from cash methods:
@@ -107,6 +126,7 @@ h1{font-size:22px;font-weight:900;margin:0 0 2px}
 </style></head><body>
 <h1>${boutique.nom}</h1>
 <div class="sub">Rapport — ${periodLabel[period]}${period==="custom"?` (${customFrom} → ${customTo})`:""} · Généré le ${formatPreciseDateTime(new Date().toISOString())}</div>
+${marginCoverageWarning?`<div style="padding:8px 10px;background:#fffbeb;color:#92400e;border-radius:8px;margin-bottom:12px;font-weight:700">${marginCoverageWarning}</div>`:""}
 <div class="kpis">
   <div class="kpi"><div class="label">CA encaissé (date de paiement)</div><div class="value green">${fmt(ca)}</div></div>
   <div class="kpi"><div class="label">Ventes</div><div class="value">${nbVentes}</div></div>
