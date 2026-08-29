@@ -1400,7 +1400,7 @@ export async function refundClientAdvance(params:{ boutiqueId:string; clientId:n
     refund_id:number; client_id:number; amount:number; payment_method:string; refunded_at:string;
     operator_id:string; operator_name:string; remaining_credit:number;
     allocations:Array<{advance_id:number;amount:number}>;
-  }>("rpc/refund_client_advance", {
+  }>("rpc/refund_client_credit_fifo", {
     method:"POST",
     body:JSON.stringify({
       p_boutique_id:params.boutiqueId,
@@ -1408,6 +1408,7 @@ export async function refundClientAdvance(params:{ boutiqueId:string; clientId:n
       p_amount:normalizeMoney(params.amount),
       p_payment_method:params.paymentMethod,
       p_idempotency_key:crypto.randomUUID(),
+      p_note:"Remboursement avoir client",
     }),
   });
 }
