@@ -1378,7 +1378,7 @@ export async function cancelPendingInvoice(params: { boutiqueId:string; invoiceI
   });
 }
 
-export async function returnSale(params: { boutiqueId:string; invoiceId:string; lines:Array<{sourceLineId?:number;productId:number;qty:number}>; refundMethod:string }) {
+export async function returnSale(params: { boutiqueId:string; invoiceId:string; lines:Array<{sourceLineId?:number;productId:number;qty:number}>; refundMethod?:string }) {
   return dataRequest<{
     return_invoice_id:string; credit_note_number:number; source_invoice_id:string; total:number; returned_at:string; refund_method:string|null;
     refund_amount:number; receivable_reduction:number; credit_restore:number; restored_advance_id:number|null;
@@ -1390,7 +1390,24 @@ export async function returnSale(params: { boutiqueId:string; invoiceId:string; 
       p_invoice_id:params.invoiceId,
       p_idempotency_key:crypto.randomUUID(),
       p_lines:params.lines.map(line=>({ sourceLineId:line.sourceLineId ?? null, productId:line.productId, qty:line.qty })),
-      p_refund_method:params.refundMethod,
+      p_refund_method:params.refundMethod ?? null,
+    }),
+  });
+}
+
+export async function refundClientAdvance(params:{ boutiqueId:string; clientId:number; amount:number; paymentMethod:string }) {
+  return dataRequest<{
+    refund_id:number; client_id:number; amount:number; payment_method:string; refunded_at:string;
+    operator_id:string; operator_name:string; remaining_credit:number;
+    allocations:Array<{advance_id:number;amount:number}>;
+  }>("rpc/refund_client_advance", {
+    method:"POST",
+    body:JSON.stringify({
+      p_boutique_id:params.boutiqueId,
+      p_client_id:params.clientId,
+      p_amount:normalizeMoney(params.amount),
+      p_payment_method:params.paymentMethod,
+      p_idempotency_key:crypto.randomUUID(),
     }),
   });
 }

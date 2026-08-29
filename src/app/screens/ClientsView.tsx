@@ -9,7 +9,7 @@ import { getSiblings } from "../utils/inventory";
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
-import { applyClientAdvanceFifo, applyClientAdvanceToInvoice, cancelPendingInvoice, createClient, deleteClientIfUnused, recordClientPayment, returnSale, updateClientContact, updateClientPaymentTerms, updateClientProfile, WHOLESALE_MARKER } from "../../lib/api";
+import { applyClientAdvanceFifo, applyClientAdvanceToInvoice, cancelPendingInvoice, createClient, deleteClientIfUnused, recordClientPayment, refundClientAdvance, returnSale, updateClientContact, updateClientPaymentTerms, updateClientProfile, WHOLESALE_MARKER } from "../../lib/api";
 import { PhoneField } from "../components/PhoneField";
 import { formatPreciseDateTime, invoicePaidAmount, invoiceRemainingAmount as baseInvoiceRemainingAmount, roundMoney } from "../utils/payments";
 import { openInvoicePDF, openOrderDocument, openReceiptPreview } from "../utils/invoice";
@@ -66,7 +66,6 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
   const [viewedInvoiceMarginLoading, setViewedInvoiceMarginLoading] = useState(false);
   const [clientReturnInv, setClientReturnInv] = useState<Invoice|null>(null);
   const [clientReturnQtys, setClientReturnQtys] = useState<Record<number,number>>({});
-  const [clientReturnMethod, setClientReturnMethod] = useState<PaymentMethod>("Espèces");
   const [clientReturnBusy, setClientReturnBusy] = useState(false);
   const [clientReturnDone, setClientReturnDone] = useState(false);
   const [editClient, setEditClient] = useState<Client|null>(null);
@@ -182,6 +181,11 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
   const [submittingPayment, setSubmittingPayment] = useState(false);
   const [paymentDone, setPaymentDone] = useState(false);
   const [paymentSummary, setPaymentSummary] = useState<{ applied:number; advance:number }|null>(null);
+  const [refundCreditModal, setRefundCreditModal] = useState(false);
+  const [refundCreditAmount, setRefundCreditAmount] = useState("");
+  const [refundCreditMethod, setRefundCreditMethod] = useState<PaymentMethod>("Espèces");
+  const [refundingCredit, setRefundingCredit] = useState(false);
+  const [refundCreditDone, setRefundCreditDone] = useState(false);
   const [applyingAdvanceInvoiceId, setApplyingAdvanceInvoiceId] = useState<string|null>(null);
   const [advanceAppliedNotice, setAdvanceAppliedNotice] = useState<{ invoiceId:string; amount:number }|null>(null);
   const [termsModalClient, setTermsModalClient] = useState<Client|null>(null);
@@ -257,7 +261,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
       if (!invoice.lines?.length || !invoiceHasReturnable(invoice)) return;
       const quantities:Record<number,number>={};
       invoice.lines.forEach((line,index)=>{quantities[index]=remainingReturnable(invoice,line);});
-      setClientReturnQtys(quantities); setClientReturnMethod("Espèces"); setClientReturnDone(false); setClientReturnInv(invoice); setViewedInvoice(null);
+      setClientReturnQtys(quantities); setClientReturnDone(false); setClientReturnInv(invoice); setViewedInvoice(null);
     }
 
     async function submitClientReturn() {
@@ -271,7 +275,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
       if (clientReturnInv.lines.some((line,index)=>(clientReturnQtys[index]??0)>remainingReturnable(clientReturnInv,line)+0.0005)) { alert("La quantité retournée dépasse le solde disponible."); return; }
       setClientReturnBusy(true);
       try {
-        const persisted=await returnSale({boutiqueId:boutique.id,invoiceId:clientReturnInv.id,refundMethod:clientReturnMethod,lines:returnLines.map(line=>({sourceLineId:line.id,productId:line.productId,qty:line.qty}))});
+        const persisted=await returnSale({boutiqueId:boutique.id,invoiceId:clientReturnInv.id,lines:returnLines.map(line=>({sourceLineId:line.id,productId:line.productId,qty:line.qty}))});
         const credit:Invoice={
           id:persisted.return_invoice_id,clientId:clientReturnInv.clientId,client:clientReturnInv.client,clientTel:clientReturnInv.clientTel,clientType:clientReturnInv.clientType,
           lines:returnLines.map(line=>({...line,sourceInvoiceLineId:line.id})),montant:Number(persisted.total),acompte:Number(persisted.refund_amount??0),date:today(),dateRaw:persisted.returned_at,status:"payé",type:"Retour",returnOfInvoiceId:clientReturnInv.id,
@@ -412,6 +416,30 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
       } catch (error) {
         setSubmittingPayment(false);
         alert(error instanceof Error ? error.message : "Versement impossible");
+      }
+    }
+
+    async function submitCreditRefund() {
+      if (refundingCredit) return;
+      const amount = Number(refundCreditAmount) || 0;
+      if (amount <= 0 || amount > totalAvoir + 0.01) return;
+      setRefundingCredit(true);
+      try {
+        const result = await refundClientAdvance({ boutiqueId:boutique.id, clientId:c.id, amount, paymentMethod:refundCreditMethod });
+        const consumed = new Map<number,number>();
+        result.allocations.forEach(item => consumed.set(item.advance_id, (consumed.get(item.advance_id) ?? 0) + item.amount));
+        onUpdate({ clientAdvances:(boutique.clientAdvances ?? []).map(advance => ({
+          ...advance,
+          allocatedAmount:(advance.allocatedAmount ?? 0) + (consumed.get(advance.id) ?? 0),
+        })) });
+        logAction("Remboursement avoir client", `${c.nom} · ${fmt(result.amount)} · ${result.payment_method}`, "↩️");
+        setRefundCreditDone(true);
+        setTimeout(()=>{
+          setRefundCreditModal(false); setRefundCreditAmount(""); setRefundCreditMethod("Espèces"); setRefundCreditDone(false); setRefundingCredit(false);
+        }, 900);
+      } catch (error) {
+        setRefundingCredit(false);
+        alert(error instanceof Error ? error.message : "Remboursement de l'avoir impossible");
       }
     }
 
@@ -664,9 +692,10 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
         </section>}
         {totalAvoir>0&&<section className="rounded-2xl p-3.5 border" style={{borderColor:SEM.success.accent+"44",background:SEM.success.bg}}>
           <div className="flex items-center justify-between gap-3">
-            <div><p className="text-xs font-black tracking-wider" style={{color:SEM.success.accent}}>AVOIR CLIENT DISPONIBLE</p><p className="text-xs text-muted-foreground mt-1">À proposer pour régler une prochaine facture.</p></div>
+            <div><p className="text-xs font-black tracking-wider" style={{color:SEM.success.accent}}>AVOIR CLIENT DISPONIBLE</p><p className="text-xs text-muted-foreground mt-1">Utilisable sur une prochaine facture ou remboursable sur demande du client.</p></div>
             <p className="text-xl font-black" style={{color:SEM.success.accent,fontFamily:"'Nunito',sans-serif"}}>{fmt(totalAvoir)}</p>
           </div>
+          {canReturn&&<button type="button" onClick={()=>{setRefundCreditAmount(String(totalAvoir));setRefundCreditMethod("Espèces");setRefundCreditDone(false);setRefundCreditModal(true);}} className="mt-3 w-full rounded-xl bg-white py-2.5 text-xs font-black" style={{color:SEM.success.accent}}>↩️ Rembourser l'avoir</button>}
         </section>}
         {/* KPIs */}
         <div className="grid grid-cols-2 gap-2">
@@ -720,8 +749,14 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
             </div>;
           })}</div>
           {(()=>{const value=clientReturnInv.lines!.reduce((sum,line,index)=>{const qty=clientReturnQtys[index]??0;return sum+(line.qty>0?(qty/line.qty)*lineTotal(line):0);},0);return <div className="flex items-center justify-between rounded-xl bg-red-50 px-4 py-3"><span className="text-sm font-black text-red-700">Valeur de l'avoir</span><span className="text-xl font-black text-red-700">{fmt(value)}</span></div>;})()}
-          {!clientReturnDone&&<div className="space-y-2"><p className="text-xs font-black text-muted-foreground">MODE DE REMBOURSEMENT SI UN REMBOURSEMENT EST DÛ</p><div className="grid grid-cols-2 gap-2">{PAYMENT_METHODS.map(method=><button key={method} type="button" onClick={()=>setClientReturnMethod(method)} className="rounded-xl px-3 py-3 text-sm font-bold" style={{background:clientReturnMethod===method?(PM_COLOR[method]??"#6b7280")+"18":"#f9fafb",color:clientReturnMethod===method?(PM_COLOR[method]??"#374151"):"#6b7280",border:clientReturnMethod===method?`2px solid ${(PM_COLOR[method]??"#6b7280")}55`:"2px solid transparent"}}>{PM_ICON[method]} {method}</button>)}</div><p className="text-xs text-muted-foreground">Le serveur annule d'abord la créance non encaissée, restaure ensuite un éventuel avoir client, puis rembourse seulement l'argent réellement encaissé.</p></div>}
+          {!clientReturnDone&&<div className="rounded-xl px-3 py-2 text-xs font-semibold" style={{background:SEM.success.bg,color:SEM.success.accent}}>Ce retour ne rembourse pas automatiquement le client. La créance éventuelle est annulée en priorité, puis le solde déjà payé devient un avoir client. Le remboursement de cet avoir se fait séparément depuis la fiche client.</div>}
           {clientReturnDone?<div className="rounded-xl bg-green-50 p-4 text-center text-sm font-black text-green-700">Retour enregistré ✓</div>:<SubmitBtn color={SEM.danger.accent} label={clientReturnBusy?"Enregistrement…":"Confirmer le retour"} onClick={()=>void submitClientReturn()} disabled={clientReturnBusy||!Object.values(clientReturnQtys).some(q=>q>0)}/>} 
+        </Modal>}
+        {refundCreditModal&&<Modal title="Rembourser l'avoir" color={SEM.danger.accent} onClose={()=>{if(!refundingCredit)setRefundCreditModal(false);}}>
+          <div className="rounded-xl px-3 py-2 text-xs font-semibold" style={{background:SEM.success.bg,color:SEM.success.accent}}>Avoir disponible : {fmt(totalAvoir)}. Ce remboursement consomme l'avoir du client et crée un mouvement de remboursement traçable.</div>
+          <Field label="MONTANT À REMBOURSER"><input value={refundCreditAmount} onChange={e=>setRefundCreditAmount(e.target.value)} type="number" min="0" max={totalAvoir} className={inputCls}/></Field>
+          <Field label="MOYEN DE REMBOURSEMENT"><div className="grid grid-cols-2 gap-2">{PAYMENT_METHODS.map(method=><button key={method} type="button" onClick={()=>setRefundCreditMethod(method)} className="rounded-xl px-3 py-3 text-sm font-bold" style={{background:refundCreditMethod===method?(PM_COLOR[method]??"#6b7280")+"18":"#f9fafb",color:refundCreditMethod===method?(PM_COLOR[method]??"#374151"):"#6b7280",border:refundCreditMethod===method?`2px solid ${(PM_COLOR[method]??"#6b7280")}55`:"2px solid transparent"}}>{PM_ICON[method]} {method}</button>)}</div></Field>
+          {refundCreditDone?<div className="rounded-xl bg-green-50 p-4 text-center text-sm font-black text-green-700">Avoir remboursé ✓</div>:<SubmitBtn color={SEM.danger.accent} label={refundingCredit?"Remboursement…":"Confirmer le remboursement"} onClick={()=>void submitCreditRefund()} disabled={refundingCredit||(Number(refundCreditAmount)||0)<=0||(Number(refundCreditAmount)||0)>totalAvoir+0.01}/>} 
         </Modal>}
         {paymentModal&&<Modal title="Versement client" color={SEM.success.accent} onClose={()=>{if(!submittingPayment)setPaymentModal(false);}}>
           <div className="rounded-2xl p-3" style={{background:SEM.success.bg}}>
