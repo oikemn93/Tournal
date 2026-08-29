@@ -35,7 +35,7 @@ function dueLabel(dueDate: string | undefined, remaining: number) {
   return { text:`Échéance le ${dueAtMidnight.toLocaleDateString("fr-FR")}`, color:SEM.neutral.accent, bg:"#f1f5f9" };
 }
 
-export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser, onUpdate, logAction, initialTab, initialClientId, initialInvoiceId, initialInvoiceNotice = "order", onInitialClientOpened, canCreateOrder = false, canCollectPayment = false, canCancelPendingOrder = false, canOpenInvoice = false, defaultPaymentTermsDays = 30, onOpenInvoice, onCreateOrder }: {
+export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser, onUpdate, logAction, initialTab, initialClientId, initialInvoiceId, initialInvoiceNotice = "order", onInitialClientOpened, canCreateOrder = false, canCollectPayment = false, canDisburse = false, canCancelPendingOrder = false, canOpenInvoice = false, defaultPaymentTermsDays = 30, onOpenInvoice, onCreateOrder }: {
   boutique: Boutique; allBoutiques: Boutique[]; platformUsers: PlatformUser[];
   currentUser: PlatformUser;
   onUpdate: (u: Partial<Boutique>) => void;
@@ -47,6 +47,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
   onInitialClientOpened?: () => void;
   canCreateOrder?: boolean;
   canCollectPayment?: boolean;
+  canDisburse?: boolean;
   canCancelPendingOrder?: boolean;
   canOpenInvoice?: boolean;
   defaultPaymentTermsDays?: number;
@@ -423,6 +424,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
     }
 
     async function submitCreditRefund() {
+      if (!canDisburse) { alert("Droit de décaissement requis"); return; }
       if (refundingCredit) return;
       const amount = Number(refundCreditAmount) || 0;
       if (amount <= 0 || amount > totalAvoir + 0.01) return;
@@ -769,7 +771,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
           <div className="rounded-xl px-3 py-2 text-xs font-semibold" style={{background:SEM.success.bg,color:SEM.success.accent}}>Avoir disponible : {fmt(totalAvoir)}. Ce remboursement consomme l'avoir du client et crée un mouvement de remboursement traçable.</div>
           <Field label="MONTANT À REMBOURSER"><input value={refundCreditAmount} onChange={e=>setRefundCreditAmount(e.target.value)} type="number" min="0" max={totalAvoir} className={inputCls}/></Field>
           <Field label="MOYEN DE REMBOURSEMENT"><div className="grid grid-cols-2 gap-2">{PAYMENT_METHODS.filter(method=>method!=="Avoir client").map(method=><button key={method} type="button" onClick={()=>setRefundCreditMethod(method)} className="rounded-xl px-3 py-3 text-sm font-bold" style={{background:refundCreditMethod===method?(PM_COLOR[method]??"#6b7280")+"18":"#f9fafb",color:refundCreditMethod===method?(PM_COLOR[method]??"#374151"):"#6b7280",border:refundCreditMethod===method?`2px solid ${(PM_COLOR[method]??"#6b7280")}55`:"2px solid transparent"}}>{PM_ICON[method]} {method}</button>)}</div></Field>
-          {refundCreditDone?<div className="rounded-xl bg-green-50 p-4 text-center text-sm font-black text-green-700">Avoir remboursé ✓</div>:<SubmitBtn color={SEM.danger.accent} label={refundingCredit?"Remboursement…":"Confirmer le remboursement"} onClick={()=>void submitCreditRefund()} disabled={refundingCredit||(Number(refundCreditAmount)||0)<=0||(Number(refundCreditAmount)||0)>totalAvoir+0.01}/>} 
+          {refundCreditDone?<div className="rounded-xl bg-green-50 p-4 text-center text-sm font-black text-green-700">Avoir remboursé ✓</div>:canDisburse?<SubmitBtn color={SEM.danger.accent} label={refundingCredit?"Remboursement…":"Confirmer le remboursement"} onClick={()=>void submitCreditRefund()} disabled={refundingCredit||(Number(refundCreditAmount)||0)<=0||(Number(refundCreditAmount)||0)>totalAvoir+0.01}/>:<div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-semibold text-amber-900">Droit de décaissement requis pour rembourser cet avoir.</div>} 
         </Modal>}
         {paymentModal&&<Modal title="Versement client" color={SEM.success.accent} onClose={()=>{if(!submittingPayment)setPaymentModal(false);}}>
           <div className="rounded-2xl p-3" style={{background:SEM.success.bg}}>

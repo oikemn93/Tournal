@@ -11,9 +11,10 @@ import { SubmitBtn } from "../components/SubmitBtn";
 import { createCharge, recordTransferChargePayment } from "../../lib/api";
 import { formatPreciseDateTime } from "../utils/payments";
 
-export function ChargesView({ boutique, onUpdate, logAction }: {
+export function ChargesView({ boutique, onUpdate, logAction, canDisburse = false }: {
   boutique: Boutique; onUpdate: (u: Partial<Boutique>) => void;
   logAction: (action: string, detail: string, icon: string) => void;
+  canDisburse?: boolean;
 }) {
   const charges = boutique.charges ?? [];
   const suppliers = boutique.suppliers;
@@ -45,6 +46,7 @@ export function ChargesView({ boutique, onUpdate, logAction }: {
   })).filter(c=>c.value>0);
 
   async function submit() {
+    if (!canDisburse) { alert("Droit de décaissement requis"); return; }
     if (!label.trim() || !montant) return;
     const now = new Date();
     const dateStr = now.toLocaleDateString("fr-FR",{day:"2-digit",month:"short"});
@@ -59,6 +61,7 @@ export function ChargesView({ boutique, onUpdate, logAction }: {
     setLabel(""); setMontant(""); setNote(""); setFourn(""); setModal(false);
   }
   async function payTransferCharge() {
+    if (!canDisburse) { alert("Droit de décaissement requis"); return; }
     if (!paymentCharge || paying) return;
     const due=Math.max(0,paymentCharge.montant-Number(paymentCharge.paidAmount??0));
     const requested=Number(paymentAmount);
@@ -133,15 +136,17 @@ export function ChargesView({ boutique, onUpdate, logAction }: {
             <div className="text-right flex-shrink-0">
               <p className="font-black text-base" style={{color:c.source==="supplier_receipt"?SEM.warning.accent:"#ef4444",fontFamily:"'Nunito',sans-serif"}}>{fmt(c.montant)}</p>
               {c.source==="supplier_receipt"&&<><p className="text-xs font-semibold" style={{color:SEM.warning.accent}}>À payer : {fmt(Math.max(0,c.montant-Number(c.paidAmount??0)))}</p>{c.dueDate&&<p className="text-xs text-muted-foreground">Échéance : {new Date(`${c.dueDate}T00:00:00`).toLocaleDateString("fr-FR")}</p>}</>}
-              {c.source==="transfer"&&<><p className="text-xs text-muted-foreground">Réglé : {fmt(Number(c.paidAmount??0))}</p>{c.status!=="paid"&&<button onClick={()=>{const due=Math.max(0,c.montant-Number(c.paidAmount??0));setPaymentCharge(c);setPaymentAmount(String(due));}} className="mt-1 inline-flex items-center gap-1 rounded-lg bg-slate-900 px-2 py-1 text-xs font-bold text-white"><CreditCard size={12}/>Payer</button>}</>}
+              {c.source==="transfer"&&<><p className="text-xs text-muted-foreground">Réglé : {fmt(Number(c.paidAmount??0))}</p>{c.status!=="paid"&&canDisburse&&<button onClick={()=>{const due=Math.max(0,c.montant-Number(c.paidAmount??0));setPaymentCharge(c);setPaymentAmount(String(due));}} className="mt-1 inline-flex items-center gap-1 rounded-lg bg-slate-900 px-2 py-1 text-xs font-bold text-white"><CreditCard size={12}/>Payer</button>}</>}
             </div>
           </div>
         ))}
       </div>
 
-      <button onClick={()=>setModal(true)} className="fixed bottom-20 right-4 w-14 h-14 rounded-full shadow-2xl flex items-center justify-center z-20 active:scale-95" style={{background:"#ef4444",boxShadow:"0 0 24px #ef444460"}}>
+      {canDisburse && <button onClick={()=>setModal(true)} className="fixed bottom-20 right-4 w-14 h-14 rounded-full shadow-2xl flex items-center justify-center z-20 active:scale-95" style={{background:"#ef4444",boxShadow:"0 0 24px #ef444460"}}>
         <Plus size={28} color="white" strokeWidth={2.5}/>
-      </button>
+      </button>}
+
+      {!canDisburse && <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">Lecture des charges autorisée · droit de décaissement requis pour toute sortie d’argent.</div>}
 
       {modal && <Modal title="Nouvelle charge" color="#374151" onClose={()=>setModal(false)}>
         <Field label="LIBELLÉ"><input value={label} onChange={e=>setLabel(e.target.value)} placeholder="Ex: Loyer boutique" className={inputCls} autoFocus onKeyDown={e=>e.key==="Enter"&&submit()}/></Field>

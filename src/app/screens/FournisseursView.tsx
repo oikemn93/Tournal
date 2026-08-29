@@ -96,6 +96,7 @@ export function FournisseursView({ boutique, onUpdate, logAction, canPaySupplier
     finally { setSavingEdit(false); }
   }
   async function paySupplier() {
+    if (!canPaySupplier) { alert("Droit de décaissement requis"); return; }
     const supplier = paymentSupplier; const due = supplier ? supplierBalance(supplier, entries, charges) : 0; const requested = Number(paymentAmount);
     if (!supplier || paying || !Number.isFinite(requested) || requested <= 0 || due <= 0) return;
     setPaying(true);
