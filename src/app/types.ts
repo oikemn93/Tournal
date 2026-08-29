@@ -26,7 +26,7 @@ export type Charge = {
   source?: "manual" | "transfer" | "recurrence" | "supplier_payment" | "supplier_receipt";
 };
 
-export type InvoiceLine = { productId: number; nom: string; qty: number; unit: string; prixUnit: number; sellUnit?: string; sellQty?: number; prixAchat?: number };
+export type InvoiceLine = { id?: number; sourceInvoiceLineId?: number; productId: number; nom: string; qty: number; unit: string; prixUnit: number; sellUnit?: string; sellQty?: number; prixAchat?: number };
 
 export type InvoicePayment = {
   id: number;
@@ -83,7 +83,8 @@ export type Invoice    = {
   lines?: InvoiceLine[]; payments?: InvoicePayment[];
   montant: number; acompte: number; date: string; dateRaw?: string;
   dueDate?: string;
-  status: InvoiceStatus; type: string; returnOfInvoiceId?: string;
+  status: InvoiceStatus; type: string; returnOfInvoiceId?: string; creditNoteNumber?: number;
+  returnRefundAmount?: number; returnReceivableReduction?: number; returnCreditRestore?: number;
   operatorId?: string; operatorNom?: string; operatorColor?: string;
   paymentMethod?: PaymentMethod; paymentSplit?: PaymentEntry[];
   origin?: "pos" | "client_profile";

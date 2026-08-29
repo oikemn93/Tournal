@@ -821,6 +821,10 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string): Promise<T | n
           status:i.status === "annulée" ? "annulée" : paid >= Number(i.montant) ? "payé" : paid > 0 ? "acompte" : i.status === "en_attente" ? "en attente" : i.status,
           type:i.type,
           returnOfInvoiceId:i.return_of_invoice_id ?? undefined,
+          creditNoteNumber:i.credit_note_number != null ? Number(i.credit_note_number) : undefined,
+          returnRefundAmount:Number(i.return_refund_amount ?? 0),
+          returnReceivableReduction:Number(i.return_receivable_reduction ?? 0),
+          returnCreditRestore:Number(i.return_credit_restore ?? 0),
           origin:i.origin === "client_profile" ? "client_profile" : "pos",
           cancelReason:i.cancel_reason ?? undefined,
           cancelledAt:i.cancelled_at ?? undefined,
@@ -840,7 +844,7 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string): Promise<T | n
             batchId:p.batch_id,
             source:p.source,
           })),
-          lines:(i.invoice_lines ?? []).map((l: any)=>({ productId:l.product_id, nom:l.nom, qty:Number(l.qty), unit:l.unit ?? "unité", prixUnit:Number(l.prix_unit), prixAchat:l.prix_achat!=null?Number(l.prix_achat):undefined, sellUnit:l.sell_unit ?? undefined, sellQty:l.sell_qty ? Number(l.sell_qty) : undefined })),
+          lines:(i.invoice_lines ?? []).map((l: any)=>({ id:Number(l.id), sourceInvoiceLineId:l.source_invoice_line_id != null ? Number(l.source_invoice_line_id) : undefined, productId:l.product_id, nom:l.nom, qty:Number(l.qty), unit:l.unit ?? "unité", prixUnit:Number(l.prix_unit), prixAchat:l.prix_achat!=null?Number(l.prix_achat):undefined, sellUnit:l.sell_unit ?? undefined, sellQty:l.sell_qty ? Number(l.sell_qty) : undefined })),
         };
       }),
       charges: charges.filter(c => c.boutique_id === b.id).map(c => ({
@@ -1153,7 +1157,7 @@ export async function loadBoutiqueSyncPatch(boutiqueId: string, sourceEvents: Bo
     const paid = invoicePayments.length ? invoicePayments.reduce((sum, payment) => sum + Number(payment.amount), 0) : Number(row.acompte);
     const operator = userById.get(row.operator_id) ?? {};
     const client = clientById.get(row.client_id);
-    return { id:row.id, clientId:row.client_id ?? undefined, client:row.client_nom ?? "Client comptoir", clientTel:row.client_tel ?? undefined, clientType:row.client_type_snapshot ?? client?.type ?? undefined, clientEmailSnapshot:row.client_email_snapshot ?? undefined, clientAdresseSnapshot:row.client_adresse_snapshot ?? undefined, clientVilleSnapshot:row.client_ville_snapshot ?? undefined, clientTypeSnapshot:row.client_type_snapshot ?? undefined, boutiqueNomSnapshot:row.boutique_nom_snapshot ?? undefined, boutiqueVilleSnapshot:row.boutique_ville_snapshot ?? undefined, boutiqueAdresseSnapshot:row.boutique_adresse_snapshot ?? undefined, boutiqueTelSnapshot:row.boutique_tel_snapshot ?? undefined, boutiqueEmailSnapshot:row.boutique_email_snapshot ?? undefined, boutiqueLogoSnapshot:row.boutique_logo_snapshot ?? undefined, montant:Number(row.montant), acompte:paid, date:syncDate(row.invoice_date), dateRaw:row.invoice_date, dueDate:row.due_date ?? undefined, status:row.status === "annulée" ? "annulée" : paid >= Number(row.montant) ? "payé" : paid > 0 ? "acompte" : row.status === "en_attente" ? "en attente" : row.status, type:row.type, returnOfInvoiceId:row.return_of_invoice_id ?? undefined, origin:row.origin === "client_profile" ? "client_profile" : "pos", cancelReason:row.cancel_reason ?? undefined, cancelledAt:row.cancelled_at ?? undefined, cancelledBy:row.cancelled_by ?? undefined, operatorId:row.operator_id ?? undefined, operatorNom:row.operator_nom_snapshot ?? operator.nom ?? undefined, operatorColor:operator.color ?? undefined, paymentMethod:row.payment_method ?? undefined, payments:invoicePayments.map(payment => ({ id:payment.id, amount:Number(payment.amount), paymentMethod:payment.payment_method, paidAt:payment.paid_at, recordedAt:payment.recorded_at, operatorId:payment.operator_id ?? undefined, operatorName:payment.operator_name, batchId:payment.batch_id, source:payment.source })), lines:(row.invoice_lines ?? []).map((line:any) => ({ productId:line.product_id, nom:line.nom, qty:Number(line.qty), unit:line.unit ?? "unité", prixUnit:Number(line.prix_unit), prixAchat:line.prix_achat != null ? Number(line.prix_achat) : undefined, sellUnit:line.sell_unit ?? undefined, sellQty:line.sell_qty ? Number(line.sell_qty) : undefined })) };
+    return { id:row.id, clientId:row.client_id ?? undefined, client:row.client_nom ?? "Client comptoir", clientTel:row.client_tel ?? undefined, clientType:row.client_type_snapshot ?? client?.type ?? undefined, clientEmailSnapshot:row.client_email_snapshot ?? undefined, clientAdresseSnapshot:row.client_adresse_snapshot ?? undefined, clientVilleSnapshot:row.client_ville_snapshot ?? undefined, clientTypeSnapshot:row.client_type_snapshot ?? undefined, boutiqueNomSnapshot:row.boutique_nom_snapshot ?? undefined, boutiqueVilleSnapshot:row.boutique_ville_snapshot ?? undefined, boutiqueAdresseSnapshot:row.boutique_adresse_snapshot ?? undefined, boutiqueTelSnapshot:row.boutique_tel_snapshot ?? undefined, boutiqueEmailSnapshot:row.boutique_email_snapshot ?? undefined, boutiqueLogoSnapshot:row.boutique_logo_snapshot ?? undefined, montant:Number(row.montant), acompte:row.type === "Retour" ? Number(row.return_refund_amount ?? paid) : paid, date:syncDate(row.invoice_date), dateRaw:row.invoice_date, dueDate:row.due_date ?? undefined, status:row.status === "annulée" ? "annulée" : row.type === "Retour" ? "payé" : paid >= Number(row.montant) ? "payé" : paid > 0 ? "acompte" : row.status === "en_attente" ? "en attente" : row.status, type:row.type, returnOfInvoiceId:row.return_of_invoice_id ?? undefined, creditNoteNumber:row.credit_note_number != null ? Number(row.credit_note_number) : undefined, returnRefundAmount:Number(row.return_refund_amount ?? 0), returnReceivableReduction:Number(row.return_receivable_reduction ?? 0), returnCreditRestore:Number(row.return_credit_restore ?? 0), origin:row.origin === "client_profile" ? "client_profile" : "pos", cancelReason:row.cancel_reason ?? undefined, cancelledAt:row.cancelled_at ?? undefined, cancelledBy:row.cancelled_by ?? undefined, operatorId:row.operator_id ?? undefined, operatorNom:row.operator_nom_snapshot ?? operator.nom ?? undefined, operatorColor:operator.color ?? undefined, paymentMethod:row.payment_method ?? undefined, payments:invoicePayments.map(payment => ({ id:payment.id, amount:Number(payment.amount), paymentMethod:payment.payment_method, paidAt:payment.paid_at, recordedAt:payment.recorded_at, operatorId:payment.operator_id ?? undefined, operatorName:payment.operator_name, batchId:payment.batch_id, source:payment.source })), lines:(row.invoice_lines ?? []).map((line:any) => ({ id:Number(line.id), sourceInvoiceLineId:line.source_invoice_line_id != null ? Number(line.source_invoice_line_id) : undefined, productId:line.product_id, nom:line.nom, qty:Number(line.qty), unit:line.unit ?? "unité", prixUnit:Number(line.prix_unit), prixAchat:line.prix_achat != null ? Number(line.prix_achat) : undefined, sellUnit:line.sell_unit ?? undefined, sellQty:line.sell_qty ? Number(line.sell_qty) : undefined })) };
   });
   if (allCharges.length) patch.charges = allCharges.map(row => ({ id:row.id, label:row.label, montant:Number(row.montant), date:syncDate(row.charge_date), dateRaw:row.charge_date, categorie:row.categorie ?? "Autre", recurrence:row.recurrence ?? "unique", note:row.note ?? undefined, fournisseur:row.fournisseur ?? undefined, supplierId:row.supplier_id ?? undefined, paymentMethod:row.payment_method ?? undefined, operatorId:row.operator_id ?? undefined, operatorName:userById.get(row.operator_id)?.nom ?? undefined, status:row.status ?? "paid", paidAmount:Number(row.paid_amount ?? row.montant), transferId:row.transfer_id ?? undefined, source:row.source ?? "manual", dueDate:row.due_date ?? undefined, stockEntryId:row.stock_entry_id ?? undefined }));
   if (sessions.length) patch.caisseSessions = sessions.map(row => ({ id:row.id, openedAt:row.opened_at, closedAt:row.closed_at ?? undefined, fondDeCaisse:Number(row.fond_ouverture ?? 0), openedBy:row.opened_by ?? "", closedBy:row.closed_by ?? "" }));
@@ -1374,17 +1378,18 @@ export async function cancelPendingInvoice(params: { boutiqueId:string; invoiceI
   });
 }
 
-export async function returnSale(params: { boutiqueId:string; invoiceId:string; lines:Array<{productId:number;qty:number}>; refundMethod:string }) {
+export async function returnSale(params: { boutiqueId:string; invoiceId:string; lines:Array<{sourceLineId?:number;productId:number;qty:number}>; refundMethod:string }) {
   return dataRequest<{
-    return_invoice_id:string; source_invoice_id:string; total:number; returned_at:string; refund_method:string;
-    payment:{ id:number; amount:number; payment_method:string; paid_at:string; operator_id:string; operator_name:string; batch_id:string; source:"invoice" };
+    return_invoice_id:string; credit_note_number:number; source_invoice_id:string; total:number; returned_at:string; refund_method:string|null;
+    refund_amount:number; receivable_reduction:number; credit_restore:number; restored_advance_id:number|null;
+    payment:{ id:number; amount:number; payment_method:string; paid_at:string; operator_id:string; operator_name:string; batch_id:string; source:"invoice" } | null;
   }>("rpc/return_sale", {
     method:"POST", headers:{ Prefer:"return=representation" },
     body:JSON.stringify({
       p_boutique_id:params.boutiqueId,
       p_invoice_id:params.invoiceId,
       p_idempotency_key:crypto.randomUUID(),
-      p_lines:params.lines,
+      p_lines:params.lines.map(line=>({ sourceLineId:line.sourceLineId ?? null, productId:line.productId, qty:line.qty })),
       p_refund_method:params.refundMethod,
     }),
   });

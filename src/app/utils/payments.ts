@@ -31,7 +31,7 @@ export function invoicePaidAmount(invoice: Invoice): number {
 }
 
 export function invoiceRemainingAmount(invoice: Invoice): number {
-  if (invoice.status === "annulée") return 0;
+  if (invoice.status === "annulée" || invoice.type.toLowerCase() === "retour") return 0;
   return roundMoney(Math.max(0, roundMoney(invoice.montant) - invoicePaidAmount(invoice)));
 }
 

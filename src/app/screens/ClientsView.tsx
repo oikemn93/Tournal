@@ -684,8 +684,8 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
           </div>}
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-            <button type="button" onClick={()=>openInvoicePDF(viewedInvoice,boutique,boutique.clients)} className="rounded-xl border border-border bg-card py-3 px-2 text-xs font-black">📄 Facture PDF</button>
-            <button type="button" onClick={()=>openReceiptPreview(viewedInvoice,boutique,currentUser.nom)} className="rounded-xl border border-border bg-card py-3 px-2 text-xs font-black">🧾 Ticket caisse</button>
+            <button type="button" onClick={()=>openInvoicePDF(viewedInvoice,boutique,boutique.clients)} className="rounded-xl border border-border bg-card py-3 px-2 text-xs font-black">📄 {viewedInvoice.type.toLowerCase()==="retour" ? "Avoir PDF" : "Facture PDF"}</button>
+            <button type="button" onClick={()=>openReceiptPreview(viewedInvoice,boutique,currentUser.nom)} className="rounded-xl border border-border bg-card py-3 px-2 text-xs font-black">🧾 {viewedInvoice.type.toLowerCase()==="retour" ? "Justificatif remboursement" : "Ticket caisse"}</button>
             {viewedInvoice.type.toLowerCase() !== "retour" && <button type="button" onClick={()=>openOrderDocument(viewedInvoice,boutique,boutique.clients)} className="rounded-xl border border-border bg-card py-3 px-2 text-xs font-black">📋 Bon de commande</button>}
           </div>
           {viewedInvoice.type.toLowerCase() === "retour" && viewedInvoice.returnOfInvoiceId && <div className="rounded-xl bg-red-50 px-3 py-2 text-xs font-black text-red-700 inline-flex items-center gap-2"><RotateCcw size={14}/> Retour sur facture {viewedInvoice.returnOfInvoiceId}</div>}

@@ -24,8 +24,10 @@ export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique:
   const invoiceSign = (invoice: typeof filtInv[number]) => invoice.type === "Retour" || invoice.type === "retour" ? -1 : 1;
   const ca           = filtPayments.reduce((sum,payment)=>sum + payment.signedAmount,0);
   const caTotal      = filtInv.reduce((s,i)=>s + invoiceSign(i) * i.montant,0);
-  const nbVentes     = new Set(filtPayments.filter(payment=>payment.signedAmount>0).map(payment=>payment.invoiceId)).size;
-  const panierMoyen  = nbVentes > 0 ? ca / nbVentes : 0;
+  const salePayments = filtPayments.filter(payment=>payment.signedAmount>0);
+  const nbVentes     = new Set(salePayments.map(payment=>payment.invoiceId)).size;
+  const caBrutVentes = salePayments.reduce((sum,payment)=>sum+payment.signedAmount,0);
+  const panierMoyen  = nbVentes > 0 ? caBrutVentes / nbVentes : 0;
   const impayé       = filtInv.filter(i=>invoiceSign(i)>0).reduce((s,i)=>s+invoiceRemainingAmount(i),0);
   // A supplier receipt is a payable commitment, not money that has already
   // left the cash desk. The later supplier-payment charge is the actual cash

@@ -17,7 +17,8 @@ import { getDefaultSaleUnit, getLastSalePrice, getSaleUnitOptions, toBaseSaleQty
 function ShareInvoiceModal({ inv, boutique, clients, onClose }: { inv: Invoice; boutique: Boutique; clients: Client[]; onClose: () => void }) {
   const phone = inv.clientTel ? inv.clientTel.replace(/[\s\-().]/g, "").replace("+", "") : "";
   const clientRecord = inv.clientId != null ? clients.find(c=>c.id===inv.clientId) : clients.find(c=>c.nom===inv.client);
-  const reste = Math.max(0, inv.montant - inv.acompte);
+  const isReturn = inv.type.toLowerCase() === "retour";
+  const reste = isReturn ? 0 : Math.max(0, inv.montant - inv.acompte);
   const [channel, setChannel] = useState<"apercu"|"email"|"whatsapp"|"sms">("apercu");
   const [emailAddr, setEmailAddr] = useState(clientRecord?.email ?? "");
   const [waPhone, setWaPhone] = useState(inv.clientTel ?? "");
@@ -50,14 +51,16 @@ function ShareInvoiceModal({ inv, boutique, clients, onClose }: { inv: Invoice; 
     const statusLine = reste<=0 ? "Statut : Payé"
       : inv.acompte>0 ? `Encaissé : ${fmtN(inv.acompte)} F — reste dû : ${fmtN(reste)} F`
       : "Statut : Impayé";
-    return `Bonjour ${inv.client}\n\nVoici votre facture ${inv.id} de ${boutique.nom}.\nTotal : ${fmtN(inv.montant)} F\n${statusLine}\n\nConsulter / télécharger la facture :\n${url}\n\nLien valable 48 h. Après expiration, la facture peut être régénérée sur demande.\n\nMerci pour votre confiance.`;
+    const doc = isReturn ? "avoir de retour" : "facture";
+    const source = isReturn && inv.returnOfInvoiceId ? `\nRetour sur facture : ${inv.returnOfInvoiceId}` : "";
+    return `Bonjour ${inv.client}\n\nVoici votre ${doc} ${inv.id} de ${boutique.nom}.\nMontant : ${fmtN(inv.montant)} F${source}\n${isReturn ? `Remboursé : ${fmtN(inv.returnRefundAmount ?? inv.acompte)} F` : statusLine}\n\nConsulter / télécharger le document :\n${url}\n\nLien valable 48 h. Le document peut être régénéré sur demande.\n\nMerci pour votre confiance.`;
   }
 
   async function doEmail() {
     if (!emailAddr.trim() || generating) return;
     const share = await createTemporaryLink();
     if (!share) return;
-    const subject = encodeURIComponent(`Facture ${inv.id} — ${boutique.nom}`);
+    const subject = encodeURIComponent(`${isReturn ? "Avoir de retour" : "Facture"} ${inv.id} — ${boutique.nom}`);
     const body = encodeURIComponent(shareText(share.url));
     window.location.href = `mailto:${emailAddr.trim()}?subject=${subject}&body=${body}`;
   }
@@ -78,7 +81,9 @@ function ShareInvoiceModal({ inv, boutique, clients, onClose }: { inv: Invoice; 
     if (!rawPhone || generating) return;
     const share = await createTemporaryLink();
     if (!share) return;
-    const text = `Facture ${inv.id} - ${boutique.nom} : ${fmtN(inv.montant)} F. ${reste > 0 ? `Reste ${fmtN(reste)} F. ` : "Payée. "}Lien valable 48 h : ${share.url}`;
+    const text = isReturn
+      ? `Avoir de retour ${inv.id} - ${boutique.nom} : ${fmtN(inv.montant)} F.${inv.returnOfInvoiceId ? ` Retour sur ${inv.returnOfInvoiceId}.` : ""} Lien valable 48 h : ${share.url}`
+      : `Facture ${inv.id} - ${boutique.nom} : ${fmtN(inv.montant)} F. ${reste > 0 ? `Reste ${fmtN(reste)} F. ` : "Payée. "}Lien valable 48 h : ${share.url}`;
     window.location.href = `sms:${rawPhone}?body=${encodeURIComponent(text)}`;
   }
 
@@ -90,7 +95,7 @@ function ShareInvoiceModal({ inv, boutique, clients, onClose }: { inv: Invoice; 
   ];
 
   return (
-    <Modal title="Partager la facture" color="#374151" onClose={onClose}>
+    <Modal title={isReturn ? "Partager l'avoir de retour" : "Partager la facture"} color={isReturn ? "#dc2626" : "#374151"} onClose={onClose}>
       <div className="flex items-center gap-3 px-4 py-3 rounded-2xl" style={{ background:"#f3f4f6", border:"1px solid #e5e7eb" }}>
         <FileText size={18} className="text-muted-foreground flex-shrink-0"/>
         <div className="flex-1 min-w-0">
@@ -98,12 +103,12 @@ function ShareInvoiceModal({ inv, boutique, clients, onClose }: { inv: Invoice; 
           <p className="text-xs text-muted-foreground">{fmtN(inv.montant)} F · {formatPreciseDateTime(inv.dateRaw) === "—" ? inv.date : formatPreciseDateTime(inv.dateRaw)}</p>
         </div>
         <span className="text-xs font-bold px-2 py-1 rounded-lg" style={{ background:reste<=0?"#f0fdf4":inv.acompte>0?"#fffbeb":"#fef2f2", color:reste<=0?"#16a34a":inv.acompte>0?"#d97706":"#dc2626" }}>
-          {reste<=0?"Payé":inv.acompte>0?"Acompte":"Impayé"}
+          {isReturn?"Avoir":reste<=0?"Payé":inv.acompte>0?"Acompte":"Impayé"}
         </span>
       </div>
 
       <div className="px-4 py-3 rounded-2xl text-xs leading-relaxed" style={{background:"#eff6ff",color:"#1d4ed8",border:"1px solid #bfdbfe"}}>
-        Aucun PDF n'est stocké tant que le client ne demande pas sa facture. Pour E-mail, WhatsApp ou SMS, Tournal génère un PDF temporaire et un lien privé valable 48 h. Le fichier est ensuite supprimé automatiquement. La facture reste toujours régénérable depuis les données Tournal.
+        Aucun PDF n'est stocké tant que le client ne demande pas son document. Pour E-mail, WhatsApp ou SMS, Tournal génère un PDF temporaire et un lien privé valable 48 h. Le fichier est ensuite supprimé automatiquement. La facture reste toujours régénérable depuis les données Tournal.
       </div>
 
       <div className="grid grid-cols-4 gap-2">
@@ -185,26 +190,35 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
     return clientType === "B2C" || clientType === "B2B" || clientType === "Grossiste";
   };
 
-  // Quantities already returned, per source invoice and product. Every return
-  // restores stock via an entry tagged "Retour <sourceInvoiceId>", mirroring the
-  // return_sale RPC, so summing those entries tells us how much of each line has
-  // already been sent back. This prevents returning the same invoice repeatedly.
-  const returnedByInvoiceProduct = useMemo(() => {
-    const map = new Map<string, number>();
-    const prefix = "Retour ";
-    for (const e of entries) {
-      const note = e.fournisseur ?? "";
-      if (!note.startsWith(prefix)) continue;
-      const sourceId = note.slice(prefix.length);
-      const key = `${sourceId}::${e.productId}`;
-      map.set(key, (map.get(key) ?? 0) + Number(e.qty || 0));
+  // Return integrity is line-based. Product-level fallback is kept only for old in-memory rows
+  // that have not yet received their canonical invoice-line ID from realtime.
+  const returnedBySourceLine = useMemo(() => {
+    const map = new Map<number, number>();
+    for (const credit of invoices) {
+      if (credit.type.toLowerCase() !== "retour") continue;
+      for (const line of credit.lines ?? []) {
+        if (line.sourceInvoiceLineId == null) continue;
+        map.set(line.sourceInvoiceLineId, (map.get(line.sourceInvoiceLineId) ?? 0) + Number(line.qty || 0));
+      }
     }
     return map;
-  }, [entries]);
-  const remainingReturnable = (inv: Invoice, line: InvoiceLine) =>
-    Math.max(0, line.qty - (returnedByInvoiceProduct.get(`${inv.id}::${line.productId}`) ?? 0));
-  const invoiceHasReturnable = (inv: Invoice) =>
-    !!inv.lines && inv.lines.some(l => remainingReturnable(inv, l) > 0);
+  }, [invoices]);
+  const legacyReturnedByInvoiceProduct = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const credit of invoices) {
+      if (credit.type.toLowerCase() !== "retour" || !credit.returnOfInvoiceId) continue;
+      for (const line of credit.lines ?? []) {
+        if (line.sourceInvoiceLineId != null) continue;
+        const key = `${credit.returnOfInvoiceId}::${line.productId}`;
+        map.set(key, (map.get(key) ?? 0) + Number(line.qty || 0));
+      }
+    }
+    return map;
+  }, [invoices]);
+  const remainingReturnable = (inv: Invoice, line: InvoiceLine) => Math.max(0,
+    line.qty - (line.id != null ? (returnedBySourceLine.get(line.id) ?? 0) : (legacyReturnedByInvoiceProduct.get(`${inv.id}::${line.productId}`) ?? 0)),
+  );
+  const invoiceHasReturnable = (inv: Invoice) => !!inv.lines && inv.lines.some(l => remainingReturnable(inv, l) > 0);
   const [statusFilter,setStatusFilter] = useState<InvoiceStatus|"all"|"impayé"|"retours">(initialStatus ?? "all");
   const [invSearch, setInvSearch] = useState("");
   const [modal,setModal]   = useState(false);
@@ -548,7 +562,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
     }
     let persisted;
     try {
-      persisted = await returnSale({ boutiqueId:boutique.id, invoiceId:returnInv.id, refundMethod:returnMethod, lines:returnLines.map(l=>({ productId:l.productId, qty:l.qty })) });
+      persisted = await returnSale({ boutiqueId:boutique.id, invoiceId:returnInv.id, refundMethod:returnMethod, lines:returnLines.map(l=>({ sourceLineId:l.id, productId:l.productId, qty:l.qty })) });
     } catch (error) {
       alert(error instanceof Error ? error.message : "Retour impossible");
       return;
@@ -558,8 +572,9 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
     const retInv: Invoice = {
       id: retId, clientId:returnInv.clientId, client: returnInv.client, clientTel: returnInv.clientTel,
       clientType:returnInv.clientType,
-      lines: returnLines, montant: refundTotal, acompte: refundTotal,
+      lines: returnLines.map(line=>({ ...line, sourceInvoiceLineId:line.id })), montant: refundTotal, acompte:Number(persisted.refund_amount ?? 0),
       date: today(), dateRaw:persisted.returned_at, status: "payé", type: "Retour", returnOfInvoiceId:returnInv.id,
+      creditNoteNumber:persisted.credit_note_number, returnRefundAmount:Number(persisted.refund_amount ?? 0), returnReceivableReduction:Number(persisted.receivable_reduction ?? 0), returnCreditRestore:Number(persisted.credit_restore ?? 0),
       operatorNom: currentUser.nom, operatorColor: currentUser.color,
       paymentMethod: persisted.refund_method as PaymentMethod,
       payments: persisted.payment ? [{
@@ -816,7 +831,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
                   <div>
                     <div className="flex items-center gap-2">
                       <p className="font-bold text-sm">{inv.client}</p>
-                      {isReturn && <span className="text-xs px-1.5 py-0.5 rounded font-bold flex items-center gap-1" style={{ background:SEM.danger.bg, color:SEM.danger.text }}><RotateCcw size={9}/> Retour</span>}
+                      {isReturn && <span className="text-xs px-1.5 py-0.5 rounded font-bold flex items-center gap-1" style={{ background:SEM.danger.bg, color:SEM.danger.text }}><RotateCcw size={9}/> Avoir de retour</span>}
                     </div>
                     <p className="text-xs text-muted-foreground mt-0.5">{inv.id} · {formatPreciseDateTime(inv.dateRaw)} · {inv.type}</p>
                     {inv.lines&&inv.lines.length>0&&<p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1"><ShoppingCart size={10}/> {inv.lines.length} produit{inv.lines.length>1?"s":""}</p>}
@@ -860,12 +875,18 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
             <RotateCcw size={14}/> Retour sur facture {detailInv.returnOfInvoiceId}
           </div>
         )}
+        {detailInv.type === "Retour" && <div className="grid grid-cols-3 gap-2 text-center">
+          <div className="rounded-xl bg-red-50 p-2"><p className="text-[10px] text-red-700">REMBOURSÉ</p><p className="text-sm font-black text-red-700">{fmt(detailInv.returnRefundAmount ?? invoicePaidAmount(detailInv))}</p></div>
+          <div className="rounded-xl bg-amber-50 p-2"><p className="text-[10px] text-amber-700">CRÉANCE ANNULÉE</p><p className="text-sm font-black text-amber-700">{fmt(detailInv.returnReceivableReduction ?? 0)}</p></div>
+          <div className="rounded-xl bg-teal-50 p-2"><p className="text-[10px] text-teal-700">AVOIR RESTAURÉ</p><p className="text-sm font-black text-teal-700">{fmt(detailInv.returnCreditRestore ?? 0)}</p></div>
+        </div>}
         {detailInv.type !== "Retour" && (() => {
           const linkedReturns = invoices.filter(item => item.returnOfInvoiceId === detailInv.id);
           if (!linkedReturns.length) return null;
           const returnedAmount = linkedReturns.reduce((sum,item)=>sum+item.montant,0);
+          const fullyReturned = !invoiceHasReturnable(detailInv);
           return <div className="rounded-xl px-3 py-2 text-xs font-black flex items-center justify-between gap-2" style={{background:"#fef2f2",color:"#b91c1c"}}>
-            <span className="flex items-center gap-2"><RotateCcw size={14}/> {linkedReturns.length} retour{linkedReturns.length>1?"s":""} enregistré{linkedReturns.length>1?"s":""}</span>
+            <span className="flex items-center gap-2"><RotateCcw size={14}/> {fullyReturned ? "Retournée intégralement" : "Retour partiel"} · {linkedReturns.length} avoir{linkedReturns.length>1?"s":""}</span>
             <span>{fmt(returnedAmount)}</span>
           </div>;
         })()}
@@ -1084,19 +1105,29 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
                   {alreadyReturned > 0 && <p className="text-xs font-semibold" style={{ color:"#ef4444" }}>{rem > 0 ? `Reste à retourner : ${rem}` : "Déjà retourné en totalité"}</p>}
                 </div>
                 <div className="flex items-center gap-1.5 flex-shrink-0">
-                  <button disabled={rem<=0} onClick={()=>setReturnQtys(q=>({...q,[i]:Math.max(0,(q[i]??0)-1)}))} className="w-8 h-8 rounded-xl flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed" style={{ background:"#ef444422" }}><Minus size={12} style={{ color:"#ef4444" }}/></button>
-                  <span className="w-8 text-center font-black text-sm" style={{ color:"#ef4444" }}>{returnQtys[i] ?? 0}</span>
-                  <button disabled={(returnQtys[i] ?? 0) >= rem} onClick={()=>setReturnQtys(q=>({...q,[i]:Math.min(rem,(q[i]??0)+1)}))} className="w-8 h-8 rounded-xl flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed" style={{ background:"#ef444422" }}><Plus size={12} style={{ color:"#ef4444" }}/></button>
+                  {(() => {
+                    const step = l.sellQty != null && l.sellQty > 0 && l.qty > 0 ? l.qty / l.sellQty : 1;
+                    const base = returnQtys[i] ?? 0;
+                    const display = l.sellQty != null && l.qty > 0 ? base * l.sellQty / l.qty : base;
+                    return <>
+                      <button disabled={rem<=0} onClick={()=>setReturnQtys(q=>({...q,[i]:Math.max(0,(q[i]??0)-step)}))} className="w-8 h-8 rounded-xl flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed" style={{ background:"#ef444422" }}><Minus size={12} style={{ color:"#ef4444" }}/></button>
+                      <span className="min-w-12 text-center font-black text-sm" style={{ color:"#ef4444" }}>{new Intl.NumberFormat("fr-FR",{maximumFractionDigits:3}).format(display)} <span className="text-[10px]">{lineDispUnit(l)}</span></span>
+                      <button disabled={base >= rem-0.0005} onClick={()=>setReturnQtys(q=>({...q,[i]:Math.min(rem,(q[i]??0)+step)}))} className="w-8 h-8 rounded-xl flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed" style={{ background:"#ef444422" }}><Plus size={12} style={{ color:"#ef4444" }}/></button>
+                    </>;
+                  })()}
                 </div>
               </div>
               );
             })}
           </div>
           {(() => {
-            const total = returnInv.lines.reduce((s,l,i)=>s+(returnQtys[i]??0)*l.prixUnit,0);
+            const total = returnInv.lines.reduce((sum,line,index)=>{
+              const baseQty=returnQtys[index]??0;
+              return sum + (line.qty>0 ? (baseQty/line.qty)*lineTotal(line) : 0);
+            },0);
             return total > 0 ? (
               <div className="flex justify-between items-center px-4 py-3 rounded-2xl" style={{ background:"#ef444415" }}>
-                <span className="font-bold text-sm" style={{ color:"#ef4444" }}>Montant remboursé</span>
+                <span className="font-bold text-sm" style={{ color:"#ef4444" }}>Valeur de l'avoir</span>
                 <span className="text-xl font-black" style={{ color:"#ef4444", fontFamily:"'Nunito', sans-serif" }}>{fmt(total)}</span>
               </div>
             ) : null;
@@ -1111,7 +1142,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
                   </button>
                 ))}
               </div>
-              <p className="text-xs text-muted-foreground">Le mode choisi sera enregistré sur l'avoir et dans l'écriture de remboursement.</p>
+              <p className="text-xs text-muted-foreground">Le serveur réduit d'abord une éventuelle créance impayée, restaure ensuite l'avoir client utilisé, puis rembourse uniquement le solde réellement encaissé. Le mode ci-dessus ne s'applique qu'à la partie effectivement remboursée.</p>
             </div>
           )}
           {returnDone ? (
