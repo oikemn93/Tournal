@@ -20,6 +20,10 @@ function normalizePhone(value?: string): string {
   return (value ?? "").replace(/\D/g, "");
 }
 
+function clientInvoiceRemainingAmount(invoice: Invoice): number {
+  return Math.max(0, roundMoney(baseInvoiceRemainingAmount(invoice)));
+}
+
 function dueLabel(dueDate: string | undefined, remaining: number) {
   if (!dueDate || remaining <= 0) return null;
   const todayAtMidnight = new Date();
@@ -889,7 +893,10 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
           const CC = clientColor(c.type);
           const clientInvoices = boutique.invoices.filter(inv => inv.clientId === c.id);
           const invCount = clientInvoices.length;
-          const montantDu = clientInvoices.reduce((s,inv)=>s+invoiceRemainingAmount(inv),0);
+          // The list view is rendered outside the client-detail scope. Use the
+          // module-level helper here; the detail-only return-aware helper is not
+          // in scope and previously caused a ReferenceError/blank Clients screen.
+          const montantDu = clientInvoices.reduce((s,inv)=>s+clientInvoiceRemainingAmount(inv),0);
           const avoir = (boutique.clientAdvances ?? []).filter(advance=>advance.clientId===c.id).reduce((sum,advance)=>sum+Math.max(0,advance.amount-(advance.allocatedAmount ?? 0)),0);
           const net = avoir - montantDu;
           const balanceLabel = net > 0 ? `+${fmt(net)}` : net < 0 ? `-${fmt(Math.abs(net))}` : "0";
