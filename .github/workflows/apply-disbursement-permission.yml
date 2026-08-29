@@ -26,3 +26,4 @@ jobs:
           git add src/app/types.ts src/app/constants.ts src/app/App.tsx src/app/screens/ChargesView.tsx src/app/screens/ClientsView.tsx src/app/screens/FournisseursView.tsx
           git diff --cached --quiet || git commit -m "feat: gate cash outflows behind disbursement right"
           git push
+# rerun: safe targeted client refund action patch
