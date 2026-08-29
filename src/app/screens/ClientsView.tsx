@@ -56,6 +56,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
   const [modal, setModal] = useState(false);
   const [detailClient, setDetailClient] = useState<Client|null>(null);
   const [orderClient, setOrderClient] = useState<Client|null>(null);
+  const [editingClientInvoice, setEditingClientInvoice] = useState<Invoice|null>(null);
   const [viewedInvoice, setViewedInvoice] = useState<Invoice|null>(null);
   const [viewedInvoiceMargin, setViewedInvoiceMargin] = useState<FifoRealizedMarginReport|null>(null);
   const [viewedInvoiceMarginLoading, setViewedInvoiceMarginLoading] = useState(false);
@@ -188,7 +189,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
 
   if (orderClient) {
     return <div className="space-y-4 pb-24" data-screen-source="client-order-embedded">
-      <button type="button" onClick={()=>setOrderClient(null)} className="flex items-center gap-2 text-sm font-black text-muted-foreground"><ArrowLeft size={18}/> Retour à {orderClient.nom}</button>
+      <button type="button" onClick={()=>{setOrderClient(null);setEditingClientInvoice(null);}} className="flex items-center gap-2 text-sm font-black text-muted-foreground"><ArrowLeft size={18}/> Retour à {orderClient.nom}</button>
       <EmbeddedClientPOSView
         boutique={boutique}
         allBoutiques={allBoutiques}
@@ -197,10 +198,12 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
         canCancelPendingOrder={canCancelPendingOrder}
         initialClientId={orderClient.id}
         initialOrderOrigin="client_profile"
+        initialEditingInvoice={editingClientInvoice ?? undefined}
         onInitialClientPrepared={()=>undefined}
         onOrderCreated={(clientId,invoiceId,notice="order")=>{
           const client = clients.find(item=>item.id===clientId) ?? orderClient;
           setOrderClient(null);
+          setEditingClientInvoice(null);
           setDetailClient(client);
           setShowAllInvoices(true);
           setHighlightedInvoiceId(invoiceId);
@@ -537,6 +540,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
               const isHighlighted = inv.id === highlightedInvoiceId;
               const canUseAdvance = canCollectPayment && !isReturn && remaining>0 && totalAvoir>0;
               const canCancel = canCancelPendingOrder && (canManageAnyPendingOrder || inv.operatorId === currentUser.id) && inv.origin === "client_profile" && inv.status === "en attente" && paid <= 0;
+              const canEdit = canCreateOrder && (canManageAnyPendingOrder || inv.operatorId === currentUser.id) && inv.origin === "client_profile" && inv.status === "en attente" && paid <= 0;
               const paymentNotice = isHighlighted && advanceAppliedNotice?.invoiceId === inv.id
                 ? `✓ Avoir déduit : ${fmt(advanceAppliedNotice.amount)}`
                 : null;
@@ -558,6 +562,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
                     ? <button type="button" onClick={()=>setViewedInvoice(inv)} className="flex flex-1 min-w-0 items-center gap-3 text-left active:scale-[0.99]">{content}</button>
                     : <div className="flex flex-1 min-w-0 items-center gap-3">{content}</div>}
                   {canUseAdvance&&<button type="button" onClick={()=>applyAdvanceToInvoice(inv)} disabled={!!applyingAdvanceInvoiceId} className="rounded-lg px-2 py-2 text-[11px] font-black disabled:opacity-50" style={{background:"#ccfbf1",color:"#0f766e"}}>{applyingAdvanceInvoiceId===inv.id?"Application…":"🎟️ Utiliser"}</button>}
+                  {canEdit&&<button type="button" onClick={()=>{setEditingClientInvoice(inv);setOrderClient(c);}} className="rounded-lg px-2 py-2 text-[11px] font-black" style={{background:"#eff6ff",color:"#1d4ed8"}}>Modifier</button>}
                   {canCancel&&<button type="button" onClick={()=>{setCancelReason("");setCancelInvoice(inv);}} className="rounded-lg px-2 py-2 text-[11px] font-black" style={{background:"#fef2f2",color:"#dc2626"}} title="Annuler cette commande">Annuler</button>}
                 </div>
                 {paymentNotice&&<p className="mt-2 rounded-lg px-2 py-1.5 text-xs font-black" style={{background:"#dcfce7",color:SEM.success.accent}}>{paymentNotice}</p>}
@@ -680,6 +685,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
             <button type="button" onClick={()=>openReceiptPreview(viewedInvoice,boutique,currentUser.nom)} className="rounded-xl border border-border bg-card py-3 px-2 text-xs font-black">🧾 Ticket caisse</button>
             {viewedInvoice.type.toLowerCase() !== "retour" && <button type="button" onClick={()=>openOrderDocument(viewedInvoice,boutique,boutique.clients)} className="rounded-xl border border-border bg-card py-3 px-2 text-xs font-black">📋 Bon de commande</button>}
           </div>
+          {canCreateOrder && viewedInvoice.origin === "client_profile" && viewedInvoice.status === "en attente" && invoicePaidAmount(viewedInvoice) <= 0 && (canManageAnyPendingOrder || viewedInvoice.operatorId === currentUser.id) && <button type="button" onClick={()=>{setViewedInvoice(null);setEditingClientInvoice(viewedInvoice);setOrderClient(c);}} className="w-full rounded-xl bg-blue-50 py-3 text-sm font-black text-blue-700">Modifier la commande</button>}
           {canCollectPayment && invoiceRemainingAmount(viewedInvoice)>0 && totalAvoir>0 && <button type="button" onClick={()=>void applyAdvanceToInvoice(viewedInvoice)} disabled={!!applyingAdvanceInvoiceId} className="w-full rounded-xl py-3 text-sm font-black disabled:opacity-50" style={{background:SEM.success.bg,color:SEM.success.accent}}>🎟️ Utiliser l'avoir disponible ({fmt(Math.min(totalAvoir,invoiceRemainingAmount(viewedInvoice)))})</button>}
           {canCollectPayment && invoiceRemainingAmount(viewedInvoice)>0 && <button type="button" onClick={()=>{setPaymentMethod("Espèces");setPaymentAmount(String(invoiceRemainingAmount(viewedInvoice)));setViewedInvoice(null);setPaymentSummary(null);setPaymentModal(true);}} className="w-full rounded-xl bg-emerald-600 py-3 text-sm font-black text-white">Enregistrer un versement</button>}
           <p className="text-xs text-muted-foreground">Le backend applique les versements en FIFO : les factures les plus anciennes sont réglées en premier et tout excédent devient un avoir.</p>

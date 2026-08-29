@@ -12,12 +12,13 @@ import { createSale, recordMultiPayment, recordPayment, cancelPendingInvoice, up
 import { getDefaultSaleUnit, getLastSalePrice, getSaleUnitOptions, toBaseSaleQty } from "../utils/sales";
 import { formatPreciseDateTime } from "../utils/payments";
 
-export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente = false, canCancelPendingOrder = false, initialClientId, initialOrderOrigin = "pos", onInitialClientPrepared, onOrderCreated, onUpdate, logAction }: {
+export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente = false, canCancelPendingOrder = false, initialClientId, initialOrderOrigin = "pos", initialEditingInvoice, onInitialClientPrepared, onOrderCreated, onUpdate, logAction }: {
   boutique: Boutique; allBoutiques: Boutique[]; currentUser: PlatformUser;
   canEncaissVente?: boolean;
   canCancelPendingOrder?: boolean;
   initialClientId?: number;
   initialOrderOrigin?: "pos" | "client_profile";
+  initialEditingInvoice?: Invoice;
   onInitialClientPrepared?: () => void;
   onOrderCreated?: (clientId: number, invoiceId: string, notice?: "order"|"payment") => void;
   onUpdate: (u: Partial<Boutique>) => void;
@@ -99,6 +100,26 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
     }
     onInitialClientPrepared?.();
   }, [initialClientId, boutique.clients, onInitialClientPrepared]);
+
+  // Client workspace can reopen an unpaid order for editing. The existing
+  // updatePendingInvoice path preserves the invoice number and only rewrites
+  // the order lines/total; no stock movement has happened before payment.
+  useEffect(() => {
+    if (!initialEditingInvoice) return;
+    if (initialEditingInvoice.status !== "en attente" || initialEditingInvoice.acompte > 0) return;
+    const items: CartItem[] = (initialEditingInvoice.lines ?? []).map(line => ({
+      productId:line.productId, nom:line.nom, img:products.find(p=>p.id===line.productId)?.img ?? "",
+      unit:line.unit, qty:line.qty, prixUnit:line.prixUnit, sellUnit:line.sellUnit, sellQty:line.sellQty,
+    }));
+    setCart(items);
+    setClientNom(initialEditingInvoice.client === "Client comptoir" ? "" : initialEditingInvoice.client);
+    setClientTel(initialEditingInvoice.clientTel ?? "+221 ");
+    setSelectedClientId(initialEditingInvoice.clientId);
+    setEditingInvoice(initialEditingInvoice);
+    setOrderOrigin("client_profile");
+    setPosTab("produits");
+    setCheckoutOpen(true);
+  }, [initialEditingInvoice?.id]);
 
   // Auto-connect QZ Tray if configured
   useEffect(()=>{ if (boutique.autoPrint && boutique.printerName && PA.status==="idle") connectQZ(boutique.printerName); },[]);
