@@ -489,7 +489,6 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
     const updatedClientAdvances = applyAdvanceAllocations(persisted.advance_allocations);
     onUpdate({
       invoices: invoices.map(i => i.id === encaissInv.id ? updatedInv : i),
-      ...(saleEntries.length ? { entries: [...entries, ...saleEntries] } : {}),
       ...(updatedClientAdvances ? { clientAdvances: updatedClientAdvances } : {}),
     });
     const methodLabel = validSplit.length > 1
@@ -576,7 +575,8 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
       id: Date.now() + i, productId: l.productId, qty: l.qty, unit: l.unit,
       montantDu: 0, movementType:"retour", date: today(), fournisseur: `Retour ${returnInv.id}`,
     }));
-    onUpdate({ invoices: [...invoices, retInv], entries: [...entries, ...restoreEntries] });
+    // return_sale already persisted the stock restoration; realtime refreshes entries.
+    onUpdate({ invoices: [...invoices, retInv] });
     logAction("Retour articles", `${retId} ← ${returnInv.id} · ${returnLines.length} article(s) · ${fmt(refundTotal)}`, "↩️");
     setReturnDone(true);
     setTimeout(() => { setReturnInv(null); setReturnDone(false); }, 1600);
@@ -654,7 +654,6 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
     const updatedClientAdvances = applyAdvanceAllocations(initialPayment?.advanceAllocations);
     onUpdate({
       invoices:[...invoices, newInv],
-      ...(saleEntries.length ? { entries:[...entries,...saleEntries] } : {}),
       ...(updatedClientAdvances ? { clientAdvances: updatedClientAdvances } : {}),
     });
     // Inter-tenant: add incoming stock entries to sibling boutique

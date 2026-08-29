@@ -269,7 +269,6 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
         : undefined;
       onUpdate({
         invoices:[...invoices, newInv],
-        ...(saleEntries.length ? { entries:[...entries, ...saleEntries] } : {}),
         ...(updatedClientAdvances ? { clientAdvances:updatedClientAdvances } : {}),
       });
       const paymentLabel = advanceAmount > 0

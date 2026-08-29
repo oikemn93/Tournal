@@ -121,6 +121,10 @@ export async function startInventorySession(params: { boutiqueId: string; scopeT
 export async function saveInventoryCount(params: { sessionId: string; productId: number; countedQty: number; countingDetail?: InventoryCountingDetail }) { return normalizeSession(await rpc<any>("save_inventory_count", { p_session_id: params.sessionId, p_product_id: params.productId, p_counted_qty: params.countedQty, p_counting_detail: params.countingDetail ?? {} })); }
 export async function finalizeInventorySession(sessionId: string) { return normalizeSession(await rpc<any>("finalize_inventory_session", { p_session_id: sessionId })); }
 export async function cancelInventorySession(sessionId: string) { return normalizeSession(await rpc<any>("cancel_inventory_session", { p_session_id: sessionId })); }
+export async function getFifoInvoiceMargin(params: { boutiqueId: string; invoiceId: string }): Promise<FifoRealizedMarginReport> {
+  return normalizeMarginReport(await rpc<any>("get_fifo_invoice_margin", { p_boutique_id: params.boutiqueId, p_invoice_id: params.invoiceId }));
+}
+
 export async function getFifoRealizedMargin(params: { boutiqueId: string; fromAt: string; toAt: string }): Promise<FifoRealizedMarginReport> {
   return normalizeMarginReport(await rpc<any>("get_fifo_realized_margin", {
     p_boutique_id: params.boutiqueId,

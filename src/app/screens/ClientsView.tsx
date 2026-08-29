@@ -14,6 +14,7 @@ import { PhoneField } from "../components/PhoneField";
 import { formatPreciseDateTime, invoicePaidAmount, invoiceRemainingAmount } from "../utils/payments";
 import { openInvoicePDF, openOrderDocument, openReceiptPreview } from "../utils/invoice";
 import { POSView as EmbeddedClientPOSView } from "./POSView";
+import { getFifoInvoiceMargin, type FifoRealizedMarginReport } from "../../lib/inventoryApi";
 
 function normalizePhone(value?: string): string {
   return (value ?? "").replace(/\D/g, "");
@@ -56,6 +57,8 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
   const [detailClient, setDetailClient] = useState<Client|null>(null);
   const [orderClient, setOrderClient] = useState<Client|null>(null);
   const [viewedInvoice, setViewedInvoice] = useState<Invoice|null>(null);
+  const [viewedInvoiceMargin, setViewedInvoiceMargin] = useState<FifoRealizedMarginReport|null>(null);
+  const [viewedInvoiceMarginLoading, setViewedInvoiceMarginLoading] = useState(false);
   const [editClient, setEditClient] = useState<Client|null>(null);
   const [editName, setEditName] = useState("");
   const [editPhone, setEditPhone] = useState("");
@@ -72,6 +75,21 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
   const [highlightedInvoiceNotice, setHighlightedInvoiceNotice] = useState<"order" | "payment">("order");
   const [nom,setNom]=useState(""); const [dialCode,setDialCode]=useState("+221"); const [tel,setTel]=useState(""); const [ville,setVille]=useState(""); const [type,setType]=useState<ClientType>("B2C");
   const [adresse,setAdresse]=useState(""); const [email,setEmail]=useState(""); const [contact,setContact]=useState("");
+  const marginAssignment = currentUser.assignments.find(assignment => assignment.boutiqueId === boutique.id);
+  const canSeeMargin = currentUser.isSuperAdmin || !!marginAssignment?.droits?.marges;
+  useEffect(() => {
+    let cancelled = false;
+    if (!viewedInvoice || !canSeeMargin || viewedInvoice.type.toLowerCase() === "retour" || viewedInvoice.status === "annulée" || invoicePaidAmount(viewedInvoice) <= 0) {
+      setViewedInvoiceMargin(null); setViewedInvoiceMarginLoading(false);
+      return () => { cancelled = true; };
+    }
+    setViewedInvoiceMarginLoading(true);
+    void getFifoInvoiceMargin({ boutiqueId:boutique.id, invoiceId:viewedInvoice.id })
+      .then(report => { if (!cancelled) setViewedInvoiceMargin(report); })
+      .catch(error => { console.warn("Marge FIFO facture indisponible", error); if (!cancelled) setViewedInvoiceMargin(null); })
+      .finally(() => { if (!cancelled) setViewedInvoiceMarginLoading(false); });
+    return () => { cancelled = true; };
+  }, [boutique.id, viewedInvoice?.id, viewedInvoice?.status, viewedInvoice?.acompte, canSeeMargin]);
   const siblings = getSiblings(boutique.id, allBoutiques, platformUsers);
   const filtered = clients.filter(c=>c.type===tab&&(c.nom.toLowerCase().includes(search.toLowerCase())||c.tel.includes(search)||c.ville.toLowerCase().includes(search.toLowerCase())));
   const counts = { "B2C":clients.filter(c=>c.type==="B2C").length, "B2B":clients.filter(c=>c.type==="B2B").length, "Grossiste":clients.filter(c=>c.type==="Grossiste").length };
@@ -380,7 +398,6 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
             ...advance,
             allocatedAmount:(advance.allocatedAmount ?? 0) + (allocatedByAdvance.get(advance.id) ?? 0),
           })),
-          ...(stockEntries.length ? { entries:[...entries, ...stockEntries] } : {}),
         });
         setHighlightedInvoiceId(invoice.id);
         setHighlightedInvoiceNotice("payment");
@@ -648,6 +665,16 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
             <div className="mt-3 grid grid-cols-3 gap-2 text-center"><div className="rounded-xl bg-muted p-2"><p className="text-[10px] text-muted-foreground">TOTAL</p><p className="text-sm font-black">{fmt(viewedInvoice.montant)}</p></div><div className="rounded-xl bg-green-50 p-2"><p className="text-[10px] text-green-700">PAYÉ</p><p className="text-sm font-black text-green-700">{fmt(invoicePaidAmount(viewedInvoice))}</p></div><div className="rounded-xl bg-red-50 p-2"><p className="text-[10px] text-red-700">RESTE</p><p className="text-sm font-black text-red-700">{fmt(invoiceRemainingAmount(viewedInvoice))}</p></div></div>
           </div>
           <div className="space-y-2">{(viewedInvoice.lines ?? []).map((line,index)=><div key={index} className="flex items-center justify-between rounded-xl bg-muted px-3 py-2 text-xs"><div><p className="font-bold">{line.nom}</p><p className="text-muted-foreground">{line.sellQty ?? line.qty} {line.sellUnit ?? line.unit}</p></div><p className="font-black">{fmt((line.sellQty ?? line.qty) * line.prixUnit)}</p></div>)}</div>
+          {canSeeMargin && viewedInvoice.type.toLowerCase() !== "retour" && viewedInvoice.status !== "annulée" && <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3">
+            <p className="text-[10px] font-black tracking-wider text-emerald-800">RENTABILITÉ INTERNE · FIFO</p>
+            {invoicePaidAmount(viewedInvoice) <= 0 ? <p className="mt-1 text-xs text-emerald-900/70">La marge réalisée sera disponible après la première sortie de stock.</p> : viewedInvoiceMarginLoading ? <p className="mt-1 text-xs text-emerald-900/70">Calcul de la marge…</p> : viewedInvoiceMargin ? <div className="mt-2 grid grid-cols-3 gap-2 text-center">
+              <div className="rounded-xl bg-white/70 p-2"><p className="text-[10px] text-muted-foreground">COÛT FIFO</p><p className="text-sm font-black">{fmt(viewedInvoiceMargin.fifoCost)}</p></div>
+              <div className="rounded-xl bg-white/70 p-2"><p className="text-[10px] text-muted-foreground">MARGE RÉALISÉE</p><p className={`text-sm font-black ${viewedInvoiceMargin.realizedMargin >= 0 ? "text-emerald-700" : "text-red-700"}`}>{fmt(viewedInvoiceMargin.realizedMargin)}</p></div>
+              <div className="rounded-xl bg-white/70 p-2"><p className="text-[10px] text-muted-foreground">TAUX DE MARQUE</p><p className={`text-sm font-black ${viewedInvoiceMargin.realizedMargin >= 0 ? "text-emerald-700" : "text-red-700"}`}>{new Intl.NumberFormat("fr-FR",{maximumFractionDigits:1}).format(viewedInvoiceMargin.marginRate)} %</p></div>
+              {viewedInvoiceMargin.unmatchedLines > 0 && <p className="col-span-3 text-[10px] font-bold text-amber-700">Couverture FIFO {new Intl.NumberFormat("fr-FR",{maximumFractionDigits:1}).format(viewedInvoiceMargin.coverageRate)} % · {viewedInvoiceMargin.unmatchedLines} ligne(s) à rapprocher</p>}
+            </div> : <p className="mt-1 text-xs text-amber-700">Marge FIFO indisponible pour cette facture.</p>}
+          </div>}
+
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             <button type="button" onClick={()=>openInvoicePDF(viewedInvoice,boutique,boutique.clients)} className="rounded-xl border border-border bg-card py-3 px-2 text-xs font-black">📄 Facture PDF</button>
             <button type="button" onClick={()=>openReceiptPreview(viewedInvoice,boutique,currentUser.nom)} className="rounded-xl border border-border bg-card py-3 px-2 text-xs font-black">🧾 Ticket caisse</button>
