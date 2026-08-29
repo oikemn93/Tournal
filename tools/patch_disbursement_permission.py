@@ -104,28 +104,17 @@ replace(
     '  canCollectPayment?: boolean;\n  canCancelPendingOrder?: boolean;',
     '  canCollectPayment?: boolean;\n  canDisburse?: boolean;\n  canCancelPendingOrder?: boolean;',
 )
-replace(
-    "src/app/screens/ClientsView.tsx",
-    '  async function submitCreditRefund()',
-    '  async function submitCreditRefund()',
-)
-# Inject into the existing refund function body without depending on its full implementation.
 text_path = Path("src/app/screens/ClientsView.tsx")
 text = text_path.read_text()
 needle = 'async function submitCreditRefund() {'
 if needle not in text:
     raise SystemExit("missing submitCreditRefund")
-text = text.replace(needle, needle + '\n    if (!canDisburse) { alert("Droit de décaissement requis"); return; }', 1)
-text = text.replace(
-    '{refundCreditDone?<div className="rounded-xl bg-green-50 p-4 text-center text-sm font-black text-green-700">Avoir remboursé ✓</div>:<SubmitBtn',
-    '{refundCreditDone?<div className="rounded-xl bg-green-50 p-4 text-center text-sm font-black text-green-700">Avoir remboursé ✓</div>:canDisburse?<SubmitBtn',
-    1,
-)
-text = text.replace(
-    '/>} \n        </Modal>}',
-    '/>:<div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-semibold text-amber-900">Droit de décaissement requis pour rembourser cet avoir.</div>} \n        </Modal>}',
-    1,
-)
+text = text.replace(needle, needle + '\n      if (!canDisburse) { alert("Droit de décaissement requis"); return; }', 1)
+old_refund_action = '{refundCreditDone?<div className="rounded-xl bg-green-50 p-4 text-center text-sm font-black text-green-700">Avoir remboursé ✓</div>:<SubmitBtn color={SEM.danger.accent} label={refundingCredit?"Remboursement…":"Confirmer le remboursement"} onClick={()=>void submitCreditRefund()} disabled={refundingCredit||(Number(refundCreditAmount)||0)<=0||(Number(refundCreditAmount)||0)>totalAvoir+0.01}/>}'
+new_refund_action = '{refundCreditDone?<div className="rounded-xl bg-green-50 p-4 text-center text-sm font-black text-green-700">Avoir remboursé ✓</div>:canDisburse?<SubmitBtn color={SEM.danger.accent} label={refundingCredit?"Remboursement…":"Confirmer le remboursement"} onClick={()=>void submitCreditRefund()} disabled={refundingCredit||(Number(refundCreditAmount)||0)<=0||(Number(refundCreditAmount)||0)>totalAvoir+0.01}/>:<div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-semibold text-amber-900">Droit de décaissement requis pour rembourser cet avoir.</div>}'
+if old_refund_action not in text:
+    raise SystemExit("missing refund action")
+text = text.replace(old_refund_action, new_refund_action, 1)
 text_path.write_text(text)
 
 # Supplier payment UI already has canPaySupplier; App now computes it from both
