@@ -1558,16 +1558,16 @@ export type RelationalTransfer = {
   id:string; from_boutique_id:string; to_boutique_id:string; status:"pending"|"accepted"|"rejected"|"cancelled";
   relationship_type:"same_owner"|"commercial"|null; total_amount:number; invoice_id:string|null; charge_id:number|null;
   note:string|null; created_at:string;
-  stock_transfer_lines:Array<{ product_name:string; unit:string; qty:number; prix_unit:number; discount_percent:number; sell_unit:string|null; sell_qty:number|null }>;
+  stock_transfer_lines:Array<{ id:number; source_product_id:number; destination_product_id:number|null; product_name:string; unit:string; qty:number; prix_unit:number; sell_unit:string|null; sell_qty:number|null }>;
 };
 export async function getStockTransfers(boutiqueId: string) {
-  return dataRequest<RelationalTransfer[]>(`stock_transfers?select=id,from_boutique_id,to_boutique_id,status,relationship_type,total_amount,invoice_id,charge_id,note,created_at,stock_transfer_lines(product_name,unit,qty,prix_unit,discount_percent,sell_unit,sell_qty)&or=(from_boutique_id.eq.${encodeURIComponent(boutiqueId)},to_boutique_id.eq.${encodeURIComponent(boutiqueId)})&order=created_at.desc`);
+  return dataRequest<RelationalTransfer[]>(`stock_transfers?select=id,from_boutique_id,to_boutique_id,status,relationship_type,total_amount,invoice_id,charge_id,note,created_at,stock_transfer_lines(id,source_product_id,destination_product_id,product_name,unit,qty,prix_unit,sell_unit,sell_qty)&or=(from_boutique_id.eq.${encodeURIComponent(boutiqueId)},to_boutique_id.eq.${encodeURIComponent(boutiqueId)})&order=created_at.desc`);
 }
-export async function createStockTransfer(params: { fromBoutiqueId:string; toBoutiqueId:string; lines:Array<{productId:number;qty:number;unitPrice:number;discountPercent:number;sellUnit?:string;sellQty?:number}>; note?:string }) {
-  return dataRequest<{transfer_id:string;status:string;relationship_type:"same_owner"|"commercial";total_amount:number}>("rpc/create_stock_transfer", { method:"POST", body:JSON.stringify({ p_from_boutique_id:params.fromBoutiqueId,p_to_boutique_id:params.toBoutiqueId,p_idempotency_key:crypto.randomUUID(),p_lines:params.lines.map(line=>({product_id:line.productId,qty:line.qty,unit_price:line.unitPrice,discount_percent:line.discountPercent,sell_unit:line.sellUnit ?? null,sell_qty:line.sellQty ?? null})),p_note:params.note ?? null }) });
+export async function createStockTransfer(params: { fromBoutiqueId:string; toBoutiqueId:string; lines:Array<{productId:number;qty:number;unitPrice:number;sellUnit?:string;sellQty?:number}>; note?:string }) {
+  return dataRequest<{transfer_id:string;status:string;relationship_type:"same_owner"|"commercial";total_amount:number}>("rpc/create_stock_transfer", { method:"POST", body:JSON.stringify({ p_from_boutique_id:params.fromBoutiqueId,p_to_boutique_id:params.toBoutiqueId,p_idempotency_key:crypto.randomUUID(),p_lines:params.lines.map(line=>({product_id:line.productId,qty:line.qty,unit_price:line.unitPrice,sell_unit:line.sellUnit ?? null,sell_qty:line.sellQty ?? null})),p_note:params.note ?? null }) });
 }
-export async function acceptStockTransfer(transferId: string) {
-  return dataRequest<{transfer_id:string;status:string;relationship_type:"same_owner"|"commercial";total_amount:number;invoice_id:string|null;charge_id:number|null}>("rpc/accept_stock_transfer", { method:"POST", body:JSON.stringify({ p_transfer_id:transferId,p_idempotency_key:crypto.randomUUID() }) });
+export async function acceptStockTransfer(transferId: string, mappings: Array<{transferLineId:number;destinationProductId?:number;createNew?:boolean}> = []) {
+  return dataRequest<{transfer_id:string;status:string;relationship_type:"same_owner"|"commercial";total_amount:number;invoice_id:string|null;charge_id:number|null;supplier_id?:number|null}>("rpc/accept_stock_transfer", { method:"POST", body:JSON.stringify({ p_transfer_id:transferId,p_idempotency_key:crypto.randomUUID(),p_line_mappings:mappings.map(mapping=>({transfer_line_id:mapping.transferLineId,destination_product_id:mapping.destinationProductId ?? null,create_new:mapping.createNew === true})) }) });
 }
 export async function rejectStockTransfer(transferId: string) {
   return dataRequest<{transfer_id:string;status:string}>("rpc/reject_stock_transfer", { method:"POST", body:JSON.stringify({ p_transfer_id:transferId,p_idempotency_key:crypto.randomUUID() }) });

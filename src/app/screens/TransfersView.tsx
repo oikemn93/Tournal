@@ -14,7 +14,7 @@ import { formatPreciseDateTime } from "../utils/payments";
 
 const TRANSFER_COLOR = "#ea580c";
 
-type DraftLine = { productId: number; nom: string; unit: string; qty: number; sellUnit: string; sellQty: number; unitPrice: number; discountPercent: number };
+type DraftLine = { productId: number; nom: string; unit: string; qty: number; sellUnit: string; sellQty: number; unitPrice: number };
 
 const STATUS: Record<RelationalTransfer["status"], { label: string; color: string; bg: string; icon: typeof Clock }> = {
   pending:   { label:"En attente", color:"#d97706", bg:"#fffbeb", icon:Clock },
@@ -49,6 +49,9 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [newModal, setNewModal] = useState(false);
+  const [receiving, setReceiving] = useState<RelationalTransfer | null>(null);
+  const [receiveMappings, setReceiveMappings] = useState<Record<number,string>>({});
+  const [invoicePreview, setInvoicePreview] = useState<RelationalTransfer | null>(null);
 
   const destinations = useMemo(() => {
     const map = new Map<string,{id:string;nom:string;ville?:string;tel?:string;isPartner:boolean}>();
@@ -71,7 +74,6 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
   const [dLineQty, setDLineQty] = useState("");
   const [dLineSellUnit, setDLineSellUnit] = useState("");
   const [dLinePrice, setDLinePrice] = useState("");
-  const [dLineDiscount, setDLineDiscount] = useState("0");
 
   const availableProducts = boutique.products.filter(p => p.actif !== false && productQty(p.id, boutique.entries) > 0);
   const destinationBoutique = destinations.find(b => b.id === destination);
@@ -101,7 +103,7 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
   }, [destinations, destinationSearch, destinationFrequency]);
 
   const draftTotal = useMemo(
-    () => draftLines.reduce((s, l) => s + l.sellQty * l.unitPrice * (1 - l.discountPercent / 100), 0),
+    () => draftLines.reduce((s, l) => s + l.sellQty * l.unitPrice, 0),
     [draftLines],
   );
 
@@ -195,20 +197,19 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
   function addDraftLine() {
     const p = availableProducts.find(p => p.id === Number(dLineProductId));
     if (!p) return toast.error("Produit invalide");
-    const sellQty = Number(dLineQty), price = Number(dLinePrice), disc = Number(dLineDiscount);
+    const sellQty = Number(dLineQty), price = Number(dLinePrice);
     const sellUnit = dLineSellUnit || getDefaultSaleUnit(p, boutique);
     const baseQty = toBaseSaleQty(sellQty, sellUnit, p, boutique);
     const stock = productQty(p.id, boutique.entries);
     if (!sellQty || sellQty <= 0 || baseQty > stock) return toast.error(`Quantité invalide (stock : ${stock} ${p.unit})`);
     if (price < 0) return toast.error("Prix invalide");
-    if (disc < 0 || disc > 100) return toast.error("Remise invalide (0-100%)");
-    setDraftLines(prev => [...prev.filter(l => l.productId !== p.id), { productId: p.id, nom: p.nom, unit: p.unit, qty: baseQty, sellUnit, sellQty, unitPrice: price, discountPercent: disc }]);
-    setDLineProductId(""); setDLineQty(""); setDLineSellUnit(""); setDLinePrice(""); setDLineDiscount("0");
+    setDraftLines(prev => [...prev.filter(l => l.productId !== p.id), { productId: p.id, nom: p.nom, unit: p.unit, qty: baseQty, sellUnit, sellQty, unitPrice: price }]);
+    setDLineProductId(""); setDLineQty(""); setDLineSellUnit(""); setDLinePrice("");
   }
 
   function resetDraft() {
     setDestination(""); setDestinationSearch(""); setNote(""); setDraftLines([]);
-    setDLineProductId(""); setDLineQty(""); setDLineSellUnit(""); setDLinePrice(""); setDLineDiscount("0");
+    setDLineProductId(""); setDLineQty(""); setDLineSellUnit(""); setDLinePrice("");
     setNewModal(false);
   }
 
@@ -218,7 +219,7 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
     try {
       const result = await createStockTransfer({
         fromBoutiqueId: boutique.id, toBoutiqueId: destination,
-        lines: draftLines.map(l => ({ productId: l.productId, qty: l.qty, sellUnit:l.sellUnit, sellQty:l.sellQty, unitPrice: l.unitPrice, discountPercent: l.discountPercent })),
+        lines: draftLines.map(l => ({ productId: l.productId, qty: l.qty, sellUnit:l.sellUnit, sellQty:l.sellQty, unitPrice: l.unitPrice })),
         note: note.trim() || undefined,
       });
       toast.success(
@@ -243,21 +244,40 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
     finally { setSaving(false); }
   }
 
-  async function decide(transferId: string, decision: "accept" | "reject") {
+  function openReceive(transfer: RelationalTransfer) {
+    const mappings: Record<number,string> = {};
+    for (const line of transfer.stock_transfer_lines ?? []) {
+      const exact = boutique.products.find(p => p.actif !== false && p.unit === line.unit && p.nom.trim().toLowerCase() === line.product_name.trim().toLowerCase());
+      mappings[line.id] = exact ? String(exact.id) : "new";
+    }
+    setReceiveMappings(mappings);
+    setReceiving(transfer);
+  }
+
+  async function confirmReceive() {
+    if (!receiving || saving) return;
+    const mappings = (receiving.stock_transfer_lines ?? []).map(line => {
+      const selected = receiveMappings[line.id] ?? "new";
+      return selected === "new"
+        ? { transferLineId:line.id, createNew:true }
+        : { transferLineId:line.id, destinationProductId:Number(selected) };
+    });
+    setSaving(true);
+    try {
+      const r = await acceptStockTransfer(receiving.id, mappings);
+      toast.success(r.relationship_type === "same_owner" ? "Stock reçu — produits affectés" : `Stock reçu — facture fournisseur ${r.invoice_id ?? "créée"}`);
+      setReceiving(null);
+      await load();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Réception impossible"); }
+    finally { setSaving(false); }
+  }
+
+  async function decide(transferId: string, decision: "reject") {
     if (saving) return;
     setSaving(true);
     try {
-      if (decision === "accept") {
-        const r = await acceptStockTransfer(transferId);
-        toast.success(
-          r.relationship_type === "same_owner"
-            ? "Stock reçu — aucune charge ni CA generé"
-            : `Stock reçu — charge créée · facture ${r.invoice_id ?? "en cours"}`,
-        );
-      } else {
-        await rejectStockTransfer(transferId);
-        toast.success("Transfert refusé — aucun stock modifié");
-      }
+      await rejectStockTransfer(transferId);
+      toast.success("Transfert refusé — aucun stock modifié");
       await load();
     } catch (e) { toast.error(e instanceof Error ? e.message : "Action impossible"); }
     finally { setSaving(false); }
@@ -304,7 +324,7 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
           {(t.stock_transfer_lines ?? []).map((l, i) => (
             <div key={i} className="flex justify-between text-xs px-2.5 py-1.5 rounded-xl" style={{ background:"#f3f4f6" }}>
               <span className="font-semibold truncate flex-1">{l.product_name}</span>
-              <span className="text-muted-foreground ml-2 flex-shrink-0">{Number(l.sell_qty ?? l.qty)} {l.sell_unit ?? l.unit} × {fmt(Number(l.prix_unit))}{l.discount_percent > 0 ? ` −${l.discount_percent}%` : ""}{l.sell_unit ? ` · ${l.qty} ${l.unit} stock` : ""}</span>
+              <span className="text-muted-foreground ml-2 flex-shrink-0">{Number(l.sell_qty ?? l.qty)} {l.sell_unit ?? l.unit} × {fmt(Number(l.prix_unit))}{l.sell_unit ? ` · ${l.qty} ${l.unit} stock` : ""}</span>
             </div>
           ))}
         </div>
@@ -313,14 +333,14 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
         {/* Invoice / charge links */}
         {(t.invoice_id || t.charge_id) && (
           <div className="px-3.5 pb-2 flex gap-2 flex-wrap">
-            {t.invoice_id && <span className="flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-lg" style={{ background:"#eff6ff", color:"#2563eb" }}><FileText size={11}/>Facture {t.invoice_id}</span>}
+            {t.invoice_id && <button type="button" onClick={()=>setInvoicePreview(t)} className="flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-lg" style={{ background:"#eff6ff", color:"#2563eb" }}><FileText size={11}/>Voir facture fournisseur {t.invoice_id}</button>}
             {t.charge_id  && <span className="text-xs font-bold px-2 py-1 rounded-lg" style={{ background:"#fef2f2", color:"#dc2626" }}>Charge #{t.charge_id}</span>}
           </div>
         )}
         {/* Accept / reject buttons for incoming pending */}
         {isIn && t.status === "pending" && (
           <div className="flex border-t divide-x border-border">
-            <button onClick={() => decide(t.id, "accept")} disabled={saving}
+            <button onClick={() => openReceive(t)} disabled={saving}
               className="flex-1 flex items-center justify-center gap-2 py-3 font-black text-sm active:scale-95" style={{ color:SEM.success.accent }}>
               {saving ? <Loader2 size={14} className="animate-spin"/> : <Check size={14}/>} Accepter
             </button>
@@ -452,6 +472,43 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
         </Modal>
       )}
 
+      {receiving && (
+        <Modal title="Réception du transfert" color={SEM.success.accent} onClose={()=>!saving&&setReceiving(null)}>
+          <div className="space-y-4">
+            <div className="rounded-2xl px-4 py-3 text-xs leading-relaxed" style={{background:SEM.success.bg,color:SEM.success.text}}>
+              Affectez chaque article reçu à un produit existant de même unité, ou créez un nouveau produit. Un nouveau produit reprend automatiquement le conditionnement de l’émetteur.
+            </div>
+            {(receiving.stock_transfer_lines ?? []).map(line => (
+              <div key={line.id} className="rounded-2xl border border-border p-3 space-y-2">
+                <div><p className="font-black text-sm">{line.product_name}</p><p className="text-xs text-muted-foreground">{Number(line.sell_qty ?? line.qty)} {line.sell_unit ?? line.unit} · {line.qty} {line.unit} à entrer en stock</p></div>
+                <select value={receiveMappings[line.id] ?? "new"} onChange={e=>setReceiveMappings(prev=>({...prev,[line.id]:e.target.value}))} className={inputCls}>
+                  <option value="new">＋ Créer un nouveau produit</option>
+                  {boutique.products.filter(p=>p.unit===line.unit).sort((a,b)=>a.nom.localeCompare(b.nom)).map(p=><option key={p.id} value={p.id}>Affecter à {p.nom} · stock {productQty(p.id,boutique.entries)} {p.unit}</option>)}
+                </select>
+                {(receiveMappings[line.id] ?? "new") === "new" && <p className="text-[11px] font-semibold" style={{color:TRANSFER_COLOR}}>Nouveau produit · nom, unité et conditionnement repris depuis la boutique émettrice.</p>}
+              </div>
+            ))}
+            <SubmitBtn color={SEM.success.accent} label={saving?"Réception en cours…":"Confirmer la réception"} onClick={()=>void confirmReceive()} disabled={saving}/>
+          </div>
+        </Modal>
+      )}
+
+      {invoicePreview && (
+        <Modal title="Facture fournisseur" color="#2563eb" onClose={()=>setInvoicePreview(null)}>
+          <div className="space-y-4">
+            <div className="rounded-2xl border border-border p-4">
+              <p className="text-xs text-muted-foreground">FOURNISSEUR</p>
+              <p className="font-black text-lg">{(allBoutiques.find(b=>b.id===invoicePreview.from_boutique_id)?.nom) ?? "Boutique émettrice"}</p>
+              <p className="text-sm text-muted-foreground">Facture {invoicePreview.invoice_id} · {formatPreciseDateTime(invoicePreview.created_at)}</p>
+            </div>
+            <div className="space-y-2">
+              {(invoicePreview.stock_transfer_lines ?? []).map(line=><div key={line.id} className="flex justify-between gap-3 rounded-xl bg-muted px-3 py-2 text-sm"><span className="font-bold">{line.product_name}<br/><span className="text-xs font-normal text-muted-foreground">{Number(line.sell_qty ?? line.qty)} {line.sell_unit ?? line.unit}</span></span><span className="font-black">{fmt(Number(line.sell_qty ?? line.qty)*Number(line.prix_unit))}</span></div>)}
+            </div>
+            <div className="flex justify-between rounded-2xl px-4 py-3 font-black" style={{background:"#eff6ff",color:"#2563eb"}}><span>TOTAL FOURNISSEUR</span><span>{fmt(Number(invoicePreview.total_amount))}</span></div>
+          </div>
+        </Modal>
+      )}
+
       {/* New transfer modal */}
       {newModal && (
         <Modal title="Nouveau transfert" color={TRANSFER_COLOR} onClose={resetDraft}>
@@ -506,10 +563,9 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
                   </div>
                 ) : null;
               })()}
-              <div className="grid grid-cols-3 gap-2">
-                <input type="number" min="0.01" step="any" value={dLineQty} onChange={e => setDLineQty(e.target.value)} placeholder={dLineSellUnit ? `Qté ${dLineSellUnit}` : "Quantité"} className={inputCls}/>
-                <div><input type="number" min="0" step="any" value={dLinePrice} onChange={e => setDLinePrice(e.target.value)} placeholder="Prix cession" className={inputCls}/><p className="text-[10px] text-muted-foreground mt-1 px-1">Prix par conditionnement sélectionné</p></div>
-                <input type="number" min="0" max="100" step="any" value={dLineDiscount} onChange={e => setDLineDiscount(e.target.value)} placeholder="Remise %" className={inputCls}/>
+              <div className="grid grid-cols-2 gap-2">
+                <div><input type="number" min="0.01" step="any" value={dLineQty} onChange={e => setDLineQty(e.target.value)} placeholder={dLineSellUnit === "Lot" ? "Nombre de lots" : dLineSellUnit === "Pièce" ? "Nombre de pièces" : dLineSellUnit ? `Quantité ${dLineSellUnit}` : "Quantité"} className={inputCls}/><p className="text-[10px] text-muted-foreground mt-1 px-1">Saisie dans le conditionnement sélectionné</p></div>
+                <div><input type="number" min="0" step="any" value={dLinePrice} onChange={e => setDLinePrice(e.target.value)} placeholder="Prix cession" className={inputCls}/><p className="text-[10px] text-muted-foreground mt-1 px-1">Prix par {dLineSellUnit || "unité"}</p></div>
               </div>
               {dLineProductId && Number(dLineQty)>0 && (() => {
                 const product = availableProducts.find(p => p.id === Number(dLineProductId));
@@ -528,12 +584,12 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
           {draftLines.length > 0 && (
             <div className="space-y-1.5">
               {draftLines.map(l => {
-                const lineAmt = l.sellQty * l.unitPrice * (1 - l.discountPercent / 100);
+                const lineAmt = l.sellQty * l.unitPrice;
                 return (
                   <div key={l.productId} className="flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background:"#f3f4f6" }}>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-black truncate">{l.nom}</p>
-                      <p className="text-xs text-muted-foreground">{l.sellQty} {l.sellUnit} × {fmt(l.unitPrice)}{l.discountPercent > 0 ? ` −${l.discountPercent}%` : ""} · {l.qty} {l.unit} stock</p>
+                      <p className="text-xs text-muted-foreground">{l.sellQty} {l.sellUnit} × {fmt(l.unitPrice)} · {l.qty} {l.unit} stock</p>
                     </div>
                     <p className="font-black text-sm flex-shrink-0" style={{ color:TRANSFER_COLOR }}>{fmt(lineAmt)}</p>
                     <button onClick={() => setDraftLines(prev => prev.filter(x => x.productId !== l.productId))}
