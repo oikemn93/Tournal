@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { checkBackend, signQZ, sendInvoiceEmail, storePDFForSMS, getCurrentAuthUser, hasAuthenticatedSession, validateServerSession, refreshSessionIfNeeded, getAuthBootstrap, signInWithPhone, changeOwnPassword, getPinStatus, setQuickPin, verifyQuickPin, startAppSession, validateAppSession, lockAppSession, setAppSessionRecoveryHandler, signOut as signOutFromSupabase, createBoutique, createUser, resetUserPassword, subscribeToBoutiqueChanges, subscribeToBoutiqueSync, isBoutiqueSyncV2Enabled, assignUserToBoutique, unassignUserFromBoutique, upsertAssignmentDirect, deleteAssignmentDirect, recordAuditLog, loadBoutiqueSnapshot, loadBoutiqueSyncPatch, loadBoutiquePlatformUsers, loadPlatformUsers, loadGroupes, saveGroupes, loadAuthSettings as loadStoredAuthSettings, saveAuthSettings, updateBoutiqueProfile, type BoutiqueSyncEvent, type BoutiqueSyncPatch, type LegacyBoutiqueChange } from "../lib/api";
+import { checkBackend, signQZ, sendInvoiceEmail, storePDFForSMS, getCurrentAuthUser, hasAuthenticatedSession, validateServerSession, refreshSessionIfNeeded, getAuthBootstrap, signInWithPhone, changeOwnPassword, getPinStatus, setQuickPin, verifyQuickPin, startAppSession, validateAppSession, lockAppSession, setAppSessionRecoveryHandler, signOut as signOutFromSupabase, createBoutique, createUser, resetUserPassword, subscribeToBoutiqueChanges, subscribeToBoutiqueSync, isBoutiqueSyncV2Enabled, assignUserToBoutique, unassignUserFromBoutique, upsertAssignmentDirect, deleteAssignmentDirect, recordAuditLog, loadBoutiqueSnapshot, loadBoutiqueSyncPatch, loadBoutiquePlatformUsers, loadPlatformUsers, loadGroupes, saveGroupes, loadAuthSettings as loadStoredAuthSettings, saveAuthSettings, updateBoutiqueProfile, createCategory, updateCategory, deleteCategory, type BoutiqueSyncEvent, type BoutiqueSyncPatch, type LegacyBoutiqueChange } from "../lib/api";
 import { getNotifications, markNotificationRead, markAllNotificationsRead, dismissAllNotifications, subscribeToNotifications, getPushState, enableWebPush, disableWebPush, syncWebPushBoutique, type PushState } from "../lib/notifications";
 import { toast, Toaster } from "sonner";
 import {
@@ -6070,29 +6070,49 @@ function CatalogueSection({ boutique, onUpdate, logAction }: {
     setEPieces(String(cat.nbPiecesParLot || "")); setELongueur(String(cat.longueurParPiece || ""));
   }
 
-  function saveEdit(catId: string) {
+  async function saveEdit(catId: string) {
     const old = cats.find(c => c.id === catId);
-    const updated = cats.map(c => c.id !== catId ? c : { ...c, nom: eNom.trim() || c.nom, unitVente: eUnit, nbPiecesParLot: Number(ePieces) || 0, longueurParPiece: Number(eLongueur) || 0 });
-    let updatedProds = products;
-    if (old && eNom.trim() && eNom.trim() !== old.nom) updatedProds = products.map(p => p.categorie === old.nom ? { ...p, categorie: eNom.trim() } : p);
-    onUpdate({ categories: updated, products: updatedProds });
-    logAction("Catégorie modifiée", eNom.trim(), "📦");
-    setEditingId(null);
+    if (!old) return;
+    const name = eNom.trim() || old.nom;
+    const pieces = Number(ePieces) || 0;
+    const length = Number(eLongueur) || 0;
+    try {
+      await updateCategory({ boutiqueId:boutique.id, categoryId:catId, name, unitVente:eUnit, piecesPerLot:pieces, lengthPerPiece:length });
+      const updated = cats.map(c => c.id !== catId ? c : { ...c, nom:name, unitVente:eUnit, nbPiecesParLot:pieces, longueurParPiece:length });
+      const updatedProds = name !== old.nom ? products.map(p => p.categorie === old.nom ? { ...p, categorie:name } : p) : products;
+      onUpdate({ categories: updated, products: updatedProds });
+      logAction("Catégorie modifiée", name, "📦");
+      setEditingId(null);
+      toast.success("Conditionnement enregistré");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Enregistrement du conditionnement impossible");
+    }
   }
 
-  function deleteCat(cat: Category) {
-    const updatedProds = products.map(p => p.categorie === cat.nom ? { ...p, categorie: undefined } : p);
-    onUpdate({ categories: cats.filter(c => c.id !== cat.id), products: updatedProds });
-    logAction("Catégorie supprimée", cat.nom, "🗑️");
-    if (expandedId === cat.id) setExpandedId(null);
+  async function deleteCat(cat: Category) {
+    try {
+      await deleteCategory({ boutiqueId:boutique.id, categoryId:cat.id });
+      const updatedProds = products.map(p => p.categorie === cat.nom ? { ...p, categorie: undefined } : p);
+      onUpdate({ categories: cats.filter(c => c.id !== cat.id), products: updatedProds });
+      logAction("Catégorie supprimée", cat.nom, "🗑️");
+      if (expandedId === cat.id) setExpandedId(null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Suppression de la catégorie impossible");
+    }
   }
 
-  function createCat() {
+  async function createCat() {
     if (!nNom.trim()) return;
-    const nc: Category = { id: "cat" + Date.now(), nom: nNom.trim(), unitVente: nUnit, nbPiecesParLot: Number(nPieces) || 0, longueurParPiece: Number(nLongueur) || 0 };
-    onUpdate({ categories: [...cats, nc] });
-    logAction("Nouvelle catégorie", nNom.trim(), "📂");
-    setNNom(""); setNUnit("yards"); setNPieces(""); setNLongueur(""); setShowNew(false);
+    try {
+      const created = await createCategory({ boutiqueId:boutique.id, name:nNom.trim(), unitVente:nUnit, piecesPerLot:Number(nPieces) || 0, lengthPerPiece:Number(nLongueur) || 0 });
+      const nc: Category = { id:created.category_id, nom:created.name, unitVente:created.unit_vente, nbPiecesParLot:Number(created.pieces_per_lot), longueurParPiece:Number(created.length_per_piece) };
+      onUpdate({ categories: [...cats, nc] });
+      logAction("Nouvelle catégorie", nNom.trim(), "📂");
+      setNNom(""); setNUnit("yards"); setNPieces(""); setNLongueur(""); setShowNew(false);
+      toast.success("Catégorie et conditionnement enregistrés");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Création de la catégorie impossible");
+    }
   }
 
   const productsWithoutCat = products.filter(p => !p.categorie);

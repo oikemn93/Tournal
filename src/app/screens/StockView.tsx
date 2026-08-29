@@ -7,7 +7,7 @@ import { productQty, productMontant, productSupplierOutstanding, stockEntrySuppl
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
-import { correctSupplierReceipt, createProduct, recordStockMovement, setProductActive, updateProduct } from "../../lib/api";
+import { correctSupplierReceipt, createCategory, createProduct, recordStockMovement, setProductActive, updateProduct } from "../../lib/api";
 import { formatPreciseDateTime } from "../utils/payments";
 
 function sortStockEntriesNewestFirst(a: StockEntry, b: StockEntry) {
@@ -174,10 +174,17 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter, initia
   async function submitNew() {
     if (!nNom.trim()) return;
     const finalCat = nCatMode === "new" ? nCatNew.trim() : nCat;
-    const localPid = Date.now();
     let updatedCats = cats;
-    if (nCatMode === "new" && nCatNew.trim() && !cats.find(c => c.nom === nCatNew.trim())) {
-      updatedCats = [...cats, { id: "cat" + localPid, nom: nCatNew.trim(), unitVente: nUnit, nbPiecesParLot: 0, longueurParPiece: 0 }];
+    let categoryId = cats.find(c=>c.nom===finalCat)?.id;
+    if (nCatMode === "new" && nCatNew.trim() && !categoryId) {
+      try {
+        const createdCategory = await createCategory({ boutiqueId:boutique.id, name:nCatNew.trim(), unitVente:nUnit, piecesPerLot:nLotMode ? (Number(nPieces) || 0) : 0, lengthPerPiece:nLotMode ? (Number(nLongueur) || 0) : 0 });
+        categoryId = createdCategory.category_id;
+        updatedCats = [...cats, { id:createdCategory.category_id, nom:createdCategory.name, unitVente:createdCategory.unit_vente, nbPiecesParLot:Number(createdCategory.pieces_per_lot), longueurParPiece:Number(createdCategory.length_per_piece) }];
+      } catch (error) {
+        alert(error instanceof Error ? error.message : "Création de la catégorie impossible");
+        return;
+      }
     }
     const initQty = nLotMode ? nLotQty : Number(nQty);
     const supplier = supplierById(nSupplierId);
@@ -185,7 +192,7 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter, initia
     const lotExtra = nLotMode ? { nbLots: Number(nLots)||1, nbPieces: Number(nPieces)||0, ...(nUnit !== "pièces" ? { longueurPiece: Number(nLongueur)||0 } : {}) } : {};
     let persisted;
     try {
-      persisted = await createProduct({ boutiqueId:boutique.id, name:nNom.trim(), unit:nUnit, categoryId:cats.find(c=>c.nom===finalCat)?.id, purchasePrice:Number(nPrixUnit) || 0, salePrice:Number(nPrixUnit) || 0 });
+      persisted = await createProduct({ boutiqueId:boutique.id, name:nNom.trim(), unit:nUnit, categoryId, purchasePrice:Number(nPrixUnit) || 0, salePrice:Number(nPrixUnit) || 0 });
       const movement = initQty > 0 && supplier
         ? await recordStockMovement({ boutiqueId:boutique.id, productId:persisted.product_id, qty:initQty, type:"achat", prixUnit:initQty ? (Number(nMontant) || 0) / initQty : 0, note:supplier.nom, supplierId:supplier.id })
         : null;

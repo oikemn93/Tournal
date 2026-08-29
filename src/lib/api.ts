@@ -1494,6 +1494,41 @@ export async function updateSupplier(params:{ boutiqueId:string; supplierId:numb
 export async function recordSupplierPayment(params:{ boutiqueId:string; supplierId:number; amount:number; paymentMethod:string; note?:string; paymentDate:string }) {
   return dataRequest<{charge_id:number; supplier_id:number; applied_amount:number; remaining_due:number; paid_at:string; payment_method:string; operator_name?:string; allocations:Array<{charge_id:number;amount:number}>}>("rpc/record_supplier_payment", { method:"POST", headers:{ Prefer:"return=representation" }, body:JSON.stringify({ p_boutique_id:params.boutiqueId,p_supplier_id:params.supplierId,p_idempotency_key:crypto.randomUUID(),p_montant:params.amount,p_payment_method:params.paymentMethod,p_note:params.note ?? null,p_payment_date:params.paymentDate }) });
 }
+export async function createCategory(params:{ boutiqueId:string; name:string; unitVente:string; piecesPerLot?:number; lengthPerPiece?:number }) {
+  return dataRequest<{category_id:string;name:string;unit_vente:string;pieces_per_lot:number;length_per_piece:number}>("rpc/create_category", {
+    method:"POST", headers:{ Prefer:"return=representation" },
+    body:JSON.stringify({
+      p_boutique_id:params.boutiqueId,
+      p_idempotency_key:crypto.randomUUID(),
+      p_nom:params.name,
+      p_unit_vente:params.unitVente,
+      p_pieces_per_lot:params.piecesPerLot ?? 0,
+      p_length_per_piece:params.lengthPerPiece ?? 0,
+    }),
+  });
+}
+
+export async function updateCategory(params:{ boutiqueId:string; categoryId:string; name:string; unitVente:string; piecesPerLot?:number; lengthPerPiece?:number }) {
+  return dataRequest<{category_id:string;name:string;unit_vente:string;pieces_per_lot:number;length_per_piece:number}>("rpc/update_category", {
+    method:"POST", headers:{ Prefer:"return=representation" },
+    body:JSON.stringify({
+      p_boutique_id:params.boutiqueId,
+      p_category_id:params.categoryId,
+      p_nom:params.name,
+      p_unit_vente:params.unitVente,
+      p_pieces_per_lot:params.piecesPerLot ?? 0,
+      p_length_per_piece:params.lengthPerPiece ?? 0,
+    }),
+  });
+}
+
+export async function deleteCategory(params:{ boutiqueId:string; categoryId:string }) {
+  return dataRequest<{category_id:string;name:string;unlinked_products:number}>("rpc/delete_category", {
+    method:"POST", headers:{ Prefer:"return=representation" },
+    body:JSON.stringify({ p_boutique_id:params.boutiqueId, p_category_id:params.categoryId }),
+  });
+}
+
 export async function createProduct(params:{ boutiqueId:string; name:string; unit:string; categoryId?:string; purchasePrice?:number; salePrice?:number }) {
   return dataRequest<{product_id:number}>("rpc/create_product", { method:"POST", body:JSON.stringify({ p_boutique_id:params.boutiqueId,p_idempotency_key:crypto.randomUUID(),p_nom:params.name,p_unit:params.unit,p_category_id:params.categoryId ?? null,p_prix_achat:params.purchasePrice ?? 0,p_prix_vente:params.salePrice ?? 0 }) });
 }
