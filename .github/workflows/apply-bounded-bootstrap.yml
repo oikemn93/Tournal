@@ -15,109 +15,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
+        with:
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
-        with: { version: 10 }
+        with:
+          version: 10
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Patch current bootstrap implementation
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          api=Path('src/lib/api.ts'); text=api.read_text()
-          anchor='const BOOTSTRAP_HISTORY_DAYS = 30;\n'; assert anchor in text
-          text=text.replace(anchor,anchor+'''export const BOUNDED_BOOTSTRAP_HISTORY_DAYS = BOOTSTRAP_HISTORY_DAYS;\nexport function boundedBootstrapCutoffIso(now = Date.now()) {\n  return new Date(now - BOOTSTRAP_HISTORY_DAYS * 86_400_000).toISOString();\n}\n''',1)
-          old='''    const historyFrom = options.historyFrom ?? defaultBootstrapHistoryFrom();\n    const historyTo = options.historyTo;\n    const invoiceWindow = `${historyFrom ? `&invoice_date=gte.${encodeURIComponent(historyFrom)}` : ""}${historyTo ? `&invoice_date=lt.${encodeURIComponent(historyTo)}` : ""}`;\n    const paymentWindow = `${historyFrom ? `&paid_at=gte.${encodeURIComponent(historyFrom)}` : ""}${historyTo ? `&paid_at=lt.${encodeURIComponent(historyTo)}` : ""}`;\n'''; assert old in text
-          new='''    const historyFrom = options.historyFrom ?? defaultBootstrapHistoryFrom();\n    const historyTo = options.historyTo;\n    const historyFromFilter = encodeURIComponent(historyFrom);\n    const invoiceWindow = options.historyOnly\n      ? `${historyFrom ? `&invoice_date=gte.${historyFromFilter}` : ""}${historyTo ? `&invoice_date=lt.${encodeURIComponent(historyTo)}` : ""}`\n      : `&or=(invoice_date.gte.${historyFromFilter},status.eq.en_attente,type.eq.Retour)`;\n    const paymentWindow = `${historyFrom ? `&paid_at=gte.${historyFromFilter}` : ""}${historyTo ? `&paid_at=lt.${encodeURIComponent(historyTo)}` : ""}`;\n    const stockWindow = `&or=(entry_date.gte.${historyFromFilter},supplier_id.not.is.null)`;\n    const chargeWindow = `&or=(charge_date.gte.${historyFromFilter},status.neq.paid)`;\n    const caisseWindow = `&or=(opened_at.gte.${historyFromFilter},closed_at.is.null)`;\n'''; text=text.replace(old,new,1)
-          old_tuple='    const [boutiques, categories, products, entries, clients, suppliers, invoices, historicalInvoiceHeaders, payments, advances, creditRefunds, charges, sessions, auditLogs, userScope] = await Promise.all(['; assert old_tuple in text
-          text=text.replace(old_tuple,'    const [boutiques, categories, products, entries, clients, suppliers, invoices, payments, advances, creditRefunds, charges, sessions, auditLogs, userScope] = await Promise.all([',1)
-          header='      (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`invoices?select=*${scoped()}&invoice_date=lt.${encodeURIComponent(historyFrom)}&order=invoice_date.desc`)),\n'; assert header in text; text=text.replace(header,'',1)
-          text=text.replace('      invoices: [...invoices, ...historicalInvoiceHeaders].filter(i => i.boutique_id === b.id).map(i => {','      invoices: invoices.filter(i => i.boutique_id === b.id).map(i => {',1)
-          repl={
-            '(options.historyOnly ? Promise.resolve([]) : dataRequestAll<any>(`stock_entries?select=*${scoped()}`, "entry_date.desc,id.desc"))':'(options.historyOnly ? Promise.resolve([]) : dataRequestAll<any>(`stock_entries?select=*${scoped()}${stockWindow}`, "entry_date.desc,id.desc"))',
-            '(options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`client_credit_refunds?select=*${scoped()}&order=refunded_at.desc,id.desc`))':'(options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`client_credit_refunds?select=*${scoped()}&refunded_at=gte.${historyFromFilter}&order=refunded_at.desc,id.desc`))',
-            '(options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`charges?select=*${scoped()}`))':'(options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`charges?select=*${scoped()}${chargeWindow}`))',
-            '(options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`caisse_sessions?select=*${scoped()}`))':'(options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`caisse_sessions?select=*${scoped()}${caisseWindow}`))',
-          }
-          for a,b in repl.items(): assert a in text,a; text=text.replace(a,b,1)
-          paid='''        const paid = invoicePayments.length\n          ? invoicePayments.reduce((sum, p) => sum + Number(p.amount), 0)\n          : Number(i.acompte);'''; assert paid in text
-          text=text.replace(paid,'''        const paid = Math.max(\n          Number(i.acompte ?? 0),\n          invoicePayments.reduce((sum, p) => sum + Number(p.amount), 0),\n        );''',1)
-          day='    const day = (value?: string | null) => value ? new Date(value).toLocaleDateString("fr-FR") : "";\n'; assert day in text
-          text=text.replace(day,day+'''    const loadedStockQtyByProduct = new Map<number, number>();\n    for (const entry of entries) {\n      const pid = Number(entry.product_id);\n      loadedStockQtyByProduct.set(pid, (loadedStockQtyByProduct.get(pid) ?? 0) + Number(entry.qty));\n    }\n    const bootstrapAt = `${historyFrom}T00:00:00.000Z`;\n''',1)
-          entry='      entries: entries.filter(e => e.boutique_id === b.id).map(e => ({ id:e.id, productId:e.product_id, qty:Number(e.qty), unit:"unité", montantDu:receiptAmountByEntryId.get(e.id) ?? Number(e.qty)*Number(e.prix_unit ?? 0), movementType:e.type ?? undefined, date:day(e.entry_date), recordedAt:e.entry_date, fournisseur:supplierById.get(e.supplier_id)?.nom ?? e.note ?? "", supplierId:e.supplier_id ?? undefined, reference:e.reference ?? undefined, operatorId:e.operator_id ?? undefined, operatorName:userById.get(e.operator_id)?.nom ?? undefined, invoiceId:undefined })),\n'; assert entry in text
-          text=text.replace(entry,'''      entries: [\n        ...products.filter(p => p.boutique_id === b.id).map(p => ({\n          id:-(9_000_000_000_000 + Number(p.id)), productId:Number(p.id),\n          qty:Number(p.stock ?? 0) - (loadedStockQtyByProduct.get(Number(p.id)) ?? 0),\n          unit:"unité", montantDu:0, movementType:"bootstrap", date:day(bootstrapAt), recordedAt:bootstrapAt, fournisseur:"", invoiceId:undefined,\n        })).filter(e => Math.abs(e.qty) > 0.000001),\n        ...entries.filter(e => e.boutique_id === b.id).map(e => ({ id:e.id, productId:e.product_id, qty:Number(e.qty), unit:"unité", montantDu:receiptAmountByEntryId.get(e.id) ?? Number(e.qty)*Number(e.prix_unit ?? 0), movementType:e.type ?? undefined, date:day(e.entry_date), recordedAt:e.entry_date, fournisseur:supplierById.get(e.supplier_id)?.nom ?? e.note ?? "", supplierId:e.supplier_id ?? undefined, reference:e.reference ?? undefined, operatorId:e.operator_id ?? undefined, operatorName:userById.get(e.operator_id)?.nom ?? undefined, invoiceId:undefined })),\n      ],\n''',1)
-          marker='/** Loads account metadata for administration screens from named relational tables. */'; assert marker in text
-          helper=r'''
-export type BoutiqueHistoryPatch = BoutiqueSyncPatch & { clientCreditRefunds?: Array<Record<string, any>> };
-
-export async function loadBoutiqueHistoryRange(boutiqueId:string, fromAt:string, toAt:string): Promise<BoutiqueHistoryPatch> {
-  const bid=encodeURIComponent(boutiqueId); const scoped=`&boutique_id=eq.${bid}`;
-  const from=encodeURIComponent(new Date(fromAt).toISOString()); const to=encodeURIComponent(new Date(toAt).toISOString());
-  const [invoiceRefs,paymentRefs,chargeRefs,refundRows]=await Promise.all([
-    dataRequestAll<{id:string}>(`invoices?select=id${scoped}&invoice_date=gte.${from}&invoice_date=lt.${to}`,"invoice_date.asc,id.asc"),
-    dataRequestAll<{invoice_id:string}>(`invoice_payments?select=invoice_id${scoped}&paid_at=gte.${from}&paid_at=lt.${to}`,"paid_at.asc,id.asc"),
-    dataRequestAll<{id:number}>(`charges?select=id${scoped}&charge_date=gte.${from}&charge_date=lt.${to}`,"charge_date.asc,id.asc"),
-    dataRequestAll<any>(`client_credit_refunds?select=*${scoped}&refunded_at=gte.${from}&refunded_at=lt.${to}`,"refunded_at.asc,id.asc"),
-  ]);
-  const invoiceIds=[...new Set([...invoiceRefs.map(r=>r.id),...paymentRefs.map(r=>r.invoice_id)])];
-  const events:BoutiqueSyncEvent[]=[
-    ...invoiceIds.map(id=>({event_id:`history:invoice:${id}`,revision:0,domain:"sales" as const,entity_type:"invoice" as const,entity_id:id,operation:"UPDATE" as const})),
-    ...chargeRefs.map(r=>({event_id:`history:charge:${r.id}`,revision:0,domain:"charges" as const,entity_type:"charge" as const,entity_id:String(r.id),operation:"UPDATE" as const})),
-  ];
-  const patch=events.length?await loadBoutiqueSyncPatch(boutiqueId,events):{deleted:{}};
-  const day=(value?:string|null)=>value?new Date(value).toLocaleDateString("fr-FR"):"";
-  return {...patch,clientCreditRefunds:refundRows.map(r=>({id:Number(r.id),clientId:Number(r.client_id),amount:Number(r.amount),paymentMethod:r.payment_method,refundedAt:r.refunded_at,date:day(r.refunded_at),dateRaw:r.refunded_at,operatorId:r.operator_id??undefined,operatorName:r.operator_name,note:r.note??undefined}))};
-}
-
-export async function loadProductStockHistory(boutiqueId:string, productId:number) {
-  const bid=encodeURIComponent(boutiqueId);
-  const rows=await dataRequestAll<any>(`stock_entries?select=*&boutique_id=eq.${bid}&product_id=eq.${encodeURIComponent(String(productId))}`,"entry_date.desc,id.desc");
-  const day=(value?:string|null)=>value?new Date(value).toLocaleDateString("fr-FR"):"";
-  return rows.map(row=>({id:Number(row.id),productId:Number(row.product_id),qty:Number(row.qty),unit:"unité",montantDu:Number(row.qty)*Number(row.prix_unit??0),movementType:row.type??undefined,date:day(row.entry_date),recordedAt:row.entry_date,fournisseur:row.note??"",supplierId:row.supplier_id??undefined,reference:row.reference??undefined,operatorId:row.operator_id??undefined,invoiceId:row.source_invoice_id??undefined}));
-}
-
-'''
-          text=text.replace(marker,helper+marker,1); api.write_text(text)
-
-          payments=Path('src/app/utils/payments.ts'); p=payments.read_text(); old='''export function invoicePaidAmount(invoice: Invoice): number {\n  if (invoice.payments?.length) {\n    return roundMoney(invoice.payments.reduce((sum, payment) => sum + payment.amount, 0));\n  }\n  return roundMoney(invoice.acompte);\n}\n'''; assert old in p
-          payments.write_text(p.replace(old,'''export function invoicePaidAmount(invoice: Invoice): number {\n  const eventTotal=invoice.payments?.length?invoice.payments.reduce((sum,payment)=>sum+payment.amount,0):0;\n  return roundMoney(Math.max(Number(invoice.acompte??0),eventTotal));\n}\n''',1))
-
-          inv=Path('src/app/utils/inventory.ts'); t=inv.read_text(); old='const isSupplierDebtEntry = (entry: StockEntry) => entry.qty > 0 && entry.movementType !== "retour";'; assert old in t
-          inv.write_text(t.replace(old,'const isSupplierDebtEntry = (entry: StockEntry) => entry.qty > 0 && entry.movementType !== "retour" && entry.movementType !== "bootstrap";',1))
-
-          stock=Path('src/app/screens/StockView.tsx'); s=stock.read_text(); old='import { correctSupplierReceipt, createCategory, createProduct, recordStockMovement, setProductActive, updateProduct } from "../../lib/api";'; assert old in s
-          s=s.replace(old,'import { correctSupplierReceipt, createCategory, createProduct, loadProductStockHistory, recordStockMovement, setProductActive, updateProduct } from "../../lib/api";',1)
-          anchor='  const [stockCorrectionBusy, setStockCorrectionBusy] = useState<number|null>(null);\n'; assert anchor in s
-          s=s.replace(anchor,anchor+'''  const [productHistory,setProductHistory]=useState<Record<number,StockEntry[]>>({});\n  useEffect(()=>{\n    if(!detail || productHistory[detail.id]) return; let cancelled=false;\n    void loadProductStockHistory(boutique.id,detail.id).then(rows=>{if(!cancelled)setProductHistory(current=>({...current,[detail.id]:rows}));}).catch(error=>console.warn("Historique stock indisponible",error));\n    return()=>{cancelled=true;};\n  },[boutique.id,detail?.id]);\n''',1)
-          hist='{entries.filter(e => e.productId === detail.id).sort(sortStockEntriesNewestFirst).map(e => {'; assert hist in s
-          s=s.replace(hist,'{[...new Map([...(productHistory[detail.id] ?? []),...entries.filter(e=>e.productId===detail.id&&e.movementType!=="bootstrap")].map(e=>[e.id,e])).values()].sort(sortStockEntriesNewestFirst).map(e => {',1); stock.write_text(s)
-
-          f=Path('src/app/screens/FacturesView.tsx'); x=f.read_text(); assert 'createInvoiceShare, loadBoutiqueSnapshot' in x
-          x=x.replace('createInvoiceShare, loadBoutiqueSnapshot','createInvoiceShare, loadBoutiqueHistoryRange',1)
-          old='''    void loadBoutiqueSnapshot<Boutique[]>(boutique.id, { historyFrom:selectedDay, historyTo:next.toISOString().slice(0,10), historyOnly:true })\n      .then(rows => {\n        if (cancelled) return;\n        const historical = rows?.[0]?.invoices ?? [];'''; assert old in x
-          x=x.replace(old,'''    void loadBoutiqueHistoryRange(boutique.id, `${selectedDay}T00:00:00.000Z`, next.toISOString())\n      .then(patch => {\n        if (cancelled) return;\n        const historical = patch.invoices ?? [];''',1)
-          x=x.replace('historyLoadingDay===selectedDay ? "Chargement…" : dayFilterActive ? dayLabel : "Toutes les factures"','historyLoadingDay===selectedDay ? "Chargement…" : dayFilterActive ? dayLabel : "Historique récent"',1); f.write_text(x)
-
-          r=Path('src/app/screens/RapportView.tsx'); q=r.read_text(); ia='import { getFifoRealizedMargin, type FifoRealizedMarginReport } from "../../lib/inventoryApi";\n'; assert ia in q
-          q=q.replace(ia,ia+'import { boundedBootstrapCutoffIso, loadBoutiqueHistoryRange, type BoutiqueHistoryPatch } from "../../lib/api";\n',1)
-          old='''  const RC = boutique.color;\n  const { invoices } = boutique;\n  const { entries } = boutique;\n  const charges = boutique.charges ?? [];\n'''; assert old in q
-          q=q.replace(old,'''  const RC = boutique.color;\n  const { entries } = boutique;\n  const [historicalPatch,setHistoricalPatch]=useState<BoutiqueHistoryPatch|null>(null);\n  const mergeById=(current:any[],older:any[])=>[...new Map([...current,...older].map(item=>[item.id,item])).values()];\n  const invoices=useMemo(()=>mergeById(boutique.invoices,historicalPatch?.invoices??[]) as typeof boutique.invoices,[boutique.invoices,historicalPatch?.invoices]);\n  const charges=useMemo(()=>mergeById(boutique.charges??[],historicalPatch?.charges??[]) as NonNullable<typeof boutique.charges>,[boutique.charges,historicalPatch?.charges]);\n  const creditRefunds=useMemo(()=>mergeById(boutique.clientCreditRefunds??[],historicalPatch?.clientCreditRefunds??[]) as NonNullable<typeof boutique.clientCreditRefunds>,[boutique.clientCreditRefunds,historicalPatch?.clientCreditRefunds]);\n''',1)
-          target='filterByPeriod(boutique.clientCreditRefunds ?? [], period, customFrom, customTo)'; assert target in q; q=q.replace(target,'filterByPeriod(creditRefunds, period, customFrom, customTo)',1)
-          ea='''  useEffect(()=>{\n    let cancelled=false;\n    if(!canSeeMargin){setServerMargin(null);return ()=>{cancelled=true;};}\n'''; assert ea in q
-          q=q.replace(ea,'''  useEffect(()=>{\n    if(new Date(marginPeriod.fromAt).getTime()>=new Date(boundedBootstrapCutoffIso()).getTime()){setHistoricalPatch(null);return;}\n    let cancelled=false;\n    void loadBoutiqueHistoryRange(boutique.id,marginPeriod.fromAt,marginPeriod.toAt).then(patch=>{if(!cancelled)setHistoricalPatch(patch);}).catch(error=>{console.warn("Historique rapport indisponible",error);if(!cancelled)setHistoricalPatch(null);});\n    return()=>{cancelled=true;};\n  },[boutique.id,marginPeriod.fromAt,marginPeriod.toAt]);\n\n'''+ea,1); r.write_text(q)
-
-          m=Path('supabase/migrations/20260830114500_supplier_current_balances_for_bounded_bootstrap.sql')
-          m.write_text('''-- Compact current supplier-state projection for bounded clients.\ncreate or replace function public.get_supplier_current_balances(p_boutique_id text) returns table(supplier_id bigint,balance numeric) language sql stable security definer set search_path='pg_catalog','public','private' as $function$ select s.id,greatest(0::numeric,coalesce((select sum(e.qty*coalesce(e.prix_unit,0)) from public.stock_entries e where e.boutique_id=p_boutique_id and e.supplier_id=s.id and e.qty>0 and e.type in ('achat','ajustement')),0)+coalesce((select sum(c.montant) from public.charges c where c.boutique_id=p_boutique_id and c.supplier_id=s.id and c.source='transfer'),0)-coalesce((select sum(c.montant) from public.charges c where c.boutique_id=p_boutique_id and c.supplier_id=s.id and c.source is distinct from 'transfer' and c.source is distinct from 'supplier_receipt'),0)-coalesce((select sum(c.paid_amount) from public.charges c where c.boutique_id=p_boutique_id and c.supplier_id=s.id and c.source='transfer'),0))::numeric from public.suppliers s where s.boutique_id=p_boutique_id and ((select private.auth_is_super_admin()) or ((select private.auth_is_active_user()) and exists(select 1 from public.boutique_assignments ba where ba.boutique_id=p_boutique_id and ba.user_id=(select auth.uid())))); $function$; revoke all on function public.get_supplier_current_balances(text) from public,anon; grant execute on function public.get_supplier_current_balances(text) to authenticated;\n''')
-          PY
-      - name: Build and static guards
-        run: |
-          pnpm build
-          node scripts/check-no-network-polling.mjs
+      - run: python3 .github/scripts/apply_bounded_bootstrap.py
+      - run: pnpm build
+      - run: node scripts/check-no-network-polling.mjs
       - name: Commit refactor
         run: |
           git config user.name 'github-actions[bot]'
