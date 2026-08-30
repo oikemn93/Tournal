@@ -7,59 +7,66 @@ function normalizedUnit(value?: string): string {
   return raw;
 }
 
+function getProductSaleConfig(product: Product, boutique: Boutique) {
+  const productParam = (boutique.productParams ?? []).find(param => param.productId === product.id);
+  const category = (boutique.categories ?? []).find(c => c.nom === product.categorie);
+  return {
+    unitVente: productParam?.unitVente?.trim() || category?.unitVente || product.unit,
+    nbPiecesParLot: productParam?.nbPiecesParLot ?? category?.nbPiecesParLot ?? 0,
+    longueurParPiece: productParam?.longueurParPiece ?? category?.longueurParPiece ?? 0,
+  };
+}
+
 /**
  * Conditioning options shared by every selling surface.
- * Unit/piece is deliberately first: a new sale must always start in unit mode,
- * while lot and length-based modes remain explicit user choices.
+ * Product-level sale settings take priority over category defaults.
  */
 export function getSaleUnitOptions(product: Product, boutique: Boutique): string[] {
-  const category = (boutique.categories ?? []).find(c => c.nom === product.categorie);
-  if (!category || category.nbPiecesParLot <= 0) return [product.unit];
+  const config = getProductSaleConfig(product, boutique);
+  if (config.nbPiecesParLot <= 0) return [config.unitVente || product.unit];
 
-  const baseUnit = category.unitVente || product.unit;
+  const baseUnit = config.unitVente || product.unit;
   const options = ["Pièce", "Lot"];
-  if (normalizedUnit(baseUnit) !== "piece") options.push(baseUnit);
+  if (normalizedUnit(baseUnit) !== "piece" && normalizedUnit(baseUnit) !== "lot") options.push(baseUnit);
   return Array.from(new Set(options));
 }
 
 export function getDefaultSaleUnit(product: Product, boutique: Boutique): string {
-  const category = (boutique.categories ?? []).find(c => c.nom === product.categorie);
-  const baseUnit = category?.unitVente ?? product.unit;
+  const config = getProductSaleConfig(product, boutique);
   const options = getSaleUnitOptions(product, boutique);
+  const preferredUnit = config.unitVente || product.unit;
 
-  // The business default is always the smallest sellable unit when a product
-  // has conditioning metadata. A lot is never selected implicitly.
-  if (category?.nbPiecesParLot && options.includes("Pièce")) return "Pièce";
-  return options.includes(baseUnit) ? baseUnit : (options[0] ?? product.unit);
+  const exact = options.find(option => normalizedUnit(option) === normalizedUnit(preferredUnit));
+  if (exact) return exact;
+  return options[0] ?? product.unit;
 }
 
 export function toBaseSaleQty(sellQty: number, sellUnit: string, product: Product, boutique: Boutique): number {
-  const category = (boutique.categories ?? []).find(c => c.nom === product.categorie);
-  if (!category || category.nbPiecesParLot <= 0) return sellQty;
+  const config = getProductSaleConfig(product, boutique);
+  if (config.nbPiecesParLot <= 0) return sellQty;
 
-  const baseUnit = category.unitVente ?? product.unit;
+  const baseUnit = config.unitVente || product.unit;
   if (sellUnit === "Lot") {
     return normalizedUnit(baseUnit) === "piece"
-      ? sellQty * category.nbPiecesParLot
-      : sellQty * category.nbPiecesParLot * (category.longueurParPiece || 1);
+      ? sellQty * config.nbPiecesParLot
+      : sellQty * config.nbPiecesParLot * (config.longueurParPiece || 1);
   }
   if (sellUnit === "Pièce") {
     return normalizedUnit(baseUnit) === "piece"
       ? sellQty
-      : sellQty * (category.longueurParPiece || 1);
+      : sellQty * (config.longueurParPiece || 1);
   }
   return sellQty;
 }
 
 export function getSaleUnitLabel(product: Product, boutique: Boutique, sellUnit: string): string {
-  const category = (boutique.categories ?? []).find(c => c.nom === product.categorie);
-  if (!category) return sellUnit;
+  const config = getProductSaleConfig(product, boutique);
   if (sellUnit === "Lot") {
-    const length = category.longueurParPiece > 0 ? ` × ${category.longueurParPiece} ${category.unitVente}` : "";
-    return `Lot (${category.nbPiecesParLot} pièces${length})`;
+    const length = config.longueurParPiece > 0 ? ` × ${config.longueurParPiece} ${config.unitVente}` : "";
+    return `Lot (${config.nbPiecesParLot} pièces${length})`;
   }
-  if (sellUnit === "Pièce" && category.longueurParPiece > 0 && normalizedUnit(category.unitVente) !== "piece") {
-    return `Pièce (${category.longueurParPiece} ${category.unitVente})`;
+  if (sellUnit === "Pièce" && config.longueurParPiece > 0 && normalizedUnit(config.unitVente) !== "piece") {
+    return `Pièce (${config.longueurParPiece} ${config.unitVente})`;
   }
   return sellUnit;
 }
