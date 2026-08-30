@@ -29,33 +29,20 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          import re
+
           p = Path('src/app/screens/POSView.tsx')
           s = p.read_text()
 
-          old = '''  function openAdd(p: Product) {
-            const inCart = cart.find(i => i.productId === p.id);
-            const defaultUnit = inCart?.sellUnit ?? getDefaultSaleUnit(p, boutique);
-            const lastPrice = inCart ? inCart.prixUnit : getLastSalePrice(p.id, invoices, defaultUnit);
-            setAddModal(p);
-            setAddSellUnit(defaultUnit);
-            setAddQty(inCart ? String(inCart.sellQty ?? inCart.qty) : "");
-            setAddPrice(lastPrice != null ? String(lastPrice) : "");
-          }'''
-          new = '''  function openAdd(p: Product) {
-            const defaultUnit = getDefaultSaleUnit(p, boutique);
-            const lastPrice = getLastSalePrice(p.id, invoices, defaultUnit);
-            setAddModal(p);
-            setAddSellUnit(defaultUnit);
-            setAddQty("");
-            setAddPrice(lastPrice != null ? String(lastPrice) : "");
-          }'''
-          if old not in s:
-              raise SystemExit('openAdd block not found')
-          s = s.replace(old, new, 1)
+          pattern = r'''  function openAdd\(p: Product\) \{\n(?:    .*\n){7}  \}'''
+          replacement = '''  function openAdd(p: Product) {\n    const defaultUnit = getDefaultSaleUnit(p, boutique);\n    const lastPrice = getLastSalePrice(p.id, invoices, defaultUnit);\n    setAddModal(p);\n    setAddSellUnit(defaultUnit);\n    setAddQty("");\n    setAddPrice(lastPrice != null ? String(lastPrice) : "");\n  }'''
+          s2, n = re.subn(pattern, replacement, s, count=1)
+          if n != 1:
+              raise SystemExit(f'openAdd patch count={n}')
+          s = s2
 
           start = s.index('    setCart(prev => {', s.index('  function confirmAdd()'))
-          end_marker = '    setAddModal(null);'
-          end = s.index(end_marker, start)
+          end = s.index('    setAddModal(null);', start)
           s = s[:start] + '    setCart(prev => [...prev, item]);\n' + s[end:]
 
           old = '<SubmitBtn color={POS_COLOR} label={cart.find(i=>i.productId===addModal.id)?"Mettre à jour":"Ajouter au panier"} onClick={confirmAdd} disabled={!addQty||!addPrice||Number(addQty)<=0||Number(addPrice)<=0}/>'
@@ -69,10 +56,11 @@ jobs:
       - name: Verify behavior
         shell: bash
         run: |
+          grep -F 'const defaultUnit = getDefaultSaleUnit(p, boutique);' src/app/screens/POSView.tsx
           grep -F 'setAddQty("");' src/app/screens/POSView.tsx
           grep -F 'setCart(prev => [...prev, item]);' src/app/screens/POSView.tsx
           grep -F 'label="Ajouter au panier"' src/app/screens/POSView.tsx
-          ! grep -F 'label={cart.find(i=>i.productId===addModal.id)?"Mettre à jour"' src/app/screens/POSView.tsx
+          ! grep -F 'Mettre à jour' src/app/screens/POSView.tsx
       - name: Install
         run: pnpm install --frozen-lockfile
       - name: Build
