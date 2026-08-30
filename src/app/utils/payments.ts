@@ -24,10 +24,8 @@ export function moneyExceeds(value: number, limit: number, epsilon = MONEY_EPSIL
 }
 
 export function invoicePaidAmount(invoice: Invoice): number {
-  if (invoice.payments?.length) {
-    return roundMoney(invoice.payments.reduce((sum, payment) => sum + payment.amount, 0));
-  }
-  return roundMoney(invoice.acompte);
+  const eventTotal=invoice.payments?.length?invoice.payments.reduce((sum,payment)=>sum+payment.amount,0):0;
+  return roundMoney(Math.max(Number(invoice.acompte??0),eventTotal));
 }
 
 export function invoiceRemainingAmount(invoice: Invoice): number {

@@ -7,12 +7,16 @@ import { invBadge, lineDispQty, lineDispUnit, lineTotal, filterByPeriod, supplie
 import { Modal } from "../components/Modal";
 import { filterPaymentEventsByPeriod, formatPreciseDateTime, invoicePaidAmount, invoiceRemainingAmount } from "../utils/payments";
 import { getFifoRealizedMargin, type FifoRealizedMarginReport } from "../../lib/inventoryApi";
+import { boundedBootstrapCutoffIso, loadBoutiqueHistoryRange, type BoutiqueHistoryPatch } from "../../lib/api";
 
 export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique: Boutique; canSeeMargin?: boolean }) {
   const RC = boutique.color;
-  const { invoices } = boutique;
   const { entries } = boutique;
-  const charges = boutique.charges ?? [];
+  const [historicalPatch,setHistoricalPatch]=useState<BoutiqueHistoryPatch|null>(null);
+  const mergeById=(current:any[],older:any[])=>[...new Map([...current,...older].map(item=>[item.id,item])).values()];
+  const invoices=useMemo(()=>mergeById(boutique.invoices,historicalPatch?.invoices??[]) as typeof boutique.invoices,[boutique.invoices,historicalPatch?.invoices]);
+  const charges=useMemo(()=>mergeById(boutique.charges??[],historicalPatch?.charges??[]) as NonNullable<typeof boutique.charges>,[boutique.charges,historicalPatch?.charges]);
+  const creditRefunds=useMemo(()=>mergeById(boutique.clientCreditRefunds??[],historicalPatch?.clientCreditRefunds??[]) as NonNullable<typeof boutique.clientCreditRefunds>,[boutique.clientCreditRefunds,historicalPatch?.clientCreditRefunds]);
   const [period, setPeriod] = useState<DashPeriod>("jour");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
@@ -22,7 +26,7 @@ export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique:
 
   const filtInv = filterByPeriod(invoices, period, customFrom, customTo);
   const filtPayments = filterPaymentEventsByPeriod(invoices, period, customFrom, customTo);
-  const filtCreditRefunds = filterByPeriod(boutique.clientCreditRefunds ?? [], period, customFrom, customTo);
+  const filtCreditRefunds = filterByPeriod(creditRefunds, period, customFrom, customTo);
   const filtCh  = filterByPeriod(charges, period, customFrom, customTo);
 
   const invoiceSign = (invoice: typeof filtInv[number]) => invoice.type === "Retour" || invoice.type === "retour" ? -1 : 1;
@@ -61,6 +65,13 @@ export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique:
     else {from=customFrom?new Date(`${customFrom}T00:00:00`):new Date(now);to=customTo?new Date(`${customTo}T23:59:59.999`):to;}
     return {fromAt:from.toISOString(),toAt:to.toISOString()};
   },[period,customFrom,customTo]);
+  useEffect(()=>{
+    if(new Date(marginPeriod.fromAt).getTime()>=new Date(boundedBootstrapCutoffIso()).getTime()){setHistoricalPatch(null);return;}
+    let cancelled=false;
+    void loadBoutiqueHistoryRange(boutique.id,marginPeriod.fromAt,marginPeriod.toAt).then(patch=>{if(!cancelled)setHistoricalPatch(patch);}).catch(error=>{console.warn("Historique rapport indisponible",error);if(!cancelled)setHistoricalPatch(null);});
+    return()=>{cancelled=true;};
+  },[boutique.id,marginPeriod.fromAt,marginPeriod.toAt]);
+
   useEffect(()=>{
     let cancelled=false;
     if(!canSeeMargin){setServerMargin(null);return ()=>{cancelled=true;};}

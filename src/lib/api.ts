@@ -726,6 +726,10 @@ export type BoutiqueSnapshotOptions = {
 };
 
 const BOOTSTRAP_HISTORY_DAYS = 30;
+export const BOUNDED_BOOTSTRAP_HISTORY_DAYS = BOOTSTRAP_HISTORY_DAYS;
+export function boundedBootstrapCutoffIso(now = Date.now()) {
+  return new Date(now - BOOTSTRAP_HISTORY_DAYS * 86_400_000).toISOString();
+}
 
 function defaultBootstrapHistoryFrom() {
   const date = new Date();
@@ -739,18 +743,23 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string, options: Bouti
     const scoped = (column = "boutique_id") => `&${column}=eq.${bid}`;
     const historyFrom = options.historyFrom ?? defaultBootstrapHistoryFrom();
     const historyTo = options.historyTo;
-    const invoiceWindow = `${historyFrom ? `&invoice_date=gte.${encodeURIComponent(historyFrom)}` : ""}${historyTo ? `&invoice_date=lt.${encodeURIComponent(historyTo)}` : ""}`;
-    const paymentWindow = `${historyFrom ? `&paid_at=gte.${encodeURIComponent(historyFrom)}` : ""}${historyTo ? `&paid_at=lt.${encodeURIComponent(historyTo)}` : ""}`;
-    const [boutiques, categories, products, entries, clients, suppliers, invoices, historicalInvoiceHeaders, payments, advances, creditRefunds, charges, sessions, auditLogs, userScope] = await Promise.all([
+    const historyFromFilter = encodeURIComponent(historyFrom);
+    const invoiceWindow = options.historyOnly
+      ? `${historyFrom ? `&invoice_date=gte.${historyFromFilter}` : ""}${historyTo ? `&invoice_date=lt.${encodeURIComponent(historyTo)}` : ""}`
+      : `&or=(invoice_date.gte.${historyFromFilter},status.eq.en_attente,type.eq.Retour)`;
+    const paymentWindow = `${historyFrom ? `&paid_at=gte.${historyFromFilter}` : ""}${historyTo ? `&paid_at=lt.${encodeURIComponent(historyTo)}` : ""}`;
+    const stockWindow = `&or=(entry_date.gte.${historyFromFilter},supplier_id.not.is.null)`;
+    const chargeWindow = `&or=(charge_date.gte.${historyFromFilter},status.neq.paid)`;
+    const caisseWindow = `&or=(opened_at.gte.${historyFromFilter},closed_at.is.null)`;
+    const [boutiques, categories, products, entries, clients, suppliers, invoices, payments, advances, creditRefunds, charges, sessions, auditLogs, userScope] = await Promise.all([
       dataRequest<any[]>(`boutiques?select=*${boutiqueFilter}&order=nom.asc`),
       (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`categories?select=*${scoped()}`)), (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`products?select=*${scoped()}`)),
-      (options.historyOnly ? Promise.resolve([]) : dataRequestAll<any>(`stock_entries?select=*${scoped()}`, "entry_date.desc,id.desc")), dataRequest<any[]>(`clients?select=*${scoped()}`),
+      (options.historyOnly ? Promise.resolve([]) : dataRequestAll<any>(`stock_entries?select=*${scoped()}${stockWindow}`, "entry_date.desc,id.desc")), dataRequest<any[]>(`clients?select=*${scoped()}`),
       (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`suppliers?select=*${scoped()}`)),
       dataRequest<any[]>(`invoices?select=*,invoice_lines(*)${scoped()}${invoiceWindow}&order=invoice_date.desc`),
-      (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`invoices?select=*${scoped()}&invoice_date=lt.${encodeURIComponent(historyFrom)}&order=invoice_date.desc`)),
       dataRequest<any[]>(`invoice_payments?select=*${scoped()}${paymentWindow}&order=paid_at.asc`), (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`client_advances?select=*${scoped()}&order=paid_at.desc,id.desc`)),
-      (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`client_credit_refunds?select=*${scoped()}&order=refunded_at.desc,id.desc`)), (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`charges?select=*${scoped()}`)),
-      (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`caisse_sessions?select=*${scoped()}`)),
+      (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`client_credit_refunds?select=*${scoped()}&refunded_at=gte.${historyFromFilter}&order=refunded_at.desc,id.desc`)), (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`charges?select=*${scoped()}${chargeWindow}`)),
+      (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`caisse_sessions?select=*${scoped()}${caisseWindow}`)),
       // The administration view presents recent activity. Loading the entire
       // audit trail at every login or Realtime event was the largest avoidable
       // payload in production.
@@ -777,6 +786,12 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string, options: Bouti
       paymentsByInvoice.set(payment.invoice_id, invoicePayments);
     }
     const day = (value?: string | null) => value ? new Date(value).toLocaleDateString("fr-FR") : "";
+    const loadedStockQtyByProduct = new Map<number, number>();
+    for (const entry of entries) {
+      const pid = Number(entry.product_id);
+      loadedStockQtyByProduct.set(pid, (loadedStockQtyByProduct.get(pid) ?? 0) + Number(entry.qty));
+    }
+    const bootstrapAt = `${historyFrom}T00:00:00.000Z`;
     return boutiques.map((b) => ({
       id: b.id, nom: b.nom, ville: b.ville ?? "", color: b.color ?? "#C9A227",
       initials: b.initials ?? (b.nom ?? "?").split(/\s+/).map((x: string) => x[0]).join("").slice(0, 2).toUpperCase(),
@@ -795,7 +810,14 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string, options: Bouti
         longueurParPiece: Number(p.length_per_piece ?? 0),
         unitVente: p.unit,
       })),
-      entries: entries.filter(e => e.boutique_id === b.id).map(e => ({ id:e.id, productId:e.product_id, qty:Number(e.qty), unit:"unité", montantDu:receiptAmountByEntryId.get(e.id) ?? Number(e.qty)*Number(e.prix_unit ?? 0), movementType:e.type ?? undefined, date:day(e.entry_date), recordedAt:e.entry_date, fournisseur:supplierById.get(e.supplier_id)?.nom ?? e.note ?? "", supplierId:e.supplier_id ?? undefined, reference:e.reference ?? undefined, operatorId:e.operator_id ?? undefined, operatorName:userById.get(e.operator_id)?.nom ?? undefined, invoiceId:undefined })),
+      entries: [
+        ...products.filter(p => p.boutique_id === b.id).map(p => ({
+          id:-(9_000_000_000_000 + Number(p.id)), productId:Number(p.id),
+          qty:Number(p.stock ?? 0) - (loadedStockQtyByProduct.get(Number(p.id)) ?? 0),
+          unit:"unité", montantDu:0, movementType:"bootstrap", date:day(bootstrapAt), recordedAt:bootstrapAt, fournisseur:"", invoiceId:undefined,
+        })).filter(e => Math.abs(e.qty) > 0.000001),
+        ...entries.filter(e => e.boutique_id === b.id).map(e => ({ id:e.id, productId:e.product_id, qty:Number(e.qty), unit:"unité", montantDu:receiptAmountByEntryId.get(e.id) ?? Number(e.qty)*Number(e.prix_unit ?? 0), movementType:e.type ?? undefined, date:day(e.entry_date), recordedAt:e.entry_date, fournisseur:supplierById.get(e.supplier_id)?.nom ?? e.note ?? "", supplierId:e.supplier_id ?? undefined, reference:e.reference ?? undefined, operatorId:e.operator_id ?? undefined, operatorName:userById.get(e.operator_id)?.nom ?? undefined, invoiceId:undefined })),
+      ],
       clients: clients.filter(c => c.boutique_id === b.id).map(c => {
         // A wholesale client is stored as B2B with a marker in `contact`.
         const isWholesale = typeof c.contact === "string" && c.contact.includes(WHOLESALE_MARKER);
@@ -815,11 +837,12 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string, options: Bouti
         operatorId:r.operator_id ?? undefined, operatorName:r.operator_name, note:r.note ?? undefined,
       })),
       suppliers: suppliers.filter(s => s.boutique_id === b.id).map(s => ({ id:s.id, nom:s.nom, ville:s.ville ?? "", lastDelivery:day(s.last_delivery_at), tel:s.tel ?? "", initials:s.initials ?? "", color:s.color ?? "#C9A227", email:s.email ?? undefined, contact:s.contact ?? undefined, notes:s.notes ?? undefined, paymentTermsDays:s.payment_terms_days ?? undefined, linkedBoutiqueId:s.linked_boutique_id ?? undefined })),
-      invoices: [...invoices, ...historicalInvoiceHeaders].filter(i => i.boutique_id === b.id).map(i => {
+      invoices: invoices.filter(i => i.boutique_id === b.id).map(i => {
         const invoicePayments = paymentsByInvoice.get(i.id) ?? [];
-        const paid = invoicePayments.length
-          ? invoicePayments.reduce((sum, p) => sum + Number(p.amount), 0)
-          : Number(i.acompte);
+        const paid = Math.max(
+          Number(i.acompte ?? 0),
+          invoicePayments.reduce((sum, p) => sum + Number(p.amount), 0),
+        );
         const operator = userById.get(i.operator_id) ?? {};
         const clientRecord = clientById.get(i.client_id);
         return {
@@ -1192,6 +1215,35 @@ export async function loadBoutiqueSyncPatch(boutiqueId: string, sourceEvents: Bo
     return { id:row.id, userId:row.user_id, userNom:user.nom ?? "Utilisateur", userColor:user.color ?? "#6b7280", action:row.action, detail:row.detail, icon:row.icon, timestamp, date:new Date(timestamp).toLocaleString("fr-FR", { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit", second:"2-digit" }), source:row.source ?? undefined };
   });
   return patch;
+}
+
+
+export type BoutiqueHistoryPatch = BoutiqueSyncPatch & { clientCreditRefunds?: Array<Record<string, any>> };
+
+export async function loadBoutiqueHistoryRange(boutiqueId:string, fromAt:string, toAt:string): Promise<BoutiqueHistoryPatch> {
+  const bid=encodeURIComponent(boutiqueId); const scoped=`&boutique_id=eq.${bid}`;
+  const from=encodeURIComponent(new Date(fromAt).toISOString()); const to=encodeURIComponent(new Date(toAt).toISOString());
+  const [invoiceRefs,paymentRefs,chargeRefs,refundRows]=await Promise.all([
+    dataRequestAll<{id:string}>(`invoices?select=id${scoped}&invoice_date=gte.${from}&invoice_date=lt.${to}`,"invoice_date.asc,id.asc"),
+    dataRequestAll<{invoice_id:string}>(`invoice_payments?select=invoice_id${scoped}&paid_at=gte.${from}&paid_at=lt.${to}`,"paid_at.asc,id.asc"),
+    dataRequestAll<{id:number}>(`charges?select=id${scoped}&charge_date=gte.${from}&charge_date=lt.${to}`,"charge_date.asc,id.asc"),
+    dataRequestAll<any>(`client_credit_refunds?select=*${scoped}&refunded_at=gte.${from}&refunded_at=lt.${to}`,"refunded_at.asc,id.asc"),
+  ]);
+  const invoiceIds=[...new Set([...invoiceRefs.map(r=>r.id),...paymentRefs.map(r=>r.invoice_id)])];
+  const events:BoutiqueSyncEvent[]=[
+    ...invoiceIds.map(id=>({event_id:`history:invoice:${id}`,revision:0,domain:"sales" as const,entity_type:"invoice" as const,entity_id:id,operation:"UPDATE" as const})),
+    ...chargeRefs.map(r=>({event_id:`history:charge:${r.id}`,revision:0,domain:"charges" as const,entity_type:"charge" as const,entity_id:String(r.id),operation:"UPDATE" as const})),
+  ];
+  const patch=events.length?await loadBoutiqueSyncPatch(boutiqueId,events):{deleted:{}};
+  const day=(value?:string|null)=>value?new Date(value).toLocaleDateString("fr-FR"):"";
+  return {...patch,clientCreditRefunds:refundRows.map(r=>({id:Number(r.id),clientId:Number(r.client_id),amount:Number(r.amount),paymentMethod:r.payment_method,refundedAt:r.refunded_at,date:day(r.refunded_at),dateRaw:r.refunded_at,operatorId:r.operator_id??undefined,operatorName:r.operator_name,note:r.note??undefined}))};
+}
+
+export async function loadProductStockHistory(boutiqueId:string, productId:number) {
+  const bid=encodeURIComponent(boutiqueId);
+  const rows=await dataRequestAll<any>(`stock_entries?select=*&boutique_id=eq.${bid}&product_id=eq.${encodeURIComponent(String(productId))}`,"entry_date.desc,id.desc");
+  const day=(value?:string|null)=>value?new Date(value).toLocaleDateString("fr-FR"):"";
+  return rows.map(row=>({id:Number(row.id),productId:Number(row.product_id),qty:Number(row.qty),unit:"unité",montantDu:Number(row.qty)*Number(row.prix_unit??0),movementType:row.type??undefined,date:day(row.entry_date),recordedAt:row.entry_date,fournisseur:row.note??"",supplierId:row.supplier_id??undefined,reference:row.reference??undefined,operatorId:row.operator_id??undefined,invoiceId:row.source_invoice_id??undefined}));
 }
 
 /** Loads account metadata for administration screens from named relational tables. */

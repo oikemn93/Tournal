@@ -7,7 +7,7 @@ import { productQty, productMontant, productSupplierOutstanding, stockEntrySuppl
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
-import { correctSupplierReceipt, createCategory, createProduct, recordStockMovement, setProductActive, updateProduct } from "../../lib/api";
+import { correctSupplierReceipt, createCategory, createProduct, loadProductStockHistory, recordStockMovement, setProductActive, updateProduct } from "../../lib/api";
 import { formatPreciseDateTime } from "../utils/payments";
 
 function sortStockEntriesNewestFirst(a: StockEntry, b: StockEntry) {
@@ -43,6 +43,12 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter, initia
   const [editEntryQty, setEditEntryQty] = useState("");
   const [editEntryAmount, setEditEntryAmount] = useState("");
   const [stockCorrectionBusy, setStockCorrectionBusy] = useState<number|null>(null);
+  const [productHistory,setProductHistory]=useState<Record<number,StockEntry[]>>({});
+  useEffect(()=>{
+    if(!detail || productHistory[detail.id]) return; let cancelled=false;
+    void loadProductStockHistory(boutique.id,detail.id).then(rows=>{if(!cancelled)setProductHistory(current=>({...current,[detail.id]:rows}));}).catch(error=>console.warn("Historique stock indisponible",error));
+    return()=>{cancelled=true;};
+  },[boutique.id,detail?.id]);
 
   // Entry form
   const [dUnit, setDUnit] = useState("yards");
@@ -445,7 +451,7 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter, initia
               <div>
                 <div className="flex items-center gap-2 mb-3"><History size={15} style={{ color: "#3b82f6" }}/><p className="text-xs font-black tracking-wider" style={{ color: "#3b82f6" }}>HISTORIQUE</p></div>
                 <div className="space-y-2">
-                  {entries.filter(e => e.productId === detail.id).sort(sortStockEntriesNewestFirst).map(e => {
+                  {[...new Map([...(productHistory[detail.id] ?? []),...entries.filter(e=>e.productId===detail.id&&e.movementType!=="bootstrap")].map(e=>[e.id,e])).values()].sort(sortStockEntriesNewestFirst).map(e => {
                     const isSale = e.qty < 0;
                     const isReturn = e.movementType === "retour";
                     const isReceipt = e.movementType === "achat" && e.qty > 0;

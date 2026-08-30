@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Search, Plus, Send, FileText, Eye, Mail, MessageCircle, Smartphone, Phone, Wallet, CreditCard, RotateCcw, ShoppingCart, Receipt, AlertCircle, Trash2, CheckCircle, Minus, Store, X, ChevronLeft, ChevronRight, CalendarDays, PlusCircle } from "lucide-react";
 import type { Boutique, Invoice, InvoiceStatus, InvoiceLine, StockEntry, PaymentMethod, Client, PlatformUser, CaisseSession, PaymentEntry } from "../types";
 import { SEM, inputCls, searchInputCls, PAYMENT_METHODS, PM_ICON, PM_COLOR, PLACEHOLDER_IMGS } from "../constants";
-import { createSale, recordPayment, recordMultiPayment, returnSale, openCaisseSession, closeCaisseSession, createInvoiceShare, loadBoutiqueSnapshot } from "../../lib/api";
+import { createSale, recordPayment, recordMultiPayment, returnSale, openCaisseSession, closeCaisseSession, createInvoiceShare, loadBoutiqueHistoryRange } from "../../lib/api";
 import { fmt, today, imgSrc } from "../utils/formatting";
 import { invBadge, lineTotal, lineDispQty, lineDispUnit, genInvoiceId, productQty, getSiblings, invoiceMargin, lineUnitCost } from "../utils/inventory";
 import { buildReceiptHtml, openInvoicePDF, buildInvoiceMessage, generateInvoicePDFBlob, agentPrint, printReceipt, printCaisseReport } from "../utils/invoice";
@@ -385,10 +385,10 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
     const next = new Date(selectedDay + "T00:00:00Z");
     next.setUTCDate(next.getUTCDate() + 1);
     setHistoryLoadingDay(selectedDay);
-    void loadBoutiqueSnapshot<Boutique[]>(boutique.id, { historyFrom:selectedDay, historyTo:next.toISOString().slice(0,10), historyOnly:true })
-      .then(rows => {
+    void loadBoutiqueHistoryRange(boutique.id, `${selectedDay}T00:00:00.000Z`, next.toISOString())
+      .then(patch => {
         if (cancelled) return;
-        const historical = rows?.[0]?.invoices ?? [];
+        const historical = patch.invoices ?? [];
         if (historical.length) {
           const merged = new Map(boutique.invoices.map(invoice => [invoice.id, invoice]));
           historical.forEach(invoice => merged.set(invoice.id, invoice));
@@ -849,7 +849,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
       <div className="flex items-center gap-2">
         <button onClick={()=>shiftDay(-1)} className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 border border-border bg-card active:scale-90" title="Jour précédent"><ChevronLeft size={16}/></button>
         <button onClick={()=>{ setDayFilterActive(a=>!a); }} className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-xl text-xs font-black capitalize active:scale-95" style={{ background: dayFilterActive?FCT_COLOR:FCT_COLOR+"22", color: dayFilterActive?"#fff":FCT_COLOR }}>
-          <CalendarDays size={13}/> {historyLoadingDay===selectedDay ? "Chargement…" : dayFilterActive ? dayLabel : "Toutes les factures"}
+          <CalendarDays size={13}/> {historyLoadingDay===selectedDay ? "Chargement…" : dayFilterActive ? dayLabel : "Historique récent"}
         </button>
         <button onClick={()=>shiftDay(1)} disabled={selectedDay>=todayKey} className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 border border-border bg-card active:scale-90 disabled:opacity-40" title="Jour suivant"><ChevronRight size={16}/></button>
         {selectedDay!==todayKey && <button onClick={()=>{ setSelectedDay(todayKey); setDayFilterActive(true); }} className="px-2 h-7 rounded-lg text-[10px] font-black flex-shrink-0" style={{ background:FCT_COLOR+"22", color:FCT_COLOR }}>Auj.</button>}

@@ -24,7 +24,7 @@ export function lineTotal(l: InvoiceLine | CartItem) { return lineDispQty(l) * l
 export function productQty(pid: number, entries: StockEntry[]) { return entries.filter(e => e.productId === pid).reduce((s, e) => s + e.qty, 0); }
 // A customer return restores physical stock at its historical cost, but it is
 // not a new supplier purchase and must never increase the amount owed.
-const isSupplierDebtEntry = (entry: StockEntry) => entry.qty > 0 && entry.movementType !== "retour";
+const isSupplierDebtEntry = (entry: StockEntry) => entry.qty > 0 && entry.movementType !== "retour" && entry.movementType !== "bootstrap";
 export function productMontant(pid: number, entries: StockEntry[]) { return entries.filter(e => e.productId === pid && isSupplierDebtEntry(e)).reduce((s, e) => s + e.montantDu, 0); }
 /**
  * The payable created for a supplier reception is the source of truth for
