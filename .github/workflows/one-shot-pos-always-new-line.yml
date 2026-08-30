@@ -1,0 +1,87 @@
+name: One-shot POS always new line
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/one-shot-pos-always-new-line.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Patch POS repeated product behavior
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('src/app/screens/POSView.tsx')
+          s = p.read_text()
+
+          old = '''  function openAdd(p: Product) {
+            const inCart = cart.find(i => i.productId === p.id);
+            const defaultUnit = inCart?.sellUnit ?? getDefaultSaleUnit(p, boutique);
+            const lastPrice = inCart ? inCart.prixUnit : getLastSalePrice(p.id, invoices, defaultUnit);
+            setAddModal(p);
+            setAddSellUnit(defaultUnit);
+            setAddQty(inCart ? String(inCart.sellQty ?? inCart.qty) : "");
+            setAddPrice(lastPrice != null ? String(lastPrice) : "");
+          }'''
+          new = '''  function openAdd(p: Product) {
+            const defaultUnit = getDefaultSaleUnit(p, boutique);
+            const lastPrice = getLastSalePrice(p.id, invoices, defaultUnit);
+            setAddModal(p);
+            setAddSellUnit(defaultUnit);
+            setAddQty("");
+            setAddPrice(lastPrice != null ? String(lastPrice) : "");
+          }'''
+          if old not in s:
+              raise SystemExit('openAdd block not found')
+          s = s.replace(old, new, 1)
+
+          start = s.index('    setCart(prev => {', s.index('  function confirmAdd()'))
+          end_marker = '    setAddModal(null);'
+          end = s.index(end_marker, start)
+          s = s[:start] + '    setCart(prev => [...prev, item]);\n' + s[end:]
+
+          old = '<SubmitBtn color={POS_COLOR} label={cart.find(i=>i.productId===addModal.id)?"Mettre à jour":"Ajouter au panier"} onClick={confirmAdd} disabled={!addQty||!addPrice||Number(addQty)<=0||Number(addPrice)<=0}/>'
+          new = '<SubmitBtn color={POS_COLOR} label="Ajouter au panier" onClick={confirmAdd} disabled={!addQty||!addPrice||Number(addQty)<=0||Number(addPrice)<=0}/>'
+          if old not in s:
+              raise SystemExit('SubmitBtn label not found')
+          s = s.replace(old, new, 1)
+
+          p.write_text(s)
+          PY
+      - name: Verify behavior
+        shell: bash
+        run: |
+          grep -F 'setAddQty("");' src/app/screens/POSView.tsx
+          grep -F 'setCart(prev => [...prev, item]);' src/app/screens/POSView.tsx
+          grep -F 'label="Ajouter au panier"' src/app/screens/POSView.tsx
+          ! grep -F 'label={cart.find(i=>i.productId===addModal.id)?"Mettre à jour"' src/app/screens/POSView.tsx
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Build
+        run: pnpm build
+      - name: Commit
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/app/screens/POSView.tsx
+          git commit -m 'fix: always add repeated POS products as new lines'
+          git push origin HEAD:main
