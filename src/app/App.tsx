@@ -8872,7 +8872,22 @@ export default function App() {
           lastRemoteB.current = fingerprint;
           if (bid && remoteB[0]) {
             setBoutiques(prev => prev.some(b=>b.id===bid)
-              ? prev.map(b=>b.id===bid?remoteB[0]:b)
+              ? prev.map(b => {
+                  if (b.id !== bid) return b;
+                  const loadedById = new Map((b.invoices ?? []).map(invoice => [invoice.id, invoice]));
+                  const mergedInvoices = (remoteB[0].invoices ?? []).map(invoice => {
+                    const loaded = loadedById.get(invoice.id);
+                    if (!loaded) return invoice;
+                    const remoteHasDetails = (invoice.lines?.length ?? 0) > 0 || (invoice.payments?.length ?? 0) > 0;
+                    const loadedHasDetails = (loaded.lines?.length ?? 0) > 0 || (loaded.payments?.length ?? 0) > 0;
+                    return !remoteHasDetails && loadedHasDetails
+                      ? { ...invoice, lines:loaded.lines, payments:loaded.payments }
+                      : invoice;
+                  });
+                  const remoteIds = new Set(mergedInvoices.map(invoice => invoice.id));
+                  const loadedHistoricalOnly = (b.invoices ?? []).filter(invoice => !remoteIds.has(invoice.id));
+                  return { ...remoteB[0], invoices:[...mergedInvoices, ...loadedHistoricalOnly] };
+                })
               : [...prev, remoteB[0]]);
           } else {
             setBoutiques(remoteB);
@@ -8992,10 +9007,9 @@ export default function App() {
     }
   }, [applyBoutiqueSyncPatch, pullRemote]);
 
-  // V1 is kept as the safety net while V2 rolls out boutique by boutique.
-  // Stock movements are frequent and independent, so external product/entry
-  // events can safely use the same narrow canonical patch as V2. Every other
-  // V1 event falls back to the complete reconciliation path.
+  // V1 remains a safety net. Invoice events are always resolved by exact id,
+  // including invoices older than the bounded login window. This keeps an old
+  // invoice opened by another user live even when the bootstrap did not load it.
   const processLegacyBoutiqueChanges = useCallback(async (
     changes: LegacyBoutiqueChange[],
     reason: "events" | "reconnect" | "unavailable",
@@ -9004,34 +9018,62 @@ export default function App() {
       await pullRemote();
       return;
     }
-    const patchable = changes.length > 0
-      && changes.every(change => (change.table === "products" || change.table === "stock_entries") && change.operation !== "DELETE")
-      // The originating client has already applied an optimistic stock entry.
-      // It receives a full snapshot instead, avoiding a transient double count.
-      && !changes.some(change => change.ownStockWrite);
+    const invoiceTables = new Set(["invoices", "invoice_lines", "invoice_payments"]);
+    const invoiceChanges = changes.filter(change => invoiceTables.has(change.table));
+    if (invoiceChanges.length) {
+      const invoiceEvents: BoutiqueSyncEvent[] = [];
+      for (const [index, change] of invoiceChanges.entries()) {
+        const record = change.record;
+        const oldRecord = change.oldRecord;
+        const recordId = String(record.id ?? oldRecord.id ?? "");
+        const invoiceId = change.table === "invoices"
+          ? String(record.id ?? oldRecord.id ?? "")
+          : String(record.invoice_id ?? oldRecord.invoice_id ?? "");
+        if (!invoiceId) { await pullRemote(); return; }
+        invoiceEvents.push({
+          event_id:`v1:${change.table}:${recordId || invoiceId}:${index}`,
+          revision:index,
+          domain:"sales",
+          entity_type:change.table === "invoices" ? "invoice" : change.table === "invoice_lines" ? "invoice_line" : "invoice_payment",
+          entity_id:invoiceId,
+          record_id:recordId || null,
+          operation:change.operation,
+        });
+      }
+      try {
+        const boutiqueId = activeBoutiqueIdRef.current;
+        if (!boutiqueId) return;
+        const patch = await loadBoutiqueSyncPatch(boutiqueId, invoiceEvents);
+        applyBoutiqueSyncPatch(patch);
+        setLastSyncAt(Date.now());
+      } catch (error) {
+        console.warn("Correctif facture Realtime V1 indisponible, réconciliation bornée utilisée", error);
+        await pullRemote();
+        return;
+      }
+    }
+    const remaining = changes.filter(change => !invoiceTables.has(change.table));
+    if (!remaining.length) return;
+    const patchable = remaining.every(change => (change.table === "products" || change.table === "stock_entries") && change.operation !== "DELETE")
+      && !remaining.some(change => change.ownStockWrite);
     if (!patchable) {
       await pullRemote();
       return;
     }
     const events: BoutiqueSyncEvent[] = [];
-    for (const [index, change] of changes.entries()) {
+    for (const [index, change] of remaining.entries()) {
       const record = change.record;
       const recordId = String(record.id ?? "");
-      const entityId = change.table === "stock_entries"
-        ? String(record.product_id ?? "")
-        : recordId;
-      if (!recordId || !entityId) {
-        await pullRemote();
-        return;
-      }
+      const entityId = change.table === "stock_entries" ? String(record.product_id ?? "") : recordId;
+      if (!recordId || !entityId) { await pullRemote(); return; }
       events.push({
-        event_id: `v1:${change.table}:${recordId}:${index}`,
-        revision: index,
-        domain: change.table === "stock_entries" ? "stock" : "catalogue",
-        entity_type: change.table === "stock_entries" ? "stock_entry" : "product",
-        entity_id: entityId,
-        record_id: recordId,
-        operation: change.operation,
+        event_id:`v1:${change.table}:${recordId}:${index}`,
+        revision:index,
+        domain:change.table === "stock_entries" ? "stock" : "catalogue",
+        entity_type:change.table === "stock_entries" ? "stock_entry" : "product",
+        entity_id:entityId,
+        record_id:recordId,
+        operation:change.operation,
       });
     }
     try {

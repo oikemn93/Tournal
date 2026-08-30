@@ -1,0 +1,16 @@
+import fs from "node:fs";
+const api=fs.readFileSync("src/lib/api.ts","utf8");
+const app=fs.readFileSync("src/app/App.tsx","utf8");
+const syncStart=api.indexOf("export function subscribeToBoutiqueSync");
+const syncEnd=api.indexOf("function syncInFilter",syncStart);
+const sync=api.slice(syncStart,syncEnd);
+if(syncStart<0||syncEnd<0) throw new Error("Realtime V2 subscription missing");
+if(/historyFrom|BOOTSTRAP_HISTORY|invoice_date|paid_at/.test(sync)) throw new Error("Realtime V2 must never be date-windowed");
+if(!sync.includes("channel(`tournal:v2:${boutiqueId}`")) throw new Error("Realtime V2 must remain boutique scoped");
+const patchStart=api.indexOf("export async function loadBoutiqueSyncPatch");
+const patchEnd=api.indexOf("export async function",patchStart+20);
+const patch=api.slice(patchStart,patchEnd>patchStart?patchEnd:undefined);
+if(!patch.includes('ids("invoice_payment")')||!patch.includes('syncInFilter("id", invoiceIds)')||!patch.includes('syncInFilter("invoice_id", invoiceIds)')) throw new Error("Realtime invoice/payment patches must resolve exact invoice ids independent of bootstrap age");
+if(!app.includes('const invoiceTables = new Set(["invoices", "invoice_lines", "invoice_payments"])')) throw new Error("Legacy realtime must target invoice changes by id");
+if(!app.includes('loadedHistoricalOnly')) throw new Error("Bounded reconciliation must preserve lazily loaded historical invoices");
+console.log("Bounded bootstrap realtime invariants OK");
