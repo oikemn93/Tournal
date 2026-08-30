@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Search, Plus, Send, FileText, Eye, Mail, MessageCircle, Smartphone, Phone, Wallet, CreditCard, RotateCcw, ShoppingCart, Receipt, AlertCircle, Trash2, CheckCircle, Minus, Store, X, ChevronLeft, ChevronRight, CalendarDays, PlusCircle } from "lucide-react";
 import type { Boutique, Invoice, InvoiceStatus, InvoiceLine, StockEntry, PaymentMethod, Client, PlatformUser, CaisseSession, PaymentEntry } from "../types";
 import { SEM, inputCls, searchInputCls, PAYMENT_METHODS, PM_ICON, PM_COLOR, PLACEHOLDER_IMGS } from "../constants";
-import { createSale, recordPayment, recordMultiPayment, returnSale, openCaisseSession, closeCaisseSession, createInvoiceShare } from "../../lib/api";
+import { createSale, recordPayment, recordMultiPayment, returnSale, openCaisseSession, closeCaisseSession, createInvoiceShare, loadBoutiqueSnapshot } from "../../lib/api";
 import { fmt, today, imgSrc } from "../utils/formatting";
 import { invBadge, lineTotal, lineDispQty, lineDispUnit, genInvoiceId, productQty, getSiblings, invoiceMargin, lineUnitCost } from "../utils/inventory";
 import { buildReceiptHtml, openInvoicePDF, buildInvoiceMessage, generateInvoicePDFBlob, agentPrint, printReceipt, printCaisseReport } from "../utils/invoice";
@@ -371,6 +371,35 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
   const todayKey = new Date().toISOString().slice(0,10);
   const [selectedDay, setSelectedDay] = useState(todayKey);
   const [dayFilterActive, setDayFilterActive] = useState(initialStatus !== "impayé" && initialStatus !== "en retard");
+  const [historyLoadingDay, setHistoryLoadingDay] = useState<string | null>(null);
+  const [loadedHistoryDays, setLoadedHistoryDays] = useState<Set<string>>(() => new Set());
+  const bootstrapCutoff = useMemo(() => {
+    const date = new Date();
+    date.setUTCDate(date.getUTCDate() - 30);
+    return date.toISOString().slice(0, 10);
+  }, []);
+
+  useEffect(() => {
+    if (!dayFilterActive || selectedDay >= bootstrapCutoff || loadedHistoryDays.has(selectedDay) || historyLoadingDay === selectedDay) return;
+    let cancelled = false;
+    const next = new Date(selectedDay + "T00:00:00Z");
+    next.setUTCDate(next.getUTCDate() + 1);
+    setHistoryLoadingDay(selectedDay);
+    void loadBoutiqueSnapshot<Boutique[]>(boutique.id, { historyFrom:selectedDay, historyTo:next.toISOString().slice(0,10), historyOnly:true })
+      .then(rows => {
+        if (cancelled) return;
+        const historical = rows?.[0]?.invoices ?? [];
+        if (historical.length) {
+          const merged = new Map(boutique.invoices.map(invoice => [invoice.id, invoice]));
+          historical.forEach(invoice => merged.set(invoice.id, invoice));
+          onUpdate({ invoices:[...merged.values()].sort((a,b)=>(b.dateRaw ?? "").localeCompare(a.dateRaw ?? "")) });
+        }
+        setLoadedHistoryDays(previous => new Set(previous).add(selectedDay));
+      })
+      .catch(error => console.error("Chargement historique factures impossible", error))
+      .finally(() => { if (!cancelled) setHistoryLoadingDay(null); });
+    return () => { cancelled = true; };
+  }, [boutique.id, boutique.invoices, bootstrapCutoff, dayFilterActive, historyLoadingDay, loadedHistoryDays, onUpdate, selectedDay]);
   function shiftDay(delta: number) {
     const d = new Date(selectedDay + "T12:00:00");
     d.setDate(d.getDate() + delta);
@@ -820,7 +849,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
       <div className="flex items-center gap-2">
         <button onClick={()=>shiftDay(-1)} className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 border border-border bg-card active:scale-90" title="Jour précédent"><ChevronLeft size={16}/></button>
         <button onClick={()=>{ setDayFilterActive(a=>!a); }} className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-xl text-xs font-black capitalize active:scale-95" style={{ background: dayFilterActive?FCT_COLOR:FCT_COLOR+"22", color: dayFilterActive?"#fff":FCT_COLOR }}>
-          <CalendarDays size={13}/> {dayFilterActive ? dayLabel : "Toutes les factures"}
+          <CalendarDays size={13}/> {historyLoadingDay===selectedDay ? "Chargement…" : dayFilterActive ? dayLabel : "30 derniers jours"}
         </button>
         <button onClick={()=>shiftDay(1)} disabled={selectedDay>=todayKey} className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 border border-border bg-card active:scale-90 disabled:opacity-40" title="Jour suivant"><ChevronRight size={16}/></button>
         {selectedDay!==todayKey && <button onClick={()=>{ setSelectedDay(todayKey); setDayFilterActive(true); }} className="px-2 h-7 rounded-lg text-[10px] font-black flex-shrink-0" style={{ background:FCT_COLOR+"22", color:FCT_COLOR }}>Auj.</button>}

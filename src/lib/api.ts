@@ -719,23 +719,41 @@ export async function getAuthBootstrap() {
  * It is intentionally scoped to one boutique: the authentication shell never
  * downloads another shop's business history.
  */
-export async function loadBoutiqueSnapshot<T>(boutiqueId: string): Promise<T | null> {
+export type BoutiqueSnapshotOptions = {
+  historyFrom?: string;
+  historyTo?: string;
+  historyOnly?: boolean;
+};
+
+const BOOTSTRAP_HISTORY_DAYS = 30;
+
+function defaultBootstrapHistoryFrom() {
+  const date = new Date();
+  date.setUTCDate(date.getUTCDate() - BOOTSTRAP_HISTORY_DAYS);
+  return date.toISOString().slice(0, 10);
+}
+
+export async function loadBoutiqueSnapshot<T>(boutiqueId: string, options: BoutiqueSnapshotOptions = {}): Promise<T | null> {
     const bid = encodeURIComponent(boutiqueId);
     const boutiqueFilter = `&id=eq.${bid}`;
     const scoped = (column = "boutique_id") => `&${column}=eq.${bid}`;
+    const historyFrom = options.historyFrom ?? defaultBootstrapHistoryFrom();
+    const historyTo = options.historyTo;
+    const invoiceWindow = `${historyFrom ? `&invoice_date=gte.${encodeURIComponent(historyFrom)}` : ""}${historyTo ? `&invoice_date=lt.${encodeURIComponent(historyTo)}` : ""}`;
+    const paymentWindow = `${historyFrom ? `&paid_at=gte.${encodeURIComponent(historyFrom)}` : ""}${historyTo ? `&paid_at=lt.${encodeURIComponent(historyTo)}` : ""}`;
     const [boutiques, categories, products, entries, clients, suppliers, invoices, payments, advances, creditRefunds, charges, sessions, auditLogs, userScope] = await Promise.all([
       dataRequest<any[]>(`boutiques?select=*${boutiqueFilter}&order=nom.asc`),
-      dataRequest<any[]>(`categories?select=*${scoped()}`), dataRequest<any[]>(`products?select=*${scoped()}`),
-      dataRequestAll<any>(`stock_entries?select=*${scoped()}`, "entry_date.desc,id.desc"), dataRequest<any[]>(`clients?select=*${scoped()}`),
-      dataRequest<any[]>(`suppliers?select=*${scoped()}`),
-      dataRequest<any[]>(`invoices?select=*,invoice_lines(*)${scoped()}`),
-      dataRequest<any[]>(`invoice_payments?select=*${scoped()}&order=paid_at.asc`), dataRequest<any[]>(`client_advances?select=*${scoped()}&order=paid_at.desc,id.desc`),
-      dataRequest<any[]>(`client_credit_refunds?select=*${scoped()}&order=refunded_at.desc,id.desc`), dataRequest<any[]>(`charges?select=*${scoped()}`),
-      dataRequest<any[]>(`caisse_sessions?select=*${scoped()}`),
+      (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`categories?select=*${scoped()}`)), (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`products?select=*${scoped()}`)),
+      (options.historyOnly ? Promise.resolve([]) : dataRequestAll<any>(`stock_entries?select=*${scoped()}`, "entry_date.desc,id.desc")), dataRequest<any[]>(`clients?select=*${scoped()}`),
+      (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`suppliers?select=*${scoped()}`)),
+      dataRequest<any[]>(`invoices?select=*,invoice_lines(*)${scoped()}${invoiceWindow}&order=invoice_date.desc`),
+      dataRequest<any[]>(`invoice_payments?select=*${scoped()}${paymentWindow}&order=paid_at.asc`), (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`client_advances?select=*${scoped()}&order=paid_at.desc,id.desc`)),
+      (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`client_credit_refunds?select=*${scoped()}&order=refunded_at.desc,id.desc`)), (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`charges?select=*${scoped()}`)),
+      (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`caisse_sessions?select=*${scoped()}`)),
       // The administration view presents recent activity. Loading the entire
       // audit trail at every login or Realtime event was the largest avoidable
       // payload in production.
-      dataRequest<any[]>(`audit_log?select=*${scoped()}&order=created_at.desc&limit=200`),
+      (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`audit_log?select=*${scoped()}&order=created_at.desc&limit=200`)),
       loadBoutiqueUserScope(boutiqueId),
     ]);
     const users = userScope.users;
