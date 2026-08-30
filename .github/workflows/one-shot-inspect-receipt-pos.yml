@@ -1,0 +1,33 @@
+name: One-shot inspect receipt and POS
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/one-shot-inspect-receipt-pos.yml
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect route wiring
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          for path, needles in [
+            ('src/app/App.tsx',['RelationalFournisseursView','RelationalStockView','onStartReceipt','initialSupplierId']),
+            ('src/app/screens/POSView.tsx',['setCart(prev','removeFromCart','updateCartQty','cart.map(item']),
+          ]:
+            lines=Path(path).read_text().splitlines()
+            print('\n###',path)
+            for i,line in enumerate(lines):
+              if any(n in line for n in needles):
+                lo=max(0,i-6); hi=min(len(lines),i+12)
+                print(f'--- lines {lo+1}-{hi} ---')
+                for j in range(lo,hi): print(f'{j+1}: {lines[j]}')
+          PY
