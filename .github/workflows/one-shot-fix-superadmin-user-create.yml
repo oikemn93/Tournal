@@ -16,6 +16,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
       - name: Patch null boutique handling
         run: |
           python - <<'PY'
@@ -30,13 +38,11 @@ jobs:
           p.write_text(s)
           PY
       - name: Verify patch
-        run: |
-          grep -F 'createUser(user.phone, user.nom, user.password, boutique?.id)' src/app/App.tsx
+        run: grep -F 'createUser(user.phone, user.nom, user.password, boutique?.id)' src/app/App.tsx
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
       - name: Build
-        run: |
-          corepack enable
-          pnpm install --frozen-lockfile
-          pnpm build
+        run: pnpm build
       - name: Commit fix
         run: |
           git config user.name 'github-actions[bot]'
