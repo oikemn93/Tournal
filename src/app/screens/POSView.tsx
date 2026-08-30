@@ -309,12 +309,11 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
   }
 
   function openAdd(p: Product) {
-    const inCart = cart.find(i => i.productId === p.id);
-    const defaultUnit = inCart?.sellUnit ?? getDefaultSaleUnit(p, boutique);
-    const lastPrice = inCart ? inCart.prixUnit : getLastSalePrice(p.id, invoices, defaultUnit);
+    const defaultUnit = getDefaultSaleUnit(p, boutique);
+    const lastPrice = getLastSalePrice(p.id, invoices, defaultUnit);
     setAddModal(p);
     setAddSellUnit(defaultUnit);
-    setAddQty(inCart ? String(inCart.sellQty ?? inCart.qty) : "");
+    setAddQty("");
     setAddPrice(lastPrice != null ? String(lastPrice) : "");
   }
   function confirmAdd() {
@@ -331,21 +330,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
       unit: baseUnit, qty: baseQty, prixUnit: prix,
       ...(isSell ? { sellUnit: addSellUnit, sellQty: sellQtyN } : {}),
     };
-    setCart(prev => {
-      const existingIndex = prev.findIndex(existing =>
-        existing.productId === item.productId &&
-        existing.prixUnit === item.prixUnit &&
-        (existing.sellUnit ?? existing.unit) === (item.sellUnit ?? item.unit)
-      );
-      if (existingIndex < 0) return [...prev, item];
-      return prev.map((existing, index) => {
-        if (index !== existingIndex) return existing;
-        if (existing.sellUnit && existing.sellQty !== undefined && item.sellQty !== undefined) {
-          return { ...existing, sellQty: existing.sellQty + item.sellQty, qty: existing.qty + item.qty };
-        }
-        return { ...existing, qty: existing.qty + item.qty };
-      });
-    });
+    setCart(prev => [...prev, item]);
     setAddModal(null);
   }
   function removeFromCart(lineIndex: number) { setCart(prev => prev.filter((_, index) => index !== lineIndex)); }
@@ -949,7 +934,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
               <span className="text-xl font-black" style={{ color:POS_COLOR, fontFamily:"'Nunito', sans-serif" }}>{fmt(Number(addQty)*Number(addPrice))}</span>
             </div>
           )}
-          <SubmitBtn color={POS_COLOR} label={cart.find(i=>i.productId===addModal.id)?"Mettre à jour":"Ajouter au panier"} onClick={confirmAdd} disabled={!addQty||!addPrice||Number(addQty)<=0||Number(addPrice)<=0}/>
+          <SubmitBtn color={POS_COLOR} label="Ajouter au panier" onClick={confirmAdd} disabled={!addQty||!addPrice||Number(addQty)<=0||Number(addPrice)<=0}/>
         </Modal>
       )}
 
