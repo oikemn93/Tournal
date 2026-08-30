@@ -1,0 +1,46 @@
+name: One-shot fix superadmin user creation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/one-shot-fix-superadmin-user-create.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch null boutique handling
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('src/app/App.tsx')
+          s = p.read_text()
+          old = 'const { userId } = await createUser(user.phone, user.nom, user.password, boutique.id);'
+          new = 'const { userId } = await createUser(user.phone, user.nom, user.password, boutique?.id);'
+          if old not in s:
+              raise SystemExit('expected createUser call not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+          PY
+      - name: Verify patch
+        run: |
+          grep -F 'createUser(user.phone, user.nom, user.password, boutique?.id)' src/app/App.tsx
+      - name: Build
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm build
+      - name: Commit fix
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/app/App.tsx
+          git commit -m 'fix: allow superadmin user creation without active boutique'
+          git push origin HEAD:main
