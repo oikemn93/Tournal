@@ -17,13 +17,14 @@ function sortStockEntriesNewestFirst(a: StockEntry, b: StockEntry) {
   return byTimestamp || b.id - a.id;
 }
 
-export function StockView({ boutique, onUpdate, logAction, initialFilter, initialSupplierId, initialEntryId, onInitialRoutePrepared }: {
+export function StockView({ boutique, onUpdate, logAction, initialFilter, initialSupplierId, initialEntryId, onInitialRoutePrepared, onReceiptSaved }: {
   boutique: Boutique; onUpdate: (u: Partial<Boutique>) => void;
   logAction: (action: string, detail: string, icon: string) => void;
   initialFilter?: string;
   initialSupplierId?: number;
   initialEntryId?: number;
   onInitialRoutePrepared?: () => void;
+  onReceiptSaved?: (supplierId: number) => void;
 }) {
   const { products, entries, suppliers } = boutique;
   const charges = boutique.charges ?? [];
@@ -175,6 +176,7 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter, initia
     setAddMode(false); setDQty(""); setDMontant(""); setDPrixUnit(""); setDSku("");
     setDLotMode(false); setDLots("1"); setDPieces(""); setDLongueur("");
     setReceiptSupplierId(null);
+    onReceiptSaved?.(supplier.id);
   }
 
   async function submitNew() {

@@ -331,16 +331,16 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
       unit: baseUnit, qty: baseQty, prixUnit: prix,
       ...(isSell ? { sellUnit: addSellUnit, sellQty: sellQtyN } : {}),
     };
-    setCart(prev => { const ex = prev.find(i => i.productId === addModal.id); if (ex) return prev.map(i => i.productId === addModal.id ? item : i); return [...prev, item]; });
+    setCart(prev => [...prev, item]);
     setAddModal(null);
   }
-  function removeFromCart(productId: number) { setCart(prev => prev.filter(i => i.productId !== productId)); }
-  function updateCartQty(productId: number, newDispQty: number) {
-    if (newDispQty <= 0) { removeFromCart(productId); return; }
-    setCart(prev => prev.map(item => {
-      if (item.productId !== productId) return item;
+  function removeFromCart(lineIndex: number) { setCart(prev => prev.filter((_, index) => index !== lineIndex)); }
+  function updateCartQty(lineIndex: number, newDispQty: number) {
+    if (newDispQty <= 0) { removeFromCart(lineIndex); return; }
+    setCart(prev => prev.map((item, index) => {
+      if (index !== lineIndex) return item;
       if (item.sellUnit && item.sellQty !== undefined) {
-        const p = products.find(pr => pr.id === productId);
+        const p = products.find(pr => pr.id === item.productId);
         const newBase = p ? toBaseQty(newDispQty, item.sellUnit, p) : newDispQty;
         return { ...item, sellQty: newDispQty, qty: newBase };
       }
@@ -692,12 +692,12 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
         <Modal title={editingInvoice ? `Modifier ${editingInvoice.id}` : "Nouvelle commande"} color={POS_COLOR} onClose={resetCheckout}>
           {!done ? (<>
             <div className="space-y-2">
-              {cart.map(item => {
+              {cart.map((item, lineIndex) => {
                 const dQty = lineDispQty(item);
                 const dUnit = lineDispUnit(item);
                 const dTotal = lineTotal(item);
                 return (
-                <div key={item.productId} className="flex items-center gap-3 bg-muted rounded-2xl p-3">
+                <div key={`${item.productId}-${item.prixUnit}-${lineIndex}`} className="flex items-center gap-3 bg-muted rounded-2xl p-3">
                   <img src={imgSrc(item.img,80,80)} alt={item.nom} className="w-12 h-12 rounded-xl object-cover flex-shrink-0"/>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between">
@@ -705,15 +705,15 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
                       {item.sellUnit && <span className="text-xs font-bold px-1.5 py-0.5 rounded-lg ml-1 flex-shrink-0" style={{ background:POS_COLOR+"18", color:POS_COLOR }}>{item.sellUnit}</span>}
                     </div>
                     <div className="flex items-center gap-1.5 mt-1.5">
-                      <button onClick={()=>updateCartQty(item.productId, dQty-1)} className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background:POS_COLOR+"22" }}><Minus size={12} style={{ color:POS_COLOR }}/></button>
+                      <button onClick={()=>updateCartQty(lineIndex, dQty-1)} className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background:POS_COLOR+"22" }}><Minus size={12} style={{ color:POS_COLOR }}/></button>
                       <span className="text-base font-black w-8 text-center">{dQty}</span>
-                      <button onClick={()=>updateCartQty(item.productId, dQty+1)} className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background:POS_COLOR+"22" }}><Plus size={12} style={{ color:POS_COLOR }}/></button>
+                      <button onClick={()=>updateCartQty(lineIndex, dQty+1)} className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background:POS_COLOR+"22" }}><Plus size={12} style={{ color:POS_COLOR }}/></button>
                       <span className="text-xs text-muted-foreground ml-0.5">{dUnit} × {fmt(item.prixUnit)}</span>
                     </div>
                   </div>
                   <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
                     <p className="font-black text-base" style={{ color:POS_COLOR, fontFamily:"'Nunito', sans-serif" }}>{fmt(dTotal)}</p>
-                    <button onClick={()=>removeFromCart(item.productId)} className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ background:"#ef444415" }}><Trash2 size={11} style={{ color:"#ef4444" }}/></button>
+                    <button onClick={()=>removeFromCart(lineIndex)} className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ background:"#ef444415" }}><Trash2 size={11} style={{ color:"#ef4444" }}/></button>
                   </div>
                 </div>
                 );
@@ -724,7 +724,8 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
               <p className="text-xs font-black tracking-wider px-3 py-2" style={{ color:POS_COLOR }}>+ AJOUTER UN ARTICLE</p>
               <div className="grid grid-cols-2 gap-2 px-3 pb-3" style={{ maxHeight:"200px", overflowY:"auto", scrollbarWidth:"none" }}>
                 {products.map(p=>{
-                  const inCart=cart.find(i=>i.productId===p.id);
+                  const matchingLines=cart.filter(i=>i.productId===p.id);
+                  const inCart=matchingLines[0];
                   return (
                     <button key={p.id} onClick={()=>openAdd(p)} className="flex items-center gap-2 rounded-xl p-2 text-left transition-colors active:scale-95"
                       style={{ background:inCart?POS_COLOR+"15":"#EEE9D8", border:inCart?`2px solid ${POS_COLOR}44`:"2px solid transparent" }}>
@@ -732,7 +733,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-bold truncate leading-tight">{p.nom}</p>
                         <p className="text-xs text-muted-foreground">{productQty(p.id,entries)} {p.unit}</p>
-                        {inCart&&<p className="text-xs font-bold" style={{ color:POS_COLOR }}>× {inCart.qty} ✓</p>}
+                        {inCart&&<p className="text-xs font-bold" style={{ color:POS_COLOR }}>{matchingLines.length} ligne{matchingLines.length>1?"s":""} ✓</p>}
                       </div>
                     </button>
                   );

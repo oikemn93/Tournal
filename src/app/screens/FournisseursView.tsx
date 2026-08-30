@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { ArrowLeft, CalendarClock, CheckCircle, ChevronRight, Download, Edit2, Mail, MapPin, PackageOpen, Phone, Plus, ReceiptText, Search, StickyNote, UserRound, Wallet } from "lucide-react";
 import type { Boutique, Charge, PaymentMethod, StockEntry, Supplier } from "../types";
 import { PAYMENT_METHODS, PM_ICON, SEM, SUP_COLORS, inputCls, searchInputCls } from "../constants";
@@ -30,12 +30,14 @@ function csvCell(value: unknown) { return `"${String(value ?? "").replace(/"/g, 
 type TimelineFilter = "all" | "receipt" | "payment";
 type PeriodFilter = "all" | "30" | "365" | "custom";
 
-export function FournisseursView({ boutique, onUpdate, logAction, canPaySupplier, canManageReceipts, onStartReceipt, onCorrectReceipt, defaultPaymentTermsDays = 30 }: {
+export function FournisseursView({ boutique, onUpdate, logAction, canPaySupplier, canManageReceipts, onStartReceipt, onCorrectReceipt, initialSupplierId, onInitialSupplierOpened, defaultPaymentTermsDays = 30 }: {
   boutique: Boutique; onUpdate: (u: Partial<Boutique>) => void;
   logAction: (action: string, detail: string, icon: string) => void;
   canPaySupplier: boolean; canManageReceipts: boolean;
   onStartReceipt: (supplierId: number) => void;
   onCorrectReceipt: (entry: StockEntry, supplierId: number) => void;
+  initialSupplierId?: number;
+  onInitialSupplierOpened?: () => void;
   defaultPaymentTermsDays?: number;
 }) {
   const { suppliers, products, entries } = boutique;
@@ -51,6 +53,12 @@ export function FournisseursView({ boutique, onUpdate, logAction, canPaySupplier
   const [timelineFilter,setTimelineFilter] = useState<TimelineFilter>("all");
   const [periodFilter,setPeriodFilter] = useState<PeriodFilter>("all");
   const [periodFrom,setPeriodFrom] = useState(""); const [periodTo,setPeriodTo] = useState("");
+
+  useEffect(() => {
+    if (initialSupplierId == null || !suppliers.some(supplier => supplier.id === initialSupplierId)) return;
+    setSelectedSupplierId(initialSupplierId);
+    onInitialSupplierOpened?.();
+  }, [initialSupplierId, suppliers, onInitialSupplierOpened]);
 
   const selectedSupplier = suppliers.find(supplier => supplier.id === selectedSupplierId) ?? null;
   const suppliersBySearch = suppliers.filter(supplier => supplier.nom.toLowerCase().includes(search.toLowerCase()) || supplier.ville.toLowerCase().includes(search.toLowerCase()));
