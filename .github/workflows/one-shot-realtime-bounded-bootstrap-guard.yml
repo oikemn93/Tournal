@@ -31,15 +31,7 @@ jobs:
           if old not in s: raise SystemExit('legacy realtime anchor missing')
           s=s.replace(old,new,1)
           p.write_text(s)
-
-          test=Path('scripts/check-bounded-realtime-invariants.mjs')
-          test.write_text('''import fs from "node:fs";\nconst api=fs.readFileSync("src/lib/api.ts","utf8");\nconst app=fs.readFileSync("src/app/App.tsx","utf8");\nconst syncStart=api.indexOf("export function subscribeToBoutiqueSync");\nconst syncEnd=api.indexOf("function syncInFilter",syncStart);\nconst sync=api.slice(syncStart,syncEnd);\nif(syncStart<0||syncEnd<0) throw new Error("Realtime V2 subscription missing");\nif(/historyFrom|BOOTSTRAP_HISTORY|invoice_date|paid_at/.test(sync)) throw new Error("Realtime V2 must never be date-windowed");\nif(!sync.includes("channel(`tournal:v2:${boutiqueId}`")) throw new Error("Realtime V2 must remain boutique scoped");\nconst patchStart=api.indexOf("export async function loadBoutiqueSyncPatch");\nconst patchEnd=api.indexOf("export async function",patchStart+20);\nconst patch=api.slice(patchStart,patchEnd>patchStart?patchEnd:undefined);\nif(!patch.includes('ids("invoice_payment")')||!patch.includes('syncInFilter("id", invoiceIds)')||!patch.includes('syncInFilter("invoice_id", invoiceIds)')) throw new Error("Realtime invoice/payment patches must resolve exact invoice ids independent of bootstrap age");\nif(!app.includes('const invoiceTables = new Set(["invoices", "invoice_lines", "invoice_payments"])')) throw new Error("Legacy realtime must target invoice changes by id");\nif(!app.includes('loadedHistoricalOnly')) throw new Error("Bounded reconciliation must preserve lazily loaded historical invoices");\nconsole.log("Bounded bootstrap realtime invariants OK");\n''')
-
-          ci=Path('.github/workflows/ci.yml'); c=ci.read_text()
-          anchor='''      - name: Prevent fixed-interval network polling\n        run: node scripts/check-no-network-polling.mjs\n'''
-          repl=anchor+'''\n      - name: Verify bounded bootstrap keeps realtime global\n        run: node scripts/check-bounded-realtime-invariants.mjs\n'''
-          if anchor not in c: raise SystemExit('CI anchor missing')
-          ci.write_text(c.replace(anchor,repl,1))
+          Path('scripts/check-bounded-realtime-invariants.mjs').write_text('''import fs from "node:fs";\nconst api=fs.readFileSync("src/lib/api.ts","utf8");\nconst app=fs.readFileSync("src/app/App.tsx","utf8");\nconst syncStart=api.indexOf("export function subscribeToBoutiqueSync");\nconst syncEnd=api.indexOf("function syncInFilter",syncStart);\nconst sync=api.slice(syncStart,syncEnd);\nif(syncStart<0||syncEnd<0) throw new Error("Realtime V2 subscription missing");\nif(/historyFrom|BOOTSTRAP_HISTORY|invoice_date|paid_at/.test(sync)) throw new Error("Realtime V2 must never be date-windowed");\nif(!sync.includes("channel(`tournal:v2:${boutiqueId}`")) throw new Error("Realtime V2 must remain boutique scoped");\nconst patchStart=api.indexOf("export async function loadBoutiqueSyncPatch");\nconst patchEnd=api.indexOf("export async function",patchStart+20);\nconst patch=api.slice(patchStart,patchEnd>patchStart?patchEnd:undefined);\nif(!patch.includes('ids("invoice_payment")')||!patch.includes('syncInFilter("id", invoiceIds)')||!patch.includes('syncInFilter("invoice_id", invoiceIds)')) throw new Error("Realtime invoice/payment patches must resolve exact invoice ids independent of bootstrap age");\nif(!app.includes('const invoiceTables = new Set(["invoices", "invoice_lines", "invoice_payments"])')) throw new Error("Legacy realtime must target invoice changes by id");\nif(!app.includes('loadedHistoricalOnly')) throw new Error("Bounded reconciliation must preserve lazily loaded historical invoices");\nconsole.log("Bounded bootstrap realtime invariants OK");\n''')
           PY
       - run: node scripts/check-bounded-realtime-invariants.mjs
       - run: pnpm build
@@ -47,6 +39,6 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src/app/App.tsx scripts/check-bounded-realtime-invariants.mjs .github/workflows/ci.yml
+          git add src/app/App.tsx scripts/check-bounded-realtime-invariants.mjs
           git commit -m 'fix: keep bounded bootstrap realtime complete' || exit 0
-          git push
+          git push origin HEAD:main
