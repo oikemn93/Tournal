@@ -741,12 +741,13 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string, options: Bouti
     const historyTo = options.historyTo;
     const invoiceWindow = `${historyFrom ? `&invoice_date=gte.${encodeURIComponent(historyFrom)}` : ""}${historyTo ? `&invoice_date=lt.${encodeURIComponent(historyTo)}` : ""}`;
     const paymentWindow = `${historyFrom ? `&paid_at=gte.${encodeURIComponent(historyFrom)}` : ""}${historyTo ? `&paid_at=lt.${encodeURIComponent(historyTo)}` : ""}`;
-    const [boutiques, categories, products, entries, clients, suppliers, invoices, payments, advances, creditRefunds, charges, sessions, auditLogs, userScope] = await Promise.all([
+    const [boutiques, categories, products, entries, clients, suppliers, invoices, historicalInvoiceHeaders, payments, advances, creditRefunds, charges, sessions, auditLogs, userScope] = await Promise.all([
       dataRequest<any[]>(`boutiques?select=*${boutiqueFilter}&order=nom.asc`),
       (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`categories?select=*${scoped()}`)), (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`products?select=*${scoped()}`)),
       (options.historyOnly ? Promise.resolve([]) : dataRequestAll<any>(`stock_entries?select=*${scoped()}`, "entry_date.desc,id.desc")), dataRequest<any[]>(`clients?select=*${scoped()}`),
       (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`suppliers?select=*${scoped()}`)),
       dataRequest<any[]>(`invoices?select=*,invoice_lines(*)${scoped()}${invoiceWindow}&order=invoice_date.desc`),
+      (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`invoices?select=*${scoped()}&invoice_date=lt.${encodeURIComponent(historyFrom)}&order=invoice_date.desc`)),
       dataRequest<any[]>(`invoice_payments?select=*${scoped()}${paymentWindow}&order=paid_at.asc`), (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`client_advances?select=*${scoped()}&order=paid_at.desc,id.desc`)),
       (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`client_credit_refunds?select=*${scoped()}&order=refunded_at.desc,id.desc`)), (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`charges?select=*${scoped()}`)),
       (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`caisse_sessions?select=*${scoped()}`)),
@@ -814,7 +815,7 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string, options: Bouti
         operatorId:r.operator_id ?? undefined, operatorName:r.operator_name, note:r.note ?? undefined,
       })),
       suppliers: suppliers.filter(s => s.boutique_id === b.id).map(s => ({ id:s.id, nom:s.nom, ville:s.ville ?? "", lastDelivery:day(s.last_delivery_at), tel:s.tel ?? "", initials:s.initials ?? "", color:s.color ?? "#C9A227", email:s.email ?? undefined, contact:s.contact ?? undefined, notes:s.notes ?? undefined, paymentTermsDays:s.payment_terms_days ?? undefined, linkedBoutiqueId:s.linked_boutique_id ?? undefined })),
-      invoices: invoices.filter(i => i.boutique_id === b.id).map(i => {
+      invoices: [...invoices, ...historicalInvoiceHeaders].filter(i => i.boutique_id === b.id).map(i => {
         const invoicePayments = paymentsByInvoice.get(i.id) ?? [];
         const paid = invoicePayments.length
           ? invoicePayments.reduce((sum, p) => sum + Number(p.amount), 0)

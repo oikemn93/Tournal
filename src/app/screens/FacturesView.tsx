@@ -849,7 +849,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
       <div className="flex items-center gap-2">
         <button onClick={()=>shiftDay(-1)} className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 border border-border bg-card active:scale-90" title="Jour précédent"><ChevronLeft size={16}/></button>
         <button onClick={()=>{ setDayFilterActive(a=>!a); }} className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-xl text-xs font-black capitalize active:scale-95" style={{ background: dayFilterActive?FCT_COLOR:FCT_COLOR+"22", color: dayFilterActive?"#fff":FCT_COLOR }}>
-          <CalendarDays size={13}/> {historyLoadingDay===selectedDay ? "Chargement…" : dayFilterActive ? dayLabel : "30 derniers jours"}
+          <CalendarDays size={13}/> {historyLoadingDay===selectedDay ? "Chargement…" : dayFilterActive ? dayLabel : "Toutes les factures"}
         </button>
         <button onClick={()=>shiftDay(1)} disabled={selectedDay>=todayKey} className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 border border-border bg-card active:scale-90 disabled:opacity-40" title="Jour suivant"><ChevronRight size={16}/></button>
         {selectedDay!==todayKey && <button onClick={()=>{ setSelectedDay(todayKey); setDayFilterActive(true); }} className="px-2 h-7 rounded-lg text-[10px] font-black flex-shrink-0" style={{ background:FCT_COLOR+"22", color:FCT_COLOR }}>Auj.</button>}
