@@ -331,7 +331,21 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
       unit: baseUnit, qty: baseQty, prixUnit: prix,
       ...(isSell ? { sellUnit: addSellUnit, sellQty: sellQtyN } : {}),
     };
-    setCart(prev => [...prev, item]);
+    setCart(prev => {
+      const existingIndex = prev.findIndex(existing =>
+        existing.productId === item.productId &&
+        existing.prixUnit === item.prixUnit &&
+        (existing.sellUnit ?? existing.unit) === (item.sellUnit ?? item.unit)
+      );
+      if (existingIndex < 0) return [...prev, item];
+      return prev.map((existing, index) => {
+        if (index !== existingIndex) return existing;
+        if (existing.sellUnit && existing.sellQty !== undefined && item.sellQty !== undefined) {
+          return { ...existing, sellQty: existing.sellQty + item.sellQty, qty: existing.qty + item.qty };
+        }
+        return { ...existing, qty: existing.qty + item.qty };
+      });
+    });
     setAddModal(null);
   }
   function removeFromCart(lineIndex: number) { setCart(prev => prev.filter((_, index) => index !== lineIndex)); }
@@ -726,6 +740,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
                 {products.map(p=>{
                   const matchingLines=cart.filter(i=>i.productId===p.id);
                   const inCart=matchingLines[0];
+                  const totalInCart=matchingLines.reduce((sum,line)=>sum+lineDispQty(line),0);
                   return (
                     <button key={p.id} onClick={()=>openAdd(p)} className="flex items-center gap-2 rounded-xl p-2 text-left transition-colors active:scale-95"
                       style={{ background:inCart?POS_COLOR+"15":"#EEE9D8", border:inCart?`2px solid ${POS_COLOR}44`:"2px solid transparent" }}>
@@ -733,7 +748,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-bold truncate leading-tight">{p.nom}</p>
                         <p className="text-xs text-muted-foreground">{productQty(p.id,entries)} {p.unit}</p>
-                        {inCart&&<p className="text-xs font-bold" style={{ color:POS_COLOR }}>{matchingLines.length} ligne{matchingLines.length>1?"s":""} ✓</p>}
+                        {inCart&&<p className="text-xs font-bold" style={{ color:POS_COLOR }}>Dans la vente : {totalInCart} {lineDispUnit(inCart)}{matchingLines.length>1?` · ${matchingLines.length} tarifs`:""}</p>}
                       </div>
                     </button>
                   );
