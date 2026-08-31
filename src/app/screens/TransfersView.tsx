@@ -15,6 +15,7 @@ import { formatPreciseDateTime } from "../utils/payments";
 const TRANSFER_COLOR = "#ea580c";
 
 type DraftLine = { draftId: string; productId: number; nom: string; unit: string; qty: number; sellUnit: string; sellQty: number; unitPrice: number };
+type ReceiveNewConfig = { name:string; categoryId:string; sellUnit:string; piecesPerLot:string; lengthPerPiece:string };
 
 const STATUS: Record<RelationalTransfer["status"], { label: string; color: string; bg: string; icon: typeof Clock }> = {
   pending:   { label:"En attente", color:"#d97706", bg:"#fffbeb", icon:Clock },
@@ -51,6 +52,7 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
   const [newModal, setNewModal] = useState(false);
   const [receiving, setReceiving] = useState<RelationalTransfer | null>(null);
   const [receiveMappings, setReceiveMappings] = useState<Record<number,string>>({});
+  const [receiveNewConfigs, setReceiveNewConfigs] = useState<Record<number,ReceiveNewConfig>>({});
   const [invoicePreview, setInvoicePreview] = useState<RelationalTransfer | null>(null);
 
   const destinations = useMemo(() => {
@@ -253,11 +255,14 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
 
   function openReceive(transfer: RelationalTransfer) {
     const mappings: Record<number,string> = {};
+    const configs: Record<number,ReceiveNewConfig> = {};
     for (const line of transfer.stock_transfer_lines ?? []) {
       const exact = boutique.products.find(p => p.actif !== false && p.unit === line.unit && p.nom.trim().toLowerCase() === line.product_name.trim().toLowerCase());
       mappings[line.id] = exact ? String(exact.id) : "new";
+      if (!configs[line.source_product_id]) configs[line.source_product_id] = { name:line.product_name, categoryId:"", sellUnit:line.sell_unit ?? line.unit, piecesPerLot:"", lengthPerPiece:"" };
     }
     setReceiveMappings(mappings);
+    setReceiveNewConfigs(configs);
     setReceiving(transfer);
   }
 
@@ -272,7 +277,8 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
       // reuses the exact product created by the first line in this transaction.
       if (seenNewSourceProducts.has(line.source_product_id)) return [];
       seenNewSourceProducts.add(line.source_product_id);
-      return [{ transferLineId:line.id, createNew:true }];
+      const config = receiveNewConfigs[line.source_product_id];
+      return [{ transferLineId:line.id, createNew:true, newName:config?.name?.trim() || line.product_name, categoryId:config?.categoryId || null, sellUnit:config?.sellUnit || line.sell_unit || line.unit, piecesPerLot:config?.piecesPerLot ? Number(config.piecesPerLot) : undefined, lengthPerPiece:config?.lengthPerPiece ? Number(config.lengthPerPiece) : undefined }];
     });
     setSaving(true);
     try {
@@ -504,7 +510,21 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
                   <option value="new">＋ Créer un nouveau produit</option>
                   {boutique.products.filter(p=>p.unit===line.unit).sort((a,b)=>a.nom.localeCompare(b.nom)).map(p=><option key={p.id} value={p.id}>Affecter à {p.nom} · stock {productQty(p.id,boutique.entries)} {p.unit}</option>)}
                 </select>
-                {(receiveMappings[line.id] ?? "new") === "new" && <p className="text-[11px] font-semibold" style={{color:TRANSFER_COLOR}}>Nouveau produit · nom, unité et conditionnement repris depuis la boutique émettrice.</p>}
+                {(receiveMappings[line.id] ?? "new") === "new" && (()=>{
+                  const config=receiveNewConfigs[line.source_product_id] ?? {name:line.product_name,categoryId:"",sellUnit:line.sell_unit ?? line.unit,piecesPerLot:"",lengthPerPiece:""};
+                  const update=(patch:Partial<ReceiveNewConfig>)=>setReceiveNewConfigs(prev=>({...prev,[line.source_product_id]:{...config,...patch}}));
+                  return <div className="rounded-xl border border-orange-200 bg-orange-50/60 p-3 space-y-2">
+                    <p className="text-[11px] font-black" style={{color:TRANSFER_COLOR}}>NOUVEAU PRODUIT — PERSONNALISEZ AVANT RÉCEPTION</p>
+                    <Field label="NOM DU PRODUIT" color={TRANSFER_COLOR}><input className={inputCls} value={config.name} onChange={e=>update({name:e.target.value})}/></Field>
+                    <Field label="CATÉGORIE" color={TRANSFER_COLOR}><select className={inputCls} value={config.categoryId} onChange={e=>update({categoryId:e.target.value})}><option value="">Reprendre / aucune catégorie</option>{(boutique.categories ?? []).map(cat=><option key={cat.id} value={cat.id}>{cat.nom}</option>)}</select></Field>
+                    <div className="grid grid-cols-3 gap-2">
+                      <Field label="UNITÉ DE VENTE" color={TRANSFER_COLOR}><input className={inputCls} value={config.sellUnit} onChange={e=>update({sellUnit:e.target.value})}/></Field>
+                      <Field label="PIÈCES / LOT" color={TRANSFER_COLOR}><input type="number" min="0" className={inputCls} value={config.piecesPerLot} onChange={e=>update({piecesPerLot:e.target.value})} placeholder="Reprendre"/></Field>
+                      <Field label="LONGUEUR / PIÈCE" color={TRANSFER_COLOR}><input type="number" min="0" step="any" className={inputCls} value={config.lengthPerPiece} onChange={e=>update({lengthPerPiece:e.target.value})} placeholder="Reprendre"/></Field>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">L’unité de stock reste {line.unit} pour préserver la quantité reçue. Le nom, la catégorie et le conditionnement peuvent être adaptés à votre catalogue.</p>
+                  </div>;
+                })()}
               </div>
             ))}
             <SubmitBtn color={SEM.success.accent} label={saving?"Réception en cours…":"Confirmer la réception"} onClick={()=>void confirmReceive()} disabled={saving}/>
