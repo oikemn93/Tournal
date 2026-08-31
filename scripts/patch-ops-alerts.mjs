@@ -17,8 +17,14 @@ const insert=`  const pendingAccess=(workspace?.accessRequests??[]).filter(r=>r.
 `;
 if(!s.includes(needle)) throw new Error('pendingAccess anchor missing');
 s=s.replace(needle,insert);
-const homeNeedle='{view==="home"&&<div className="space-y-4">';
-if(!s.includes(homeNeedle)) throw new Error('home anchor missing');
-const panel=`{view==="home"&&<div className="space-y-4"><section className="rounded-3xl border bg-white p-5"><div className="flex items-center justify-between gap-3"><div><p className="text-xs font-black uppercase tracking-wide text-slate-400">Alertes opérationnelles</p><h2 className="text-lg font-black">À traiter maintenant</h2></div><span className={\`rounded-full px-3 py-1 text-xs font-black \${operationalAlerts.length?'bg-amber-50 text-amber-700':'bg-emerald-50 text-emerald-700'}\`}>{operationalAlerts.length||'RAS'}</span></div>{operationalAlerts.length?<div className="mt-4 divide-y">{operationalAlerts.map((a,i)=><button key={a.kind+i} onClick={()=>{if(a.boutiqueId){setSelectedId(a.boutiqueId);setView('clients')}}} className="w-full py-3 text-left flex items-center gap-3"><AlertTriangle size={16} className={a.priority==='urgent'?'text-red-500':'text-amber-500'}/><div className="min-w-0 flex-1"><p className="text-xs font-black text-slate-500">{a.kind}</p><p className="truncate text-sm font-bold">{a.label}</p></div><ChevronRight size={15} className="text-slate-300"/></button>)}</div>:<p className="mt-4 text-sm text-slate-500">Aucune alerte opérationnelle active.</p>}</section>`;
-s=s.replace(homeNeedle,panel);
+const homeRe=/\{view===?["']home["']&&/;
+const m=s.match(homeRe);
+if(!m||m.index==null) throw new Error('home condition missing');
+const pos=m.index+m[0].length;
+const panel=`<><section className="rounded-3xl border bg-white p-5 mb-4"><div className="flex items-center justify-between gap-3"><div><p className="text-xs font-black uppercase tracking-wide text-slate-400">Alertes opérationnelles</p><h2 className="text-lg font-black">À traiter maintenant</h2></div><span className={\`rounded-full px-3 py-1 text-xs font-black \${operationalAlerts.length?'bg-amber-50 text-amber-700':'bg-emerald-50 text-emerald-700'}\`}>{operationalAlerts.length||'RAS'}</span></div>{operationalAlerts.length?<div className="mt-4 divide-y">{operationalAlerts.map((a,i)=><button key={a.kind+i} onClick={()=>{if(a.boutiqueId){setSelectedId(a.boutiqueId);setView('clients')}}} className="w-full py-3 text-left flex items-center gap-3"><AlertTriangle size={16} className={a.priority==='urgent'?'text-red-500':'text-amber-500'}/><div className="min-w-0 flex-1"><p className="text-xs font-black text-slate-500">{a.kind}</p><p className="truncate text-sm font-bold">{a.label}</p></div><ChevronRight size={15} className="text-slate-300"/></button>)}</div>:<p className="mt-4 text-sm text-slate-500">Aucune alerte opérationnelle active.</p>}</section>`;
+s=s.slice(0,pos)+panel+s.slice(pos);
+// Close the fragment immediately before the next top-level view condition.
+const next=s.indexOf('{view===',pos+panel.length);
+if(next<0) throw new Error('next view condition missing');
+s=s.slice(0,next)+'</>'+s.slice(next);
 fs.writeFileSync(p,s);
