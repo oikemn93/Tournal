@@ -38,15 +38,16 @@ export function TournalOpsWorkspace({boutiques,users,onOpenBoutique,onSystem}:{b
 
   const rows=useMemo(()=>boutiques.map(b=>{
     const members=users.filter(u=>u.assignments?.some(a=>a.boutiqueId===b.id));
-    const lastSale=(b.invoices??[]).map(i=>i.dateRaw??i.date??"").filter(Boolean).sort().at(-1)??null;
-    const firstSale=(b.invoices??[]).map(i=>i.dateRaw??i.date??"").filter(Boolean).sort().at(0)??null;
+    const overview=workspace?.overview.find(item=>item.boutique_id===b.id);
+    const lastSale=overview?.last_sale_at??(b.invoices??[]).map(i=>i.dateRaw??i.date??"").filter(Boolean).sort().at(-1)??null;
+    const firstSale=overview?.first_sale_at??(b.invoices??[]).map(i=>i.dateRaw??i.date??"").filter(Boolean).sort().at(0)??null;
     const receipts=(b.entries??[]).filter(e=>(e.qty??0)>0&&e.movementType==="achat");
-    const firstReceipt=receipts.map(e=>e.recordedAt??e.date??"").filter(Boolean).sort().at(0)??null;
-    const setup=(b.products?.length??0)>0;
+    const firstReceipt=overview?.first_receipt_at??receipts.map(e=>e.recordedAt??e.date??"").filter(Boolean).sort().at(0)??null;
+    const setup=(overview?.product_count??b.products?.length??0)>0;
     const onboarding=workspace?.onboarding.find(o=>o.boutique_id===b.id);
     const openTasks=workspace?.tasks.filter(t=>t.boutique_id===b.id&&!['done','cancelled'].includes(t.status))??[];
     const openTickets=workspace?.tickets.filter(t=>t.boutique_id===b.id&&!['resolved','closed'].includes(t.status))??[];
-    const ownerReady=members.some(m=>m.assignments?.some(a=>a.boutiqueId===b.id&&a.role==="Propriétaire"));
+    const ownerReady=(overview?.owner_count??0)>0||members.some(m=>m.assignments?.some(a=>a.boutiqueId===b.id&&(a.role==="Propriétaire"||a.role==="owner")));
     const checks=[ownerReady,members.length>0,setup,Boolean(firstReceipt||onboarding?.first_receipt_at),Boolean(firstSale||onboarding?.first_sale_at),Boolean(onboarding?.training_done)];
     const progress=Math.round(checks.filter(Boolean).length/checks.length*100);
     const score=Math.max(0,Math.min(100,progress-(openTickets.some(t=>t.priority==='urgent')?20:0)-(openTasks.filter(t=>t.due_at&&new Date(t.due_at)<new Date()).length*5)));

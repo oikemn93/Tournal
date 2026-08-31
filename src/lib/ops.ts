@@ -27,21 +27,26 @@ export type OpsOnboarding = {
   service_owner_id:string|null; target_go_live_at:string|null; notes:string|null; created_at:string; updated_at:string;
 };
 export type OpsStaffProfile = { user_id:string; role:"sales"|"service"|"support"|"manager"; active:boolean; created_at:string; updated_at:string };
+export type OpsBoutiqueOverview = {
+  boutique_id:string; product_count:number; user_count:number; owner_count:number;
+  first_sale_at:string|null; last_sale_at:string|null; first_receipt_at:string|null; last_stock_activity_at:string|null;
+};
 
 export type OpsWorkspace = {
   tasks:OpsTask[]; tickets:OpsTicket[]; interactions:OpsInteraction[];
-  onboarding:OpsOnboarding[]; staff:OpsStaffProfile[];
+  onboarding:OpsOnboarding[]; staff:OpsStaffProfile[]; overview:OpsBoutiqueOverview[];
 };
 
 export async function loadOpsWorkspace():Promise<OpsWorkspace> {
-  const [tasks,tickets,interactions,onboarding,staff] = await Promise.all([
+  const [tasks,tickets,interactions,onboarding,staff,overview] = await Promise.all([
     opsDataRequest<OpsTask[]>("ops_tasks?select=*&order=created_at.desc&limit=300"),
     opsDataRequest<OpsTicket[]>("ops_tickets?select=*&order=created_at.desc&limit=300"),
     opsDataRequest<OpsInteraction[]>("ops_interactions?select=*&order=created_at.desc&limit=300"),
     opsDataRequest<OpsOnboarding[]>("ops_onboarding?select=*&order=updated_at.desc&limit=500"),
     opsDataRequest<OpsStaffProfile[]>("ops_staff_profiles?select=*&order=created_at.asc&limit=200"),
+    opsDataRequest<OpsBoutiqueOverview[]>("rpc/get_ops_boutique_overview",{method:"POST",body:JSON.stringify({})}),
   ]);
-  return { tasks,tickets,interactions,onboarding,staff };
+  return { tasks,tickets,interactions,onboarding,staff,overview };
 }
 
 export async function createOpsTask(input:{boutiqueId?:string|null;title:string;description?:string;team?:OpsTeam;priority?:OpsPriority;assigneeId?:string|null;dueAt?:string|null;source?:OpsTask["source"]}) {
