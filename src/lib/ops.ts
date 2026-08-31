@@ -14,7 +14,7 @@ export type OpsTask = {
 export type OpsTicket = {
   id:number; boutique_id:string; subject:string; description:string|null; status:OpsTicketStatus;
   priority:OpsPriority; assignee_id:string|null; requester_name:string|null; requester_phone:string|null;
-  created_by:string|null; created_at:string; updated_at:string; resolved_at:string|null;
+  created_by:string|null; created_at:string; updated_at:string; resolved_at:string|null; sla_due_at?:string|null; first_response_at?:string|null; escalated_at?:string|null;
 };
 export type OpsInteraction = {
   id:number; boutique_id:string|null; kind:"note"|"call"|"meeting"|"handoff"|"support"|"onboarding"|"system";
