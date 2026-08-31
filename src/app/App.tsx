@@ -8704,7 +8704,7 @@ export default function App() {
   const [supplierPaymentTermsDays, setSupplierPaymentTermsDays] = useState(30);
   const [clientPaymentTermsDays, setClientPaymentTermsDays] = useState(30);
   const [caisseDefaults, setCaisseDefaults] = useState<CaisseDefaults>({ enabled:false, openingFloat:0, openingReminderTime:null, closingReminderTime:null });
-  const LOCK_TIMEOUT_MS = lockTimeoutMs; // alias for existing refs
+  const LOCK_TIMEOUT_MS = currentUser?.isSuperAdmin ? Math.max(lockTimeoutMs, 60 * 60 * 1000) : lockTimeoutMs; // SuperAdmin: minimum 60 min before PIN lock
   const saveTimer   = useRef<ReturnType<typeof setTimeout>|null>(null);
   const isPulling            = useRef(false); // prevents overlapping Realtime reconciliations
   const pullQueued           = useRef(false); // guarantees a trailing refresh when an event arrives mid-pull
