@@ -160,3 +160,13 @@ export async function updateOpsContact(id:number,patch:Partial<Pick<OpsContact,"
   const rows=await opsDataRequest<OpsContact[]>(`ops_contacts?id=eq.${id}&select=*`,{method:"PATCH",headers:{Prefer:"return=representation"},body:JSON.stringify({...patch,updated_at:new Date().toISOString()})});
   if(!rows[0]) throw new Error("Contact non modifié"); return rows[0];
 }
+
+export async function createOpsAccount(name:string) {
+  const rows=await opsDataRequest<OpsAccount[]>("ops_accounts?select=*",{method:"POST",headers:{Prefer:"return=representation"},body:JSON.stringify({name:name.trim(),stage:"prospect",health_status:"unknown"})});
+  if(!rows[0]) throw new Error("Compte client non créé"); return rows[0];
+}
+
+export async function linkOpsBoutiqueToAccount(boutiqueId:string,accountId:string) {
+  const rows=await opsDataRequest<OpsAccountBoutique[]>("ops_account_boutiques?on_conflict=boutique_id&select=*",{method:"POST",headers:{Prefer:"resolution=merge-duplicates,return=representation"},body:JSON.stringify({boutique_id:boutiqueId,account_id:accountId})});
+  if(!rows[0]) throw new Error("Liaison boutique-compte non modifiée"); return rows[0];
+}
