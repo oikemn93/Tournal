@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { checkBackend, signQZ, sendInvoiceEmail, storePDFForSMS, getCurrentAuthUser, hasAuthenticatedSession, validateServerSession, refreshSessionIfNeeded, getAuthBootstrap, signInWithPhone, changeOwnPassword, getPinStatus, setQuickPin, verifyQuickPin, startAppSession, validateAppSession, lockAppSession, setAppSessionRecoveryHandler, signOut as signOutFromSupabase, createBoutique, createUser, resetUserPassword, subscribeToBoutiqueChanges, subscribeToBoutiqueSync, isBoutiqueSyncV2Enabled, assignUserToBoutique, unassignUserFromBoutique, upsertAssignmentDirect, deleteAssignmentDirect, recordAuditLog, loadBoutiqueSnapshot, loadBoutiqueSyncPatch, loadBoutiquePlatformUsers, loadPlatformUsers, loadGroupes, saveGroupes, loadAuthSettings as loadStoredAuthSettings, saveAuthSettings, updateBoutiqueProfile, createCategory, updateCategory, deleteCategory, type BoutiqueSyncEvent, type BoutiqueSyncPatch, type LegacyBoutiqueChange } from "../lib/api";
+import { checkBackend, signQZ, sendInvoiceEmail, storePDFForSMS, getCurrentAuthUser, hasAuthenticatedSession, validateServerSession, refreshSessionIfNeeded, getAuthBootstrap, signInWithPhone, changeOwnPassword, getPinStatus, setQuickPin, verifyQuickPin, startAppSession, validateAppSession, lockAppSession, setAppSessionRecoveryHandler, signOut as signOutFromSupabase, createBoutique, createUser, resetUserPassword, subscribeToBoutiqueChanges, subscribeToBoutiqueSync, isBoutiqueSyncV2Enabled, assignUserToBoutique, unassignUserFromBoutique, upsertAssignmentDirect, deleteAssignmentDirect, recordAuditLog, loadBoutiqueSnapshot, loadBoutiqueSyncPatch, loadBoutiquePlatformUsers, loadPlatformUsers, loadGroupes, saveGroupes, loadAuthSettings as loadStoredAuthSettings, saveAuthSettings, updateBoutiqueProfile, createCategory, updateCategory, deleteCategory, updateProductCategory, type BoutiqueSyncEvent, type BoutiqueSyncPatch, type LegacyBoutiqueChange } from "../lib/api";
 import { getNotifications, markNotificationRead, markAllNotificationsRead, dismissAllNotifications, subscribeToNotifications, getPushState, enableWebPush, disableWebPush, syncWebPushBoutique, type PushState } from "../lib/notifications";
 import { toast, Toaster } from "sonner";
 import {
@@ -6115,6 +6115,19 @@ function CatalogueSection({ boutique, onUpdate, logAction }: {
     }
   }
 
+  async function assignProductToCategory(product: Product, categoryId: string) {
+    const category = cats.find(cat => cat.id === categoryId);
+    if (!category) return;
+    try {
+      await updateProductCategory({ boutiqueId:boutique.id, productId:product.id, categoryId:category.id });
+      onUpdate({ products: products.map(item => item.id === product.id ? { ...item, categorie:category.nom } : item) });
+      logAction("Produit catégorisé", `${product.nom} → ${category.nom}`, "📂");
+      toast.success(`${product.nom} ajouté à ${category.nom}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Affectation à la catégorie impossible");
+    }
+  }
+
   const productsWithoutCat = products.filter(p => !p.categorie);
 
   return (
@@ -6226,8 +6239,14 @@ function CatalogueSection({ boutique, onUpdate, logAction }: {
               {productsWithoutCat.map(p => (
                 <div key={p.id} className="flex items-center gap-3 px-4 py-3 border-b border-border last:border-b-0">
                   <img src={imgSrc(p.img, 60, 60)} alt={p.nom} className="w-10 h-10 rounded-xl object-cover flex-shrink-0"/>
-                  <p className="text-sm font-semibold flex-1">{p.nom}</p>
-                  <span className="text-xs text-muted-foreground">{p.unit}</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold truncate">{p.nom}</p>
+                    <p className="text-xs text-muted-foreground">{p.unit}</p>
+                  </div>
+                  <select defaultValue="" onChange={(event) => { const categoryId = event.target.value; if (categoryId) void assignProductToCategory(p, categoryId); }} className="max-w-[180px] rounded-xl border border-border bg-background px-2 py-2 text-xs font-bold" aria-label={`Ajouter ${p.nom} à une catégorie`}>
+                    <option value="" disabled>Ajouter à…</option>
+                    {cats.map(cat => <option key={cat.id} value={cat.id}>{cat.nom}</option>)}
+                  </select>
                 </div>
               ))}
             </div>

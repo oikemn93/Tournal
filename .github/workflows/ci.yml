@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-and-security:
@@ -15,8 +15,6 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - uses: pnpm/action-setup@v4
         with:
@@ -27,10 +25,6 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-
-      - name: Apply category assignment fix
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: python scripts/patch_assign_uncategorized_products.py
 
       - name: Install locked dependencies
         run: pnpm install --frozen-lockfile
@@ -62,17 +56,16 @@ jobs:
       - name: Prevent fixed-interval network polling
         run: node scripts/check-no-network-polling.mjs
 
-      - name: Production build
-        run: pnpm build
-
-      - name: Commit fix and restore CI
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - name: Verify temporary patchers are gone
         shell: bash
         run: |
-          git checkout HEAD^ -- .github/workflows/ci.yml
-          rm -f scripts/patch_assign_uncategorized_products.py
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src/lib/api.ts src/app/App.tsx .github/workflows/ci.yml scripts/patch_assign_uncategorized_products.py
-          git commit -m 'fix: assign uncategorized products to new categories'
-          git push origin HEAD:main
+          set -euo pipefail
+          test ! -e scripts/refund_method_patch.py
+          test ! -e scripts/security_hardening_patch.py
+          test ! -e scripts/realtime_coverage_patch.py
+          test ! -e .github/workflows/refund-method-patcher.yml
+          test ! -e .github/workflows/security-hardening-patcher.yml
+          test ! -e .github/workflows/realtime-coverage-patcher.yml
+
+      - name: Production build
+        run: pnpm build
