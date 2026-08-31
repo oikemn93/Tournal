@@ -63,22 +63,19 @@ function matchesSupplier(record: { supplierId?: number; fournisseur?: string }, 
 
 export function supplierBalance(supplier: Pick<Supplier, "id"|"nom"> | string, entries: StockEntry[], charges?: Charge[]) {
   const linkedCharges = (charges ?? []).filter(c => matchesSupplier(c, supplier));
-  const regularPurchases = entries
-    .filter(e => matchesSupplier(e, supplier) && (
-      e.movementType === "achat"
-      || (e.supplierId != null && e.movementType === "ajustement")
-      || (e.supplierId == null && isSupplierDebtEntry(e))
-    ))
-    .reduce((s, e) => s + e.montantDu, 0);
+  // Supplier debt is ledger-driven. A stock entry only carries inventory cost;
+  // it does not by itself mean money is owed. This is essential for the
+  // special self-supplier, whose receipts intentionally create stock without a
+  // supplier payable. Historical entries without a payable also remain debt-free.
+  const regularPurchases = linkedCharges
+    .filter(c => c.source === "supplier_receipt")
+    .reduce((s, c) => s + Number(c.montant), 0);
   const transferPurchases = linkedCharges
     .filter(c => c.source === "transfer")
-    .reduce((s, c) => s + c.montant, 0);
+    .reduce((s, c) => s + Number(c.montant), 0);
   const regularPayments = linkedCharges
-    // A supplier receipt is a payable document, not a cash payment. It is
-    // linked to its stock movement for status and maturity, while the distinct
-    // supplier-payment charge is what reduces the balance.
-    .filter(c => c.source !== "transfer" && c.source !== "supplier_receipt")
-    .reduce((s, c) => s + c.montant, 0);
+    .filter(c => c.source === "supplier_payment")
+    .reduce((s, c) => s + Number(c.montant), 0);
   const transferPayments = linkedCharges
     .filter(c => c.source === "transfer")
     .reduce((s, c) => s + Number(c.paidAmount ?? 0), 0);
