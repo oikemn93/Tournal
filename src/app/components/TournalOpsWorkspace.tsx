@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Activity, AlertTriangle, ArrowLeft, Building2, CheckCircle2, ChevronRight, ClipboardCheck, Headphones, LayoutDashboard, LogOut, Plus, RefreshCw, Search, Settings, ShieldCheck, Store, Users, X } from "lucide-react";
 import {
-  createOpsInteraction, createOpsTask, createOpsTicket, decideOpsAccessRequest, loadOpsSupportDiagnostic, loadOpsWorkspace, requestOpsBoutiqueAccess, updateOpsOnboarding,
+  createOpsContact, createOpsInteraction, createOpsTask, createOpsTicket, decideOpsAccessRequest, loadOpsSupportDiagnostic, loadOpsWorkspace, requestOpsBoutiqueAccess, updateOpsAccount, updateOpsOnboarding,
   updateOpsTask, updateOpsTicket, upsertOpsStaffProfile,
   type OpsOnboarding, type OpsPriority, type OpsStaffProfile, type OpsSupportDiagnostic, type OpsTask, type OpsTicket, type OpsWorkspace,
 } from "../../lib/ops";
