@@ -746,9 +746,9 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string, options: Bouti
     const historyFromFilter = encodeURIComponent(historyFrom);
     const invoiceWindow = options.historyOnly
       ? `${historyFrom ? `&invoice_date=gte.${historyFromFilter}` : ""}${historyTo ? `&invoice_date=lt.${encodeURIComponent(historyTo)}` : ""}`
-      : `&or=(invoice_date.gte.${historyFromFilter},status.eq.en_attente,type.eq.Retour)`;
+      : `&or=(invoice_date.gte.${historyFromFilter},status.eq.en_attente)`;
     const paymentWindow = `${historyFrom ? `&paid_at=gte.${historyFromFilter}` : ""}${historyTo ? `&paid_at=lt.${encodeURIComponent(historyTo)}` : ""}`;
-    const stockWindow = `&or=(entry_date.gte.${historyFromFilter},supplier_id.not.is.null)`;
+    const stockWindow = `&entry_date=gte.${historyFromFilter}`;
     const chargeWindow = `&or=(charge_date.gte.${historyFromFilter},status.neq.paid)`;
     const caisseWindow = `&or=(opened_at.gte.${historyFromFilter},closed_at.is.null)`;
     const [boutiques, categories, products, entries, clients, suppliers, invoices, payments, advances, creditRefunds, charges, sessions, auditLogs, userScope] = await Promise.all([
@@ -771,9 +771,8 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string, options: Bouti
     const categoryById = new Map(categories.map((category: any) => [category.id, category]));
     const clientById = new Map(clients.map((client: any) => [client.id, client]));
     const supplierById = new Map(suppliers.map((supplier: any) => [supplier.id, supplier]));
-    // The supplier receipt document preserves the exact entered total. The
-    // stock unit price is stored with two decimals, so multiplying it back by
-    // a quantity must not replace that exact accounting amount.
+    // Supplier receipt amounts are taken from the bounded payable slice. Older
+    // receipt history is loaded on demand instead of expanding every login.
     const receiptAmountByEntryId = new Map(
       charges
         .filter((charge: any) => charge.source === "supplier_receipt" && charge.stock_entry_id != null)
