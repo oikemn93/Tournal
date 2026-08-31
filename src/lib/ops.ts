@@ -29,6 +29,11 @@ export type OpsOnboarding = {
 export type OpsStaffProfile = { user_id:string; role:"sales"|"service"|"support"|"manager"; active:boolean; created_at:string; updated_at:string };
 export type OpsAccessRequest = { id:number; boutique_id:string; requester_id:string; reason:string; status:"pending"|"approved"|"rejected"|"revoked"; requested_minutes:number; approved_by:string|null; approved_at:string|null; expires_at:string|null; decided_note:string|null; created_at:string; updated_at:string };
 export type OpsSupportDiagnostic = { boutique_id:string; name:string; city:string|null; phone:string|null; email:string|null; user_count:number; product_count:number; last_sale_at:string|null; last_stock_activity_at:string|null; open_ticket_count:number; access_expires_at:string|null };
+export type OpsAccount = { id:string; name:string; stage:"prospect"|"sales"|"onboarding"|"active"|"at_risk"|"inactive"; health_status:"unknown"|"healthy"|"watch"|"at_risk"; sales_owner_id:string|null; service_owner_id:string|null; support_owner_id:string|null; notes:string|null; created_at:string; updated_at:string };
+export type OpsAccountBoutique = { account_id:string; boutique_id:string; created_at:string };
+export type OpsContact = { id:number; account_id:string; boutique_id:string|null; name:string; phone:string|null; email:string|null; role_label:string|null; is_primary:boolean; notes:string|null; created_by:string|null; created_at:string; updated_at:string };
+export type OpsManagerMetric = { user_id:string; role:string; open_tasks:number; overdue_tasks:number; open_tickets:number; sla_breached_tickets:number; completed_tasks_7d:number; resolved_tickets_7d:number };
+export type OpsAttentionCounts = { open_tasks:number; overdue_tasks:number; open_tickets:number; sla_breached_tickets:number; urgent_items:number };
 export type OpsBoutiqueOverview = {
   boutique_id:string; product_count:number; user_count:number; owner_count:number;
   first_sale_at:string|null; last_sale_at:string|null; first_receipt_at:string|null; last_stock_activity_at:string|null;
@@ -36,7 +41,7 @@ export type OpsBoutiqueOverview = {
 
 export type OpsWorkspace = {
   tasks:OpsTask[]; tickets:OpsTicket[]; interactions:OpsInteraction[]; accessRequests:OpsAccessRequest[];
-  onboarding:OpsOnboarding[]; staff:OpsStaffProfile[]; overview:OpsBoutiqueOverview[];
+  onboarding:OpsOnboarding[]; staff:OpsStaffProfile[]; overview:OpsBoutiqueOverview[]; accounts:OpsAccount[]; accountBoutiques:OpsAccountBoutique[]; contacts:OpsContact[]; managerMetrics:OpsManagerMetric[]; attentionCounts:OpsAttentionCounts|null;
 };
 
 export type MyOpsProfile = { user_id:string; role:"sales"|"service"|"support"|"manager"; active:boolean };
@@ -51,7 +56,7 @@ export async function loadOpsShell():Promise<OpsShell> {
 }
 
 export async function loadOpsWorkspace():Promise<OpsWorkspace> {
-  const [tasks,tickets,interactions,accessRequests,onboarding,staff,overview] = await Promise.all([
+  const [tasks,tickets,interactions,accessRequests,onboarding,staff,overview,accounts,accountBoutiques,contacts,managerMetrics,attentionCounts] = await Promise.all([
     opsDataRequest<OpsTask[]>("ops_tasks?select=*&order=created_at.desc&limit=300"),
     opsDataRequest<OpsTicket[]>("ops_tickets?select=*&order=created_at.desc&limit=300"),
     opsDataRequest<OpsInteraction[]>("ops_interactions?select=*&order=created_at.desc&limit=300"),
@@ -59,8 +64,13 @@ export async function loadOpsWorkspace():Promise<OpsWorkspace> {
     opsDataRequest<OpsOnboarding[]>("ops_onboarding?select=*&order=updated_at.desc&limit=500"),
     opsDataRequest<OpsStaffProfile[]>("ops_staff_profiles?select=*&order=created_at.asc&limit=200"),
     opsDataRequest<OpsBoutiqueOverview[]>("rpc/get_ops_boutique_overview",{method:"POST",body:JSON.stringify({})}),
+    opsDataRequest<OpsAccount[]>("ops_accounts?select=*&order=updated_at.desc&limit=500"),
+    opsDataRequest<OpsAccountBoutique[]>("ops_account_boutiques?select=*&limit=1000"),
+    opsDataRequest<OpsContact[]>("ops_contacts?select=*&order=is_primary.desc,updated_at.desc&limit=1000"),
+    opsDataRequest<OpsManagerMetric[]>("rpc/get_ops_manager_metrics",{method:"POST",body:JSON.stringify({})}),
+    opsDataRequest<OpsAttentionCounts>("rpc/get_ops_attention_counts",{method:"POST",body:JSON.stringify({})}),
   ]);
-  return { tasks,tickets,interactions,accessRequests,onboarding,staff,overview };
+  return { tasks,tickets,interactions,accessRequests,onboarding,staff,overview,accounts,accountBoutiques,contacts,managerMetrics,attentionCounts };
 }
 
 export async function createOpsTask(input:{boutiqueId?:string|null;title:string;description?:string;team?:OpsTeam;priority?:OpsPriority;assigneeId?:string|null;dueAt?:string|null;source?:OpsTask["source"]}) {
@@ -132,4 +142,16 @@ export async function decideOpsAccessRequest(requestId:number,approve:boolean,no
 
 export async function loadOpsSupportDiagnostic(boutiqueId:string) {
   return opsDataRequest<OpsSupportDiagnostic>("rpc/get_ops_support_diagnostic",{method:"POST",body:JSON.stringify({p_boutique_id:boutiqueId})});
+}
+
+export async function updateOpsAccount(id:string,patch:Partial<Pick<OpsAccount,"stage"|"health_status">>) {
+  const rows=await opsDataRequest<OpsAccount[]>(`ops_accounts?id=eq.${encodeURIComponent(id)}&select=*`,{method:"PATCH",headers:{Prefer:"return=representation"},body:JSON.stringify({...patch,updated_at:new Date().toISOString()})});
+  if(!rows[0]) throw new Error("Compte client non modifié");
+  return rows[0];
+}
+
+export async function createOpsContact(input:{accountId:string;boutiqueId?:string|null;name:string;phone?:string;email?:string;roleLabel?:string;isPrimary?:boolean}) {
+  const rows=await opsDataRequest<OpsContact[]>("ops_contacts?select=*",{method:"POST",headers:{Prefer:"return=representation"},body:JSON.stringify({account_id:input.accountId,boutique_id:input.boutiqueId??null,name:input.name.trim(),phone:input.phone?.trim()||null,email:input.email?.trim()||null,role_label:input.roleLabel?.trim()||null,is_primary:Boolean(input.isPrimary),created_by:getCurrentAuthUser()?.id??null})});
+  if(!rows[0]) throw new Error("Contact non créé");
+  return rows[0];
 }
