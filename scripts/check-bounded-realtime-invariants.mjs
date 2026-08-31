@@ -19,4 +19,6 @@ const snapshot=api.slice(snapshotStart,snapshotEnd);
 if(snapshot.includes("supplier_id.not.is.null")) throw new Error("Bootstrap stock must not include unbounded supplier history");
 if(snapshot.includes("type.eq.Retour")) throw new Error("Bootstrap invoices must not include all historical returns");
 if(!snapshot.includes("entry_date=gte.${historyFromFilter}")) throw new Error("Bootstrap stock must remain date bounded");
+if(!snapshot.includes('client_advances?select=*${scoped()}&or=(paid_at.gte.${historyFromFilter},allocated_amount.lt.amount)')) throw new Error("Bootstrap client advances must keep only recent rows or remaining credit");
+if(snapshot.includes('client_advances?select=*${scoped()}&order=paid_at.desc,id.desc')) throw new Error("Bootstrap client advances must not load the full ledger");
 console.log("Bounded bootstrap realtime invariants OK");

@@ -757,7 +757,7 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string, options: Bouti
       (options.historyOnly ? Promise.resolve([]) : dataRequestAll<any>(`stock_entries?select=*${scoped()}${stockWindow}`, "entry_date.desc,id.desc")), dataRequest<any[]>(`clients?select=*${scoped()}`),
       (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`suppliers?select=*${scoped()}`)),
       dataRequest<any[]>(`invoices?select=*,invoice_lines(*)${scoped()}${invoiceWindow}&order=invoice_date.desc`),
-      dataRequest<any[]>(`invoice_payments?select=*${scoped()}${paymentWindow}&order=paid_at.asc`), (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`client_advances?select=*${scoped()}&order=paid_at.desc,id.desc`)),
+      dataRequest<any[]>(`invoice_payments?select=*${scoped()}${paymentWindow}&order=paid_at.asc`), (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`client_advances?select=*${scoped()}&or=(paid_at.gte.${historyFromFilter},allocated_amount.lt.amount)&order=paid_at.desc,id.desc`)),
       (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`client_credit_refunds?select=*${scoped()}&refunded_at=gte.${historyFromFilter}&order=refunded_at.desc,id.desc`)), (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`charges?select=*${scoped()}${chargeWindow}`)),
       (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`caisse_sessions?select=*${scoped()}${caisseWindow}`)),
       // The administration view presents recent activity. Loading the entire
