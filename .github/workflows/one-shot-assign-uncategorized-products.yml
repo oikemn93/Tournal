@@ -1,0 +1,119 @@
+name: One-shot assign uncategorized products
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/one-shot-assign-uncategorized-products.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Patch uncategorized product assignment
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          # API: category-only product mutation, avoiding unintended name/price rewrites.
+          p = Path('src/lib/api.ts')
+          s = p.read_text()
+          marker = '''export async function updateProduct(params:{ boutiqueId:string; productId:number; name:string; categoryId?:string|null; purchasePrice:number }) {'''
+          insert = '''export async function updateProductCategory(params:{ boutiqueId:string; productId:number; categoryId:string|null }) {
+            const updated = await dataRequest<Array<{ id:number }>>(`products?id=eq.${params.productId}&boutique_id=eq.${encodeURIComponent(params.boutiqueId)}&select=id`, {
+              method:"PATCH", headers:{ Prefer:"return=representation" }, body:JSON.stringify({ category_id:params.categoryId }),
+            });
+            if (updated.length !== 1) throw new Error("Catégorie du produit non modifiée");
+          }
+
+'''
+          if marker not in s:
+              raise SystemExit('updateProduct marker not found')
+          s = s.replace(marker, insert + marker, 1)
+          p.write_text(s)
+
+          # App: expose a category selector for products without a category.
+          p = Path('src/app/App.tsx')
+          s = p.read_text()
+          old = 'createCategory, updateCategory, deleteCategory, type BoutiqueSyncEvent'
+          new = 'createCategory, updateCategory, deleteCategory, updateProductCategory, type BoutiqueSyncEvent'
+          if old not in s:
+              raise SystemExit('api import marker not found')
+          s = s.replace(old, new, 1)
+
+          marker = '  const productsWithoutCat = products.filter(p => !p.categorie);\n'
+          insert = '''  async function assignProductToCategory(product: Product, categoryId: string) {
+            const category = cats.find(cat => cat.id === categoryId);
+            if (!category) return;
+            try {
+              await updateProductCategory({ boutiqueId:boutique.id, productId:product.id, categoryId:category.id });
+              onUpdate({ products: products.map(item => item.id === product.id ? { ...item, categorie:category.nom } : item) });
+              logAction("Produit catégorisé", `${product.nom} → ${category.nom}`, "📂");
+              toast.success(`${product.nom} ajouté à ${category.nom}`);
+            } catch (error) {
+              toast.error(error instanceof Error ? error.message : "Affectation à la catégorie impossible");
+            }
+          }
+
+'''
+          if marker not in s:
+              raise SystemExit('productsWithoutCat marker not found')
+          s = s.replace(marker, insert + marker, 1)
+
+          old = '''                  <p className="text-sm font-semibold flex-1">{p.nom}</p>
+                  <span className="text-xs text-muted-foreground">{p.unit}</span>
+                </div>'''
+          new = '''                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold truncate">{p.nom}</p>
+                    <p className="text-xs text-muted-foreground">{p.unit}</p>
+                  </div>
+                  <select
+                    defaultValue=""
+                    onChange={(event) => { const categoryId = event.target.value; if (categoryId) void assignProductToCategory(p, categoryId); }}
+                    className="max-w-[180px] rounded-xl border border-border bg-background px-2 py-2 text-xs font-bold"
+                    aria-label={`Ajouter ${p.nom} à une catégorie`}
+                  >
+                    <option value="" disabled>Ajouter à…</option>
+                    {cats.map(cat => <option key={cat.id} value={cat.id}>{cat.nom}</option>)}
+                  </select>
+                </div>'''
+          # Restrict replacement to uncategorized section by locating after productsWithoutCat.map.
+          start = s.index('{productsWithoutCat.map(p => (')
+          idx = s.find(old, start)
+          if idx < 0:
+              raise SystemExit('uncategorized product row not found')
+          s = s[:idx] + new + s[idx+len(old):]
+          p.write_text(s)
+          PY
+      - name: Verify
+        run: |
+          grep -F 'export async function updateProductCategory' src/lib/api.ts
+          grep -F 'assignProductToCategory' src/app/App.tsx
+          grep -F 'Ajouter à…' src/app/App.tsx
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Build
+        run: pnpm build
+      - name: Commit
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/lib/api.ts src/app/App.tsx
+          git commit -m 'fix: assign uncategorized products to new categories'
+          git push origin HEAD:main
