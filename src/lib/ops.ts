@@ -27,13 +27,15 @@ export type OpsOnboarding = {
   service_owner_id:string|null; target_go_live_at:string|null; notes:string|null; created_at:string; updated_at:string;
 };
 export type OpsStaffProfile = { user_id:string; role:"sales"|"service"|"support"|"manager"; active:boolean; created_at:string; updated_at:string };
+export type OpsAccessRequest = { id:number; boutique_id:string; requester_id:string; reason:string; status:"pending"|"approved"|"rejected"|"revoked"; requested_minutes:number; approved_by:string|null; approved_at:string|null; expires_at:string|null; decided_note:string|null; created_at:string; updated_at:string };
+export type OpsSupportDiagnostic = { boutique_id:string; name:string; city:string|null; phone:string|null; email:string|null; user_count:number; product_count:number; last_sale_at:string|null; last_stock_activity_at:string|null; open_ticket_count:number; access_expires_at:string|null };
 export type OpsBoutiqueOverview = {
   boutique_id:string; product_count:number; user_count:number; owner_count:number;
   first_sale_at:string|null; last_sale_at:string|null; first_receipt_at:string|null; last_stock_activity_at:string|null;
 };
 
 export type OpsWorkspace = {
-  tasks:OpsTask[]; tickets:OpsTicket[]; interactions:OpsInteraction[];
+  tasks:OpsTask[]; tickets:OpsTicket[]; interactions:OpsInteraction[]; accessRequests:OpsAccessRequest[];
   onboarding:OpsOnboarding[]; staff:OpsStaffProfile[]; overview:OpsBoutiqueOverview[];
 };
 
@@ -49,15 +51,16 @@ export async function loadOpsShell():Promise<OpsShell> {
 }
 
 export async function loadOpsWorkspace():Promise<OpsWorkspace> {
-  const [tasks,tickets,interactions,onboarding,staff,overview] = await Promise.all([
+  const [tasks,tickets,interactions,accessRequests,onboarding,staff,overview] = await Promise.all([
     opsDataRequest<OpsTask[]>("ops_tasks?select=*&order=created_at.desc&limit=300"),
     opsDataRequest<OpsTicket[]>("ops_tickets?select=*&order=created_at.desc&limit=300"),
     opsDataRequest<OpsInteraction[]>("ops_interactions?select=*&order=created_at.desc&limit=300"),
+    opsDataRequest<OpsAccessRequest[]>("ops_access_requests?select=*&order=created_at.desc&limit=200"),
     opsDataRequest<OpsOnboarding[]>("ops_onboarding?select=*&order=updated_at.desc&limit=500"),
     opsDataRequest<OpsStaffProfile[]>("ops_staff_profiles?select=*&order=created_at.asc&limit=200"),
     opsDataRequest<OpsBoutiqueOverview[]>("rpc/get_ops_boutique_overview",{method:"POST",body:JSON.stringify({})}),
   ]);
-  return { tasks,tickets,interactions,onboarding,staff,overview };
+  return { tasks,tickets,interactions,accessRequests,onboarding,staff,overview };
 }
 
 export async function createOpsTask(input:{boutiqueId?:string|null;title:string;description?:string;team?:OpsTeam;priority?:OpsPriority;assigneeId?:string|null;dueAt?:string|null;source?:OpsTask["source"]}) {
@@ -116,4 +119,17 @@ export async function upsertOpsStaffProfile(userId:string,role:OpsStaffProfile["
   const rows=await opsDataRequest<OpsStaffProfile[]>("ops_staff_profiles?on_conflict=user_id&select=*",{method:"POST",headers:{Prefer:"resolution=merge-duplicates,return=representation"},body:JSON.stringify({user_id:userId,role,active,updated_at:new Date().toISOString()})});
   if (!rows[0]) throw new Error("Profil équipe non enregistré");
   return rows[0];
+}
+
+
+export async function requestOpsBoutiqueAccess(boutiqueId:string,reason:string,requestedMinutes=30) {
+  return opsDataRequest<OpsAccessRequest>("rpc/request_ops_boutique_access",{method:"POST",body:JSON.stringify({p_boutique_id:boutiqueId,p_reason:reason,p_requested_minutes:requestedMinutes})});
+}
+
+export async function decideOpsAccessRequest(requestId:number,approve:boolean,note?:string) {
+  return opsDataRequest<OpsAccessRequest>("rpc/decide_ops_access_request",{method:"POST",body:JSON.stringify({p_request_id:requestId,p_approve:approve,p_note:note??null})});
+}
+
+export async function loadOpsSupportDiagnostic(boutiqueId:string) {
+  return opsDataRequest<OpsSupportDiagnostic>("rpc/get_ops_support_diagnostic",{method:"POST",body:JSON.stringify({p_boutique_id:boutiqueId})});
 }
