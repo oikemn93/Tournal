@@ -37,6 +37,17 @@ export type OpsWorkspace = {
   onboarding:OpsOnboarding[]; staff:OpsStaffProfile[]; overview:OpsBoutiqueOverview[];
 };
 
+export type MyOpsProfile = { user_id:string; role:"sales"|"service"|"support"|"manager"; active:boolean };
+export type OpsShell = { boutiques:Array<Record<string,unknown>>; users:Array<Record<string,unknown>> };
+
+export async function loadMyOpsStaffProfile():Promise<MyOpsProfile|null> {
+  return opsDataRequest<MyOpsProfile|null>("rpc/get_my_ops_profile",{method:"POST",body:JSON.stringify({})});
+}
+
+export async function loadOpsShell():Promise<OpsShell> {
+  return opsDataRequest<OpsShell>("rpc/get_ops_shell",{method:"POST",body:JSON.stringify({})});
+}
+
 export async function loadOpsWorkspace():Promise<OpsWorkspace> {
   const [tasks,tickets,interactions,onboarding,staff,overview] = await Promise.all([
     opsDataRequest<OpsTask[]>("ops_tasks?select=*&order=created_at.desc&limit=300"),

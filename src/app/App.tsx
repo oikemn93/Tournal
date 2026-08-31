@@ -26,6 +26,7 @@ import { TransfersView as RelationalTransfersView } from "./screens/TransfersVie
 import { InventoryView as RelationalInventoryView } from "./screens/InventoryView";
 import { SuperAdminUserActions } from "./components/SuperAdminUserActions";
 import { TournalOpsWorkspace as TournalOps } from "./components/TournalOpsWorkspace";
+import { loadMyOpsStaffProfile, loadOpsShell } from "../lib/ops";
 import { NotificationCenter } from "./components/NotificationCenter";
 import { filterPaymentEventsByPeriod, formatPreciseDateTime, invoicePaymentEvents, invoiceRemainingAmount } from "./utils/payments";
 
@@ -1248,7 +1249,11 @@ function PinSetupScreen({ onComplete }: { onComplete: () => void | Promise<void>
 
 function SuperAdminScreen(props: React.ComponentProps<typeof LegacySuperAdminScreen>) {
   const [showSystemAdmin, setShowSystemAdmin] = useState(false);
-  if (showSystemAdmin) {
+  const authUserId = getCurrentAuthUser()?.id;
+  const currentProfile = props.platformUsers.find(user=>user.id===authUserId);
+  const canSystemAdmin = !!currentProfile?.isSuperAdmin;
+  const opsRole = (currentProfile as PlatformUser & { opsRole?:string } | undefined)?.opsRole;
+  if (showSystemAdmin && canSystemAdmin) {
     return <div className="relative">
       <button type="button" onClick={()=>setShowSystemAdmin(false)} className="fixed right-3 top-3 z-[100] rounded-xl bg-slate-950 px-3 py-2 text-xs font-black text-white shadow-lg">← Tournal Ops</button>
       <LegacySuperAdminScreen {...props}/>
@@ -1257,8 +1262,11 @@ function SuperAdminScreen(props: React.ComponentProps<typeof LegacySuperAdminScr
   return <TournalOps
     boutiques={props.boutiques}
     users={props.platformUsers}
-    onOpenBoutique={(boutiqueId)=>{ const boutique = props.boutiques.find(item=>item.id===boutiqueId); if (boutique) props.onEnterBoutique(boutique); }}
-    onSystem={()=>setShowSystemAdmin(true)}
+    canSystemAdmin={canSystemAdmin}
+    canEnterBoutique={canSystemAdmin}
+    opsRole={opsRole}
+    onOpenBoutique={(boutiqueId)=>{ if (!canSystemAdmin) return; const boutique = props.boutiques.find(item=>item.id===boutiqueId); if (boutique) props.onEnterBoutique(boutique); }}
+    onSystem={()=>{ if (canSystemAdmin) setShowSystemAdmin(true); }}
   />;
 }
 
@@ -9303,16 +9311,23 @@ export default function App() {
       const pinState = await getPinStatus().catch(() => ({ configured:false }));
       if (!pinState.configured) { setScreen("pin-setup"); return; }
 
-      // The global admin shell needs account metadata, never all boutique business data.
-      if (user.isSuperAdmin) {
+      // Tournal Ops is the internal work hub. SuperAdmins and explicitly
+      // authorised Ops staff enter the same lightweight shell; only SuperAdmins
+      // can cross the boundary into technical administration or impersonate a shop.
+      const opsProfile = user.isSuperAdmin ? null : await loadMyOpsStaffProfile().catch(() => null);
+      if (user.isSuperAdmin || opsProfile?.active) {
+        const opsUser = opsProfile ? ({ ...user, opsRole:opsProfile.role } as PlatformUser & { opsRole:string }) : user;
+        setCurrentUser(opsUser);
+        setPlatformUsers([opsUser]);
         setScreen("superadmin");
-        setTimeout(() => { void Promise.all([
-          loadPlatformUsers<PlatformUser[]>(), loadGroupes<Groupe[]>(),
-        ]).then(([users, groups]) => {
-          if (users?.length) setPlatformUsers(users);
-          if (groups?.length) setGroupes(groups);
-          void checkBackend().then(setBackendOk).catch(()=>setBackendOk(false));
-        }).catch(()=>undefined); }, 0);
+        setTimeout(() => { void Promise.all([loadOpsShell(), loadGroupes<Groupe[]>()])
+          .then(([shell, groups]) => {
+            const shellUsers = (shell.users as unknown as PlatformUser[]).map(item => item.id===opsUser.id ? { ...item, opsRole:opsProfile?.role } : item);
+            setBoutiques(shell.boutiques as unknown as Boutique[]);
+            setPlatformUsers(shellUsers);
+            if (groups?.length) setGroupes(groups);
+            void checkBackend().then(setBackendOk).catch(()=>setBackendOk(false));
+          }).catch(()=>undefined); }, 0);
         return;
       }
 
