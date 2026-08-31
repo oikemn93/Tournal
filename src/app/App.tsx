@@ -9320,14 +9320,18 @@ export default function App() {
         setCurrentUser(opsUser);
         setPlatformUsers([opsUser]);
         setScreen("superadmin");
-        setTimeout(() => { void Promise.all([loadOpsShell(), loadGroupes<Groupe[]>()])
-          .then(([shell, groups]) => {
+        setTimeout(() => {
+          void loadOpsShell().then(shell => {
             const shellUsers = (shell.users as unknown as PlatformUser[]).map(item => item.id===opsUser.id ? { ...item, opsRole:opsProfile?.role } : item);
             setBoutiques(shell.boutiques as unknown as Boutique[]);
             setPlatformUsers(shellUsers);
-            if (groups?.length) setGroupes(groups);
             void checkBackend().then(setBackendOk).catch(()=>setBackendOk(false));
-          }).catch(()=>undefined); }, 0);
+          }).catch(error => {
+            setBackendOk(false);
+            toast.error("Tournal Ops indisponible : " + (error instanceof Error ? error.message : String(error)), { duration:8000 });
+          });
+          if (user.isSuperAdmin) void loadGroupes<Groupe[]>().then(groups => { if (groups?.length) setGroupes(groups); }).catch(()=>undefined);
+        }, 0);
         return;
       }
 
