@@ -1727,3 +1727,7 @@ export async function sendInvoiceEmail(_params: unknown): Promise<void> {
 export async function storePDFForSMS(_params: unknown): Promise<string | null> {
   return null;
 }
+
+export async function opsDataRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  return dataRequest<T>(path, init, false);
+}

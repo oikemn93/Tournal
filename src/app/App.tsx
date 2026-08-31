@@ -25,7 +25,7 @@ import { ComptabiliteView as RelationalComptabiliteView } from "./screens/Rappor
 import { TransfersView as RelationalTransfersView } from "./screens/TransfersView";
 import { InventoryView as RelationalInventoryView } from "./screens/InventoryView";
 import { SuperAdminUserActions } from "./components/SuperAdminUserActions";
-import { TournalOps } from "./components/TournalOps";
+import { TournalOpsWorkspace as TournalOps } from "./components/TournalOpsWorkspace";
 import { NotificationCenter } from "./components/NotificationCenter";
 import { filterPaymentEventsByPeriod, formatPreciseDateTime, invoicePaymentEvents, invoiceRemainingAmount } from "./utils/payments";
 
