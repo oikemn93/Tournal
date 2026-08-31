@@ -25,6 +25,7 @@ import { ComptabiliteView as RelationalComptabiliteView } from "./screens/Rappor
 import { TransfersView as RelationalTransfersView } from "./screens/TransfersView";
 import { InventoryView as RelationalInventoryView } from "./screens/InventoryView";
 import { SuperAdminUserActions } from "./components/SuperAdminUserActions";
+import { TournalOps } from "./components/TournalOps";
 import { NotificationCenter } from "./components/NotificationCenter";
 import { filterPaymentEventsByPeriod, formatPreciseDateTime, invoicePaymentEvents, invoiceRemainingAmount } from "./utils/payments";
 
@@ -1245,7 +1246,23 @@ function PinSetupScreen({ onComplete }: { onComplete: () => void | Promise<void>
 
 // ─── SCREEN: SUPER ADMIN ──────────────────────────────────────────────────────
 
-function SuperAdminScreen({ boutiques, platformUsers, groupes, onEnterBoutique, onCreateBoutique, onUpdateBoutique, onDeleteBoutique, onCreateUser, onUpdateUser, onCreateGroupe, onUpdateGroupe, onDeleteGroupe, onResetPassword, onLogout, backendOk, saveState }: {
+function SuperAdminScreen(props: React.ComponentProps<typeof LegacySuperAdminScreen>) {
+  const [showSystemAdmin, setShowSystemAdmin] = useState(false);
+  if (showSystemAdmin) {
+    return <div className="relative">
+      <button type="button" onClick={()=>setShowSystemAdmin(false)} className="fixed right-3 top-3 z-[100] rounded-xl bg-slate-950 px-3 py-2 text-xs font-black text-white shadow-lg">← Tournal Ops</button>
+      <LegacySuperAdminScreen {...props}/>
+    </div>;
+  }
+  return <TournalOps
+    boutiques={props.boutiques}
+    users={props.platformUsers}
+    onOpenBoutique={(boutiqueId)=>{ const boutique = props.boutiques.find(item=>item.id===boutiqueId); if (boutique) props.onEnterBoutique(boutique); }}
+    onSystem={()=>setShowSystemAdmin(true)}
+  />;
+}
+
+function LegacySuperAdminScreen({ boutiques, platformUsers, groupes, onEnterBoutique, onCreateBoutique, onUpdateBoutique, onDeleteBoutique, onCreateUser, onUpdateUser, onCreateGroupe, onUpdateGroupe, onDeleteGroupe, onResetPassword, onLogout, backendOk, saveState }: {
   boutiques: Boutique[]; platformUsers: PlatformUser[]; groupes: Groupe[];
   onEnterBoutique: (b: Boutique) => void;
   onCreateBoutique: (nom: string, ville: string, ownerId: string, logo?: string) => void;
