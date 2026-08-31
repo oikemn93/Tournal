@@ -144,7 +144,7 @@ export async function loadOpsSupportDiagnostic(boutiqueId:string) {
   return opsDataRequest<OpsSupportDiagnostic>("rpc/get_ops_support_diagnostic",{method:"POST",body:JSON.stringify({p_boutique_id:boutiqueId})});
 }
 
-export async function updateOpsAccount(id:string,patch:Partial<Pick<OpsAccount,"stage"|"health_status">>) {
+export async function updateOpsAccount(id:string,patch:Partial<Pick<OpsAccount,"name"|"stage"|"health_status"|"sales_owner_id"|"service_owner_id"|"support_owner_id"|"notes">>) {
   const rows=await opsDataRequest<OpsAccount[]>(`ops_accounts?id=eq.${encodeURIComponent(id)}&select=*`,{method:"PATCH",headers:{Prefer:"return=representation"},body:JSON.stringify({...patch,updated_at:new Date().toISOString()})});
   if(!rows[0]) throw new Error("Compte client non modifié");
   return rows[0];
@@ -154,4 +154,9 @@ export async function createOpsContact(input:{accountId:string;boutiqueId?:strin
   const rows=await opsDataRequest<OpsContact[]>("ops_contacts?select=*",{method:"POST",headers:{Prefer:"return=representation"},body:JSON.stringify({account_id:input.accountId,boutique_id:input.boutiqueId??null,name:input.name.trim(),phone:input.phone?.trim()||null,email:input.email?.trim()||null,role_label:input.roleLabel?.trim()||null,is_primary:Boolean(input.isPrimary),created_by:getCurrentAuthUser()?.id??null})});
   if(!rows[0]) throw new Error("Contact non créé");
   return rows[0];
+}
+
+export async function updateOpsContact(id:number,patch:Partial<Pick<OpsContact,"name"|"phone"|"email"|"role_label"|"is_primary"|"notes">>) {
+  const rows=await opsDataRequest<OpsContact[]>(`ops_contacts?id=eq.${id}&select=*`,{method:"PATCH",headers:{Prefer:"return=representation"},body:JSON.stringify({...patch,updated_at:new Date().toISOString()})});
+  if(!rows[0]) throw new Error("Contact non modifié"); return rows[0];
 }
