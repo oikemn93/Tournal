@@ -170,3 +170,7 @@ export async function linkOpsBoutiqueToAccount(boutiqueId:string,accountId:strin
   const rows=await opsDataRequest<OpsAccountBoutique[]>("ops_account_boutiques?on_conflict=boutique_id&select=*",{method:"POST",headers:{Prefer:"resolution=merge-duplicates,return=representation"},body:JSON.stringify({boutique_id:boutiqueId,account_id:accountId})});
   if(!rows[0]) throw new Error("Liaison boutique-compte non modifiée"); return rows[0];
 }
+
+export async function deleteOpsContact(id:number) {
+  await opsDataRequest<unknown>(`ops_contacts?id=eq.${id}`,{method:"DELETE"});
+}
