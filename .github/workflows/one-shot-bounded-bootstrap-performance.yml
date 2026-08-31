@@ -1,0 +1,28 @@
+name: One-shot bounded bootstrap performance
+on:
+  push:
+    branches: [main]
+    paths:
+      - scripts/patch-bounded-bootstrap-performance.mjs
+      - .github/workflows/one-shot-bounded-bootstrap-performance.yml
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions: { contents: write }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: node scripts/patch-bounded-bootstrap-performance.mjs
+      - run: node scripts/check-bounded-realtime-invariants.mjs
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/lib/api.ts scripts/check-bounded-realtime-invariants.mjs
+          git diff --cached --quiet || git commit -m 'perf: strictly bound boutique bootstrap history'
+          git push
