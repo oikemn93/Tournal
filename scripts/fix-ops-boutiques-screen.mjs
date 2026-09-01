@@ -6,3 +6,4 @@ const neu='const normalizedQuery=query.trim().toLowerCase();\n  const filtered=r
 if(!s.includes(old)) throw new Error('filtered rows target not found');
 s=s.replace(old,neu);
 fs.writeFileSync(path,s);
+// Trigger repair workflow after workflow registration.
