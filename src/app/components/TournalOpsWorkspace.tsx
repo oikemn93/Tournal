@@ -57,7 +57,14 @@ export function TournalOpsWorkspace({boutiques,users,onOpenBoutique,onSystem,onL
     const score=Math.max(0,Math.min(100,progress-(openTickets.some(t=>t.priority==='urgent')?20:0)-(openTasks.filter(t=>t.due_at&&new Date(t.due_at)<new Date()).length*5)));
     return {...b,members,lastSale,firstSale,firstReceipt,setup,onboarding,openTasks,openTickets,ownerReady,progress,score};
   }),[boutiques,users,workspace]);
-  const filtered=rows.filter(b=>{const link=workspace?.accountBoutiques.find(x=>x.boutique_id===b.id);const account=link?workspace?.accounts.find(a=>a.id===link.account_id):null;return (b.nom+" "+(b.ville??"")+" "+(b.tel??"")+" "+(account?.name??"")+" "+b.members.map(m=>m.nom+" "+(m.phone??"")).join(" ")).toLowerCase().includes(query.toLowerCase())});
+  const normalizedQuery=query.trim().toLowerCase();
+  const filtered=rows.filter(b=>{
+    const link=workspace?.accountBoutiques.find(x=>x.boutique_id===b.id);
+    const account=link?workspace?.accounts.find(a=>a.id===link.account_id):null;
+    const memberText=(b.members??[]).map(m=>(m?.nom??"")+" "+(m?.phone??"")).join(" ");
+    const searchable=[b.nom,b.ville,b.tel,account?.name,memberText].filter(Boolean).join(" ").toLowerCase();
+    return !normalizedQuery||searchable.includes(normalizedQuery);
+  });
   const accountGroups=(workspace?.accounts??[]).map(account=>({account,boutiques:rows.filter(b=>workspace?.accountBoutiques.some(link=>link.account_id===account.id&&link.boutique_id===b.id))})).filter(group=>group.boutiques.length>0);
   const attention=rows.filter(b=>b.progress<100||b.openTickets.length>0||b.openTasks.length>0).sort((a,b)=>a.score-b.score);
   const selected=rows.find(b=>b.id===selectedId)??null;
