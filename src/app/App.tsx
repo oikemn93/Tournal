@@ -1311,7 +1311,7 @@ function LegacySuperAdminScreen({ boutiques, platformUsers, groupes, onEnterBout
   const nonAdmin = platformUsers.filter(u=>!u.isSuperAdmin);
   const unassigned = platformUsers.filter(u=>u.assignments.length===0);
 
-  const filteredBoutiques = boutiques.filter(b=>b.nom.toLowerCase().includes(bSearch.toLowerCase())||b.ville.toLowerCase().includes(bSearch.toLowerCase()));
+  const filteredBoutiques = boutiques.filter(b=>(b.nom??"").toLowerCase().includes(bSearch.toLowerCase())||(b.ville??"").toLowerCase().includes(bSearch.toLowerCase()));
   const filteredUsers = nonAdmin.filter(u=>u.nom.toLowerCase().includes(uSearch.toLowerCase())||u.phone.includes(uSearch));
 
   function submitBoutique() {
@@ -1378,7 +1378,7 @@ function LegacySuperAdminScreen({ boutiques, platformUsers, groupes, onEnterBout
                       <p className="text-lg font-black leading-tight" style={{ fontFamily:"'Nunito', sans-serif" }}>{b.nom}</p>
                       <div className="flex items-center gap-1.5 mt-0.5"><MapPin size={11} className="text-muted-foreground"/><span className="text-xs text-muted-foreground">{b.ville}</span></div>
                       {owner&&<p className="text-xs mt-1" style={{ color:b.color }}>Propriétaire : {owner.nom}</p>}
-                      <p className="text-xs text-muted-foreground mt-0.5">{uc} user{uc>1?"s":""} · {b.products.length} produits</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">{uc} user{uc>1?"s":""} · {b.products?.length??0} produits</p>
                     </div>
                     <ChevronRight size={20} style={{ color:b.color }}/>
                   </button>
