@@ -24,7 +24,7 @@ jobs:
           if old not in s: raise SystemExit('advance filter not found')
           p.write_text(s.replace(old,new))
           PY
-          npm ci
+          npm install --no-audit --no-fund
           npm run build
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
