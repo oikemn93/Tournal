@@ -14,3 +14,5 @@ const marker='assert.ok(pos.includes(\'await doPrint(buildReceiptHtml(newInv, bo
 if(!t.includes(marker)) throw new Error('test marker not found');
 t=t.replace(marker, marker+"assert.ok(pos.includes('await doPrint(buildOrderTicketHtml(newInv, boutique, currentUser.nom), \\\"Commande express non encaissée\\\");'), 'Unpaid express order must await printable non-paid ticket');\n");
 fs.writeFileSync(testPath,t);
+
+// one-shot trigger
