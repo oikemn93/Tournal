@@ -9134,7 +9134,7 @@ export default function App() {
   }, [applyBoutiqueSyncPatch, pullRemote]);
 
 
-  const hydrateBoutique = useCallback(async (boutiqueId: string) => {
+  const hydrateBoutique = useCallback(async (boutiqueId: string): Promise<boolean> => {
     setBusinessLoading(true);
     setAppSessionReady(false);
     try {
@@ -9149,13 +9149,12 @@ export default function App() {
         setLocked(true);
       }
       const remoteB = await loadBoutiqueSnapshot<Boutique[]>(boutiqueId);
-      if (remoteB?.[0]) {
-        const hydrated = remoteB[0];
-        lastRemoteB.current = JSON.stringify(remoteB);
-        setBoutiques(prev => prev.some(b=>b.id===boutiqueId)
-          ? prev.map(b=>b.id===boutiqueId?hydrated:b)
-          : [...prev, hydrated]);
-      }
+      if (!remoteB?.[0]) throw new Error("Snapshot boutique introuvable");
+      const hydrated = remoteB[0];
+      lastRemoteB.current = JSON.stringify(remoteB);
+      setBoutiques(prev => prev.some(b=>b.id===boutiqueId)
+        ? prev.map(b=>b.id===boutiqueId?hydrated:b)
+        : [...prev, hydrated]);
       setLastSyncAt(Date.now());
       setAppSessionReady(true);
       void checkBackend().then(setBackendOk).catch(()=>setBackendOk(false));
@@ -9174,9 +9173,11 @@ export default function App() {
           }
           setGroupes(groups);
         }).catch(() => undefined);
+      return true;
     } catch (error) {
       setBackendOk(false);
       toast.error("Données boutique indisponibles : " + (error instanceof Error ? error.message : String(error)), { duration:8000 });
+      return false;
     } finally {
       setBusinessLoading(false);
     }
@@ -9588,10 +9589,18 @@ export default function App() {
   }
   function handleEnterBoutiqueAsAdmin(b: Boutique) {
     const assign: BoutiqueAssignment = { boutiqueId:b.id, role:"Propriétaire", droits:{ dashboard:true, stock:true, fournisseurs:true, clients:true, factures:true, remboursement:true, charges:true, compta:true, vente:true, inventaire:true, marges:true, encaissement_vente:true, annulation_commande:true, decaissement:true, transferts:true } };
-    activeBoutiqueIdRef.current=b.id; setActiveBoutiqueId(b.id); setActiveAssign(assign); setTab("dashboard"); setBusinessLoading(true); setScreen("app");
+    activeBoutiqueIdRef.current=b.id; setActiveBoutiqueId(b.id); setActiveAssign(assign); setTab("dashboard"); setBusinessLoading(true);
     void loadAuthSettings(b.id);
-    setTimeout(()=>{ void hydrateBoutique(b.id); },0);
     if (currentUser) saveSession(currentUser.id, b.id, assign);
+    setTimeout(()=>{ void (async()=>{
+      const ok=await hydrateBoutique(b.id);
+      if(ok){ setScreen("app"); return; }
+      activeBoutiqueIdRef.current=null;
+      setActiveBoutiqueId(null);
+      setActiveAssign(null);
+      if(currentUser) saveSession(currentUser.id,null,null);
+      setScreen("superadmin");
+    })(); },0);
   }
   function handleLogout() {
     if (activeBoutiqueId && currentUser) logTech(activeBoutiqueId, { level:"info", cat:"session", msg:`Déconnexion : ${currentUser.nom}` });
