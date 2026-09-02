@@ -259,6 +259,24 @@ export async function createInvoiceShare(params: { boutiqueId:string; invoiceId:
   return body as { url:string; expires_at:string };
 }
 
+export async function createPaymentReceiptShare(params: { boutiqueId:string; kind:"invoice_payment"|"client_advance"; paymentId:number|string; pdf:Blob }) {
+  const session = await refreshSessionIfNeeded();
+  const form = new FormData();
+  form.append("boutique_id", params.boutiqueId);
+  form.append("document_type", params.kind);
+  if (params.kind === "invoice_payment") form.append("payment_id", String(params.paymentId));
+  else form.append("advance_id", String(params.paymentId));
+  form.append("file", params.pdf, `justificatif-versement-${params.paymentId}.pdf`);
+  const response = await fetch(`${SUPABASE_URL}/functions/v1/create-invoice-share`, {
+    method: "POST",
+    headers: { apikey: PUBLISHABLE_KEY, Authorization: `Bearer ${session.access_token}` },
+    body: form,
+  });
+  const body = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(body?.error ?? "Création du lien de justificatif impossible");
+  return body as { url:string; expires_at:string };
+}
+
 export async function signInWithPhone(phone: string, password: string) {
   const body = await authRequest("/token?grant_type=password", {
     method: "POST",

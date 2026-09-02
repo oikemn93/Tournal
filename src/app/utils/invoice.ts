@@ -332,26 +332,56 @@ export async function generateInvoicePDFBlob(inv: Invoice, boutique: Boutique, c
   }
 }
 
-export type PaymentReceiptData = { id:number|string; invoiceId:string; amount:number; paymentMethod:string; paidAt:string; operatorName:string };
+export type PaymentReceiptData = {
+  id:number|string;
+  invoiceId?:string;
+  amount:number;
+  paymentMethod:string;
+  paidAt:string;
+  operatorName:string;
+  kind?:"invoice_payment"|"client_advance";
+};
 
-export function buildPaymentReceiptHtml(payment: PaymentReceiptData, inv: Invoice, client: Client, boutique: Boutique): string {
+export function buildPaymentReceiptHtml(payment: PaymentReceiptData, inv: Invoice|null, client: Client, boutique: Boutique): string {
   const e=(v:unknown)=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]??c));
   const n=(v:number)=>new Intl.NumberFormat("fr-FR").format(v);
   const d=new Date(payment.paidAt);
   const paid=Number.isNaN(d.getTime())?payment.paidAt:d.toLocaleString("fr-FR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
-  const remaining=Math.max(0,inv.montant-invoicePaidAmount(inv));
+  const remaining=inv?Math.max(0,inv.montant-invoicePaidAmount(inv)):null;
   const accent=boutique.color||"#111827";
-  return `<!doctype html><html lang="fr"><head><meta charset="utf-8"/><title>Justificatif de versement ${e(inv.id)}</title><style>@page{size:A5;margin:14mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111827;background:#fff;margin:0}.wrap{max-width:620px;margin:auto}.head{border-bottom:2px solid ${accent};padding-bottom:18px}.brand{font-size:22px;font-weight:900;color:${accent}}.muted{font-size:12px;color:#6b7280}.title{font-size:18px;font-weight:900;margin-top:20px}.card{margin-top:16px;border:1px solid #e5e7eb;border-radius:14px;padding:16px}.row{display:flex;justify-content:space-between;gap:16px;padding:7px 0;border-bottom:1px solid #f3f4f6}.row:last-child{border:0}.label{font-size:12px;color:#6b7280}.value{font-weight:800;text-align:right}.amount{font-size:27px;font-weight:900;color:#16a34a;margin-top:4px}.foot{font-size:11px;color:#6b7280;border-top:1px solid #e5e7eb;margin-top:24px;padding-top:14px}</style></head><body><div class="wrap"><div class="head"><div class="brand">${e(boutique.nom)}</div><div class="muted">${e(boutique.ville)}${boutique.tel?` · ${e(boutique.tel)}`:""}</div><div class="title">Justificatif de versement</div></div><div class="card"><div class="row"><span class="label">Client</span><span class="value">${e(client.nom)}</span></div><div class="row"><span class="label">Facture</span><span class="value">${e(inv.id)}</span></div><div class="row"><span class="label">Date</span><span class="value">${e(paid)}</span></div><div class="row"><span class="label">Mode de paiement</span><span class="value">${e(payment.paymentMethod)}</span></div><div class="row"><span class="label">Enregistré par</span><span class="value">${e(payment.operatorName)}</span></div></div><div class="card"><div class="label">Montant versé</div><div class="amount">${n(payment.amount)} F</div><div class="row"><span class="label">Reste dû sur la facture</span><span class="value">${n(remaining)} F</span></div></div><div class="foot">Ce document atteste de l'enregistrement du versement dans Tournal. Référence ${e(inv.id)} / paiement ${e(payment.id)}.</div></div></body></html>`;
+  const reference=inv?inv.id:`AVANCE-${payment.id}`;
+  const nature=inv?"Versement affecté à une facture":"Versement client non affecté à une facture";
+  return `<!doctype html><html lang="fr"><head><meta charset="utf-8"/><title>Justificatif de versement ${e(reference)}</title><style>@page{size:A5;margin:14mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111827;background:#fff;margin:0}.wrap{max-width:620px;margin:auto}.head{border-bottom:2px solid ${accent};padding-bottom:18px}.brand{font-size:22px;font-weight:900;color:${accent}}.muted{font-size:12px;color:#6b7280}.title{font-size:18px;font-weight:900;margin-top:20px}.card{margin-top:16px;border:1px solid #e5e7eb;border-radius:14px;padding:16px}.row{display:flex;justify-content:space-between;gap:16px;padding:7px 0;border-bottom:1px solid #f3f4f6}.row:last-child{border:0}.label{font-size:12px;color:#6b7280}.value{font-weight:800;text-align:right}.amount{font-size:27px;font-weight:900;color:#16a34a;margin-top:4px}.foot{font-size:11px;color:#6b7280;border-top:1px solid #e5e7eb;margin-top:24px;padding-top:14px}</style></head><body><div class="wrap"><div class="head"><div class="brand">${e(boutique.nom)}</div><div class="muted">${e(boutique.ville)}${boutique.tel?` · ${e(boutique.tel)}`:""}</div><div class="title">Justificatif de versement</div></div><div class="card"><div class="row"><span class="label">Client</span><span class="value">${e(client.nom)}</span></div><div class="row"><span class="label">Nature</span><span class="value">${e(nature)}</span></div>${inv?`<div class="row"><span class="label">Facture</span><span class="value">${e(inv.id)}</span></div>`:""}<div class="row"><span class="label">Date</span><span class="value">${e(paid)}</span></div><div class="row"><span class="label">Mode de paiement</span><span class="value">${e(payment.paymentMethod)}</span></div><div class="row"><span class="label">Enregistré par</span><span class="value">${e(payment.operatorName)}</span></div></div><div class="card"><div class="label">Montant versé</div><div class="amount">${n(payment.amount)} F</div>${remaining!==null?`<div class="row"><span class="label">Reste dû sur la facture</span><span class="value">${n(remaining)} F</span></div>`:""}</div><div class="foot">Ce document atteste de l'enregistrement du versement dans Tournal. Référence : ${e(reference)} / versement ${e(payment.id)}.</div></div></body></html>`;
 }
 
-export function openPaymentReceiptPreview(payment: PaymentReceiptData, inv: Invoice, client: Client, boutique: Boutique) {
-  const w=window.open("","_blank","width=620,height=760"); if(!w)return; w.document.open(); w.document.write(hardenGeneratedHtml(buildPaymentReceiptHtml(payment,inv,client,boutique))); w.document.close(); w.focus();
+export function openPaymentReceiptPreview(payment: PaymentReceiptData, inv: Invoice|null, client: Client, boutique: Boutique) {
+  const w=window.open("","_blank","width=620,height=760");
+  if(!w)return;
+  w.document.open();
+  w.document.write(hardenGeneratedHtml(buildPaymentReceiptHtml(payment,inv,client,boutique)));
+  w.document.close();
+  w.focus();
 }
 
-export async function generatePaymentReceiptPDFBlob(payment: PaymentReceiptData, inv: Invoice, client: Client, boutique: Boutique): Promise<Blob> {
-  const [{jsPDF},m]=await Promise.all([import("jspdf"),import("html2canvas")]); const html2canvas=m.default;
-  const frame=document.createElement("iframe"); frame.style.cssText="position:fixed;left:-10000px;top:0;width:620px;height:880px;border:0;visibility:hidden"; document.body.appendChild(frame);
-  try{const doc=frame.contentDocument??frame.contentWindow?.document;if(!doc)throw new Error("Préparation du justificatif impossible");doc.open();doc.write(hardenGeneratedHtml(buildPaymentReceiptHtml(payment,inv,client,boutique)));doc.close();await new Promise(r=>setTimeout(r,100));if(doc.fonts?.ready)await doc.fonts.ready;doc.body.style.width="620px";doc.body.style.padding="36px";doc.body.style.background="#fff";const canvas=await html2canvas(doc.body,{scale:1.5,useCORS:true,backgroundColor:"#fff",logging:false});const pdf=new jsPDF({orientation:"portrait",unit:"mm",format:"a5",compress:true});const w=148,h=canvas.height*w/canvas.width;pdf.addImage(canvas.toDataURL("image/jpeg",0.9),"JPEG",0,0,w,h,undefined,"FAST");return pdf.output("blob");}finally{frame.remove();}
+export async function generatePaymentReceiptPDFBlob(payment: PaymentReceiptData, inv: Invoice|null, client: Client, boutique: Boutique): Promise<Blob> {
+  const [{jsPDF},m]=await Promise.all([import("jspdf"),import("html2canvas")]);
+  const html2canvas=m.default;
+  const frame=document.createElement("iframe");
+  frame.style.cssText="position:fixed;left:-10000px;top:0;width:620px;height:880px;border:0;visibility:hidden";
+  document.body.appendChild(frame);
+  try{
+    const doc=frame.contentDocument??frame.contentWindow?.document;
+    if(!doc)throw new Error("Préparation du justificatif impossible");
+    doc.open();doc.write(hardenGeneratedHtml(buildPaymentReceiptHtml(payment,inv,client,boutique)));doc.close();
+    await new Promise(r=>setTimeout(r,100));
+    if(doc.fonts?.ready)await doc.fonts.ready;
+    doc.body.style.width="620px";doc.body.style.padding="36px";doc.body.style.background="#fff";
+    const canvas=await html2canvas(doc.body,{scale:1.5,useCORS:true,backgroundColor:"#fff",logging:false});
+    const pdf=new jsPDF({orientation:"portrait",unit:"mm",format:"a5",compress:true});
+    const w=148,h=canvas.height*w/canvas.width;
+    pdf.addImage(canvas.toDataURL("image/jpeg",0.9),"JPEG",0,0,w,h,undefined,"FAST");
+    return pdf.output("blob");
+  }finally{frame.remove();}
 }
 
 export function openInvoicePDF(inv: Invoice, boutique: Boutique, clients: Client[]) {

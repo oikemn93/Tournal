@@ -9,7 +9,7 @@ import { getSiblings } from "../utils/inventory";
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
-import { applyClientAdvanceFifo, applyClientAdvanceToInvoice, cancelPendingInvoice, createClient, createInvoiceShare, deleteClientIfUnused, recordClientPayment, refundClientAdvance, returnSale, updateClientContact, updateClientPaymentTerms, updateClientProfile, WHOLESALE_MARKER } from "../../lib/api";
+import { applyClientAdvanceFifo, applyClientAdvanceToInvoice, cancelPendingInvoice, createClient, createInvoiceShare, createPaymentReceiptShare, deleteClientIfUnused, recordClientPayment, refundClientAdvance, returnSale, updateClientContact, updateClientPaymentTerms, updateClientProfile, WHOLESALE_MARKER } from "../../lib/api";
 import { PhoneField } from "../components/PhoneField";
 import { formatPreciseDateTime, invoicePaidAmount, invoiceRemainingAmount as baseInvoiceRemainingAmount, roundMoney } from "../utils/payments";
 import { generatePaymentReceiptPDFBlob, openInvoicePDF, openOrderDocument, openPaymentReceiptPreview, openReceiptPreview } from "../utils/invoice";
@@ -327,8 +327,36 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
       .sort((a,b)=>b.paidAt.localeCompare(a.paidAt));
     const paymentHistoryCount = clientPayments.length + clientAdvances.length + clientCreditRefunds.length;
     async function sharePaymentReceipt(payment: typeof clientPayments[number]) {
-      if(sharingPaymentId!==null)return; const inv=clientInvoices.find(item=>item.id===payment.invoiceId); if(!inv)return; setSharingPaymentId(payment.id);
-      try{const pdf=await generatePaymentReceiptPDFBlob(payment,inv,c,boutique);const share=await createInvoiceShare({boutiqueId:boutique.id,invoiceId:inv.id,pdf});const amount=new Intl.NumberFormat("fr-FR").format(payment.amount);const text=`Justificatif de versement · ${c.nom} · ${amount} F · facture ${inv.id}\n${share.url}\nLien valable 48 h.`;if(navigator.share)await navigator.share({title:`Justificatif de versement - ${c.nom}`,text});else{const phone=(c.tel??"").replace(/[\s\-().+]/g,"");if(phone)window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`,"_blank");else{await navigator.clipboard?.writeText(text);alert("Lien du justificatif copié.");}}}catch(error){if(error instanceof DOMException&&error.name==="AbortError")return;alert(error instanceof Error?error.message:"Envoi du justificatif impossible");}finally{setSharingPaymentId(null);}
+      const inv=clientInvoices.find(item=>item.id===payment.invoiceId);
+      if(!inv)return;
+      const key=`payment:${payment.id}`;
+      if(sharingPaymentId!==null)return;
+      setSharingPaymentId(key);
+      try{
+        const pdf=await generatePaymentReceiptPDFBlob(payment,inv,c,boutique);
+        const share=await createPaymentReceiptShare({boutiqueId:boutique.id,kind:"invoice_payment",paymentId:payment.id,pdf});
+        const amount=new Intl.NumberFormat("fr-FR").format(payment.amount);
+        const text=`Justificatif de versement · ${c.nom} · ${amount} F · facture ${inv.id}\n${share.url}\nLien valable 48 h.`;
+        if(navigator.share) await navigator.share({title:`Justificatif de versement - ${c.nom}`,text});
+        else { const phone=(c.tel??"").replace(/[\s\-().+]/g,""); if(phone)window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`,"_blank"); else { await navigator.clipboard?.writeText(text); alert("Lien du justificatif copié."); } }
+      }catch(error){ if(error instanceof DOMException&&error.name==="AbortError")return; alert(error instanceof Error?error.message:"Envoi du justificatif impossible"); }
+      finally{setSharingPaymentId(null);}
+    }
+
+    async function shareAdvanceReceipt(advance: typeof clientAdvances[number]) {
+      const key=`advance:${advance.id}`;
+      if(sharingPaymentId!==null)return;
+      setSharingPaymentId(key);
+      const receipt={id:advance.id,amount:advance.amount,paymentMethod:advance.paymentMethod,paidAt:advance.paidAt,operatorName:advance.operatorName,kind:"client_advance" as const};
+      try{
+        const pdf=await generatePaymentReceiptPDFBlob(receipt,null,c,boutique);
+        const share=await createPaymentReceiptShare({boutiqueId:boutique.id,kind:"client_advance",paymentId:advance.id,pdf});
+        const amount=new Intl.NumberFormat("fr-FR").format(advance.amount);
+        const text=`Justificatif de versement · ${c.nom} · ${amount} F · versement non affecté à une facture\n${share.url}\nLien valable 48 h.`;
+        if(navigator.share) await navigator.share({title:`Justificatif de versement - ${c.nom}`,text});
+        else { const phone=(c.tel??"").replace(/[\s\-().+]/g,""); if(phone)window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`,"_blank"); else { await navigator.clipboard?.writeText(text); alert("Lien du justificatif copié."); } }
+      }catch(error){ if(error instanceof DOMException&&error.name==="AbortError")return; alert(error instanceof Error?error.message:"Envoi du justificatif impossible"); }
+      finally{setSharingPaymentId(null);}
     }
     const visibleInvoices = showAllInvoices ? clientInvoices : clientInvoices.slice(0, 5);
 
@@ -693,17 +721,17 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
             <div className="space-y-2">
               {clientPayments.slice(0,20).map(payment=>{const inv=clientInvoices.find(item=>item.id===payment.invoiceId);return <div key={`${payment.invoiceId}-${payment.id}`} className="rounded-xl border border-border px-3 py-2 text-xs">
                 <div className="flex items-center justify-between gap-3"><div><p className="font-bold">{payment.invoiceId} · {payment.paymentMethod}</p><p className="text-muted-foreground">{formatPreciseDateTime(payment.paidAt)} · {payment.operatorName}</p></div><p className="font-black" style={{color:SEM.success.accent}}>{fmt(payment.amount)}</p></div>
-                {inv&&<div className="mt-2 flex gap-2"><button type="button" onClick={()=>openPaymentReceiptPreview(payment,inv,c,boutique)} className="rounded-lg bg-muted px-2.5 py-1.5 font-black">Justificatif</button><button type="button" onClick={()=>void sharePaymentReceipt(payment)} disabled={sharingPaymentId!==null} className="rounded-lg bg-emerald-50 px-2.5 py-1.5 font-black text-emerald-700 disabled:opacity-50 inline-flex items-center gap-1"><Send size={12}/>{sharingPaymentId===payment.id?"Envoi…":"Envoyer"}</button></div>}
+                {inv&&<div className="mt-2 flex gap-2"><button type="button" onClick={()=>openPaymentReceiptPreview(payment,inv,c,boutique)} className="rounded-lg bg-muted px-2.5 py-1.5 font-black">Justificatif</button><button type="button" onClick={()=>void sharePaymentReceipt(payment)} disabled={sharingPaymentId!==null} className="rounded-lg bg-emerald-50 px-2.5 py-1.5 font-black text-emerald-700 disabled:opacity-50 inline-flex items-center gap-1"><Send size={12}/>{sharingPaymentId===`payment:${payment.id}`?"Envoi…":"Envoyer"}</button></div>}
               </div>})}
             </div>
           </div>}
           {clientAdvances.length>0&&<div className="mt-4 border-t border-border pt-4">
             <p className="mb-3 text-xs font-black tracking-wider text-muted-foreground">VERSEMENTS D'AVANCE</p>
             <div className="space-y-2">
-              {clientAdvances.slice(0,20).map(advance=><div key={advance.id} className="flex items-center justify-between gap-3 text-xs">
-                <div><p className="font-bold">{PM_ICON[advance.paymentMethod]} {advance.paymentMethod} · Avoir</p><p className="text-muted-foreground">{formatPreciseDateTime(advance.paidAt)} · {advance.operatorName}</p></div>
-                <div className="text-right"><p className="font-black" style={{color:advanceRemaining(advance)>0?SEM.success.accent:SEM.neutral.accent}}>{fmt(advanceRemaining(advance))}</p><p className="text-[10px] text-muted-foreground">reçu {fmt(advance.amount)}</p></div>
-              </div>)}
+              {clientAdvances.slice(0,20).map(advance=>{const receipt={id:advance.id,amount:advance.amount,paymentMethod:advance.paymentMethod,paidAt:advance.paidAt,operatorName:advance.operatorName,kind:"client_advance" as const};return <div key={advance.id} className="rounded-xl border border-border px-3 py-2 text-xs">
+                <div className="flex items-center justify-between gap-3"><div><p className="font-bold">{PM_ICON[advance.paymentMethod]} {advance.paymentMethod} · Versement client</p><p className="text-muted-foreground">{formatPreciseDateTime(advance.paidAt)} · {advance.operatorName}</p></div><div className="text-right"><p className="font-black" style={{color:advanceRemaining(advance)>0?SEM.success.accent:SEM.neutral.accent}}>{fmt(advanceRemaining(advance))}</p><p className="text-[10px] text-muted-foreground">reçu {fmt(advance.amount)}</p></div></div>
+                <div className="mt-2 flex gap-2"><button type="button" onClick={()=>openPaymentReceiptPreview(receipt,null,c,boutique)} className="rounded-lg bg-muted px-2.5 py-1.5 font-black">Justificatif</button><button type="button" onClick={()=>void shareAdvanceReceipt(advance)} disabled={sharingPaymentId!==null} className="rounded-lg bg-emerald-50 px-2.5 py-1.5 font-black text-emerald-700 disabled:opacity-50 inline-flex items-center gap-1"><Send size={12}/>{sharingPaymentId===`advance:${advance.id}`?"Envoi…":"Envoyer"}</button></div>
+              </div>})}
             </div>
           </div>}
           {clientCreditRefunds.length>0&&<div className="mt-4 border-t border-border pt-4">
