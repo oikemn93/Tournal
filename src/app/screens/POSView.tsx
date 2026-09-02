@@ -28,10 +28,12 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
   const { products, entries, invoices } = boutique;
   const pa = usePAStatus();
   const activeAssignment = currentUser.assignments.find(assignment => assignment.boutiqueId === boutique.id);
-  const canManageAnyPendingOrder = currentUser.isSuperAdmin || activeAssignment?.role === "Propriétaire";
+  const isBoutiqueOwner = activeAssignment?.role === "Propriétaire" || activeAssignment?.role === "owner";
+  const canManageAnyPendingOrder = currentUser.isSuperAdmin || isBoutiqueOwner;
   const canManagePendingOrder = (invoice: Invoice) => canManageAnyPendingOrder || invoice.operatorId === currentUser.id;
   const canEditPendingOrder = (invoice: Invoice) => canManagePendingOrder(invoice) && invoice.origin !== "client_profile";
-  const canCancelOrder = (invoice: Invoice) => canCancelPendingOrder && canManagePendingOrder(invoice) && invoice.origin !== "client_profile";
+  const hasCancelPermission = canCancelPendingOrder || currentUser.isSuperAdmin || isBoutiqueOwner || !!activeAssignment?.droits?.annulation_commande;
+  const canCancelOrder = (invoice: Invoice) => hasCancelPermission && canManagePendingOrder(invoice) && invoice.origin !== "client_profile";
 
   // Order taking
   const [search, setSearch] = useState("");
@@ -345,6 +347,10 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
       }
       return { ...item, qty: newDispQty };
     }));
+  }
+  function updateCartPrice(lineIndex: number, newPrice: number) {
+    if (!Number.isFinite(newPrice) || newPrice < 0) return;
+    setCart(prev => prev.map((item, index) => index === lineIndex ? { ...item, prixUnit:newPrice } : item));
   }
 
   function askCancelOrder(inv: Invoice) {
@@ -707,7 +713,22 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
                       <button onClick={()=>updateCartQty(lineIndex, dQty-1)} className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background:POS_COLOR+"22" }}><Minus size={12} style={{ color:POS_COLOR }}/></button>
                       <span className="text-base font-black w-8 text-center">{dQty}</span>
                       <button onClick={()=>updateCartQty(lineIndex, dQty+1)} className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background:POS_COLOR+"22" }}><Plus size={12} style={{ color:POS_COLOR }}/></button>
-                      <span className="text-xs text-muted-foreground ml-0.5">{dUnit} × {fmt(item.prixUnit)}</span>
+                      {editingInvoice ? (
+                        <label className="ml-1 flex items-center gap-1 text-xs text-muted-foreground">
+                          {dUnit} ×
+                          <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={item.prixUnit}
+                            onChange={event=>updateCartPrice(lineIndex, Number(event.target.value))}
+                            className="w-24 rounded-lg border border-border bg-background px-2 py-1 text-right text-xs font-black text-foreground"
+                            aria-label={`Prix unitaire de ${item.nom}`}
+                          />
+                        </label>
+                      ) : (
+                        <span className="text-xs text-muted-foreground ml-0.5">{dUnit} × {fmt(item.prixUnit)}</span>
+                      )}
                     </div>
                   </div>
                   <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
