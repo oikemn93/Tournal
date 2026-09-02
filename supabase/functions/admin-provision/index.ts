@@ -10,6 +10,7 @@ const corsHeaders = {
 const PERMISSION_KEYS = new Set([
   "dashboard", "stock", "fournisseurs", "clients", "factures", "remboursement",
   "charges", "compta", "vente", "encaissement_vente", "inventaire", "marges",
+  "annulation_commande", "decaissement", "transferts",
 ]);
 
 function phoneToEmail(phone: string): string {
@@ -22,12 +23,10 @@ function initialsOf(name: string): string {
 }
 const passwordOk=(v:unknown)=>String(v??"").length>=12;
 function normalizeRights(value: unknown): Record<string, boolean> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-  return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>)
-      .filter(([key]) => PERMISSION_KEYS.has(key))
-      .map(([key, enabled]) => [key, enabled === true]),
-  );
+  const source = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  return Object.fromEntries([...PERMISSION_KEYS].map((key) => [key, source[key] === true]));
 }
 
 Deno.serve(async (req) => {

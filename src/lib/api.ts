@@ -670,11 +670,12 @@ export async function unassignUserFromBoutique(boutiqueId: string, userId: strin
   return adminProvision<{ ok: true }>("unassign_user", { boutiqueId, userId });
 }
 
-/** Owner-scoped assignment upsert through the privileged Edge Function.
- *  A direct PATCH can return 204 even when no row exists, so it is not an upsert.
- */
+/** Owner/SuperAdmin-scoped assignment upsert through the canonical permission RPC. */
 export async function upsertAssignmentDirect(boutiqueId: string, userId: string, role: string, droits: Record<string, boolean>) {
-  return adminProvision<{ ok: true }>("assign_user", { boutiqueId, userId, role, droits });
+  return dataRequest<{ ok: true }>("rpc/update_boutique_assignment_permissions", {
+    method: "POST",
+    body: JSON.stringify({ p_boutique_id:boutiqueId, p_user_id:userId, p_role:role, p_droits:droits }),
+  });
 }
 
 /** Owner-scoped delete: removes an assignment without superadmin. */

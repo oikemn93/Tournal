@@ -1,0 +1,17 @@
+import fs from 'node:fs';
+import assert from 'node:assert/strict';
+const expected=['dashboard','stock','fournisseurs','clients','factures','remboursement','charges','compta','vente','encaissement_vente','inventaire','marges','annulation_commande','decaissement','transferts'];
+const p=fs.readFileSync('src/app/permissions.ts','utf8');
+for(const key of expected) assert.ok(p.includes('"'+key+'"'), 'frontend missing '+key);
+const edge=fs.readFileSync('supabase/functions/admin-provision/index.ts','utf8');
+for(const key of expected) assert.ok(edge.includes('"'+key+'"'), 'edge missing '+key);
+assert.ok(edge.includes('[...PERMISSION_KEYS].map'), 'edge rights normalization is not complete');
+const app=fs.readFileSync('src/app/App.tsx','utf8');
+assert.ok(app.includes('function canAccess(perm: Permission) { return isOwner || !!(droits?.[perm]); }'), 'read-only bypass still present');
+const api=fs.readFileSync('src/lib/api.ts','utf8');
+assert.ok(api.includes('rpc/update_boutique_assignment_permissions'), 'canonical assignment RPC not used');
+const sql=fs.readFileSync('supabase/migrations/20260902233500_unify_permission_contract.sql','utf8');
+assert.ok(sql.includes("new.source='supplier_payment'") && sql.includes("'decaissement'"), 'supplier cashout guard missing');
+const cancel=fs.readFileSync('supabase/migrations/20260902230500_fix_annulation_commande_permission_scope.sql','utf8');
+assert.ok(cancel.includes('annulation_commande') || fs.readFileSync('supabase/migrations/20260822140147_client_advances_and_order_cancel_permissions.sql','utf8').includes('annulation_commande'));
+console.log('permission contract regression tests: OK');

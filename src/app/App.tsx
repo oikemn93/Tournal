@@ -28,6 +28,7 @@ import { SuperAdminUserActions } from "./components/SuperAdminUserActions";
 import { TournalOpsWorkspace as TournalOps } from "./components/TournalOpsWorkspace";
 import { loadMyOpsStaffProfile, loadOpsShell } from "../lib/ops";
 import { NotificationCenter } from "./components/NotificationCenter";
+import { ROLE_PRESETS } from "./permissions";
 import { filterPaymentEventsByPeriod, formatPreciseDateTime, invoicePaymentEvents, invoiceRemainingAmount } from "./utils/payments";
 
 const ReadOnlyCtx = React.createContext(false);
@@ -204,14 +205,6 @@ const PLACEHOLDER_IMGS = ["photo-1558769132-cb1aea458c5e","photo-1567401893414-7
 const SUP_COLORS  = ["#C9A227","#1E9B1E","#3b82f6","#a855f7","#f97316","#ec4899","#14b8a6","#ef4444"];
 const USER_COLORS = ["#C9A227","#3b82f6","#1E9B1E","#a855f7","#f97316","#ec4899","#14b8a6","#ef4444"];
 const ROLES       = ["Gérant","Vendeur","Vendeuse","Caissier","Livreur","Autre"];
-const ROLE_PRESETS: Record<string, Record<Permission,boolean>> = {
-  "Gérant":   { dashboard:true,  stock:true,  fournisseurs:true,  clients:true,  factures:true,  remboursement:true,  charges:true,  compta:true,  vente:true,  inventaire:true,  marges:true,  encaissement_vente:true,  annulation_commande:false, transferts:true, decaissement:false },
-  "Vendeur":  { dashboard:true,  stock:true,  fournisseurs:false, clients:true,  factures:true,  remboursement:false, charges:false, compta:false, vente:true,  inventaire:false, marges:false, encaissement_vente:false, annulation_commande:false, transferts:true, decaissement:false },
-  "Vendeuse": { dashboard:true,  stock:true,  fournisseurs:false, clients:true,  factures:true,  remboursement:false, charges:false, compta:false, vente:true,  inventaire:false, marges:false, encaissement_vente:false, annulation_commande:false, transferts:true, decaissement:false },
-  "Caissier": { dashboard:true,  stock:false, fournisseurs:false, clients:true,  factures:true,  remboursement:false, charges:false, compta:false, vente:false, inventaire:false, marges:false, encaissement_vente:true,  annulation_commande:false, transferts:false, decaissement:false },
-  "Livreur":  { dashboard:false, stock:false, fournisseurs:false, clients:false, factures:true,  remboursement:false, charges:false, compta:false, vente:false, inventaire:false, marges:false, encaissement_vente:false, annulation_commande:false, transferts:false, decaissement:false },
-  "Autre":    { dashboard:false, stock:false, fournisseurs:false, clients:false, factures:false, remboursement:false, charges:false, compta:false, vente:false, inventaire:false, marges:false, encaissement_vente:false, annulation_commande:false, transferts:false, decaissement:false },
-};
 const COULEURS    = ["","#C9A227","#3b82f6","#1E9B1E","#ef4444","#a855f7","#f97316","#ec4899","#6b7280","#ffffff","#000000","#8B4513"];
 const CATEGORIES_DEF = ["Wax","Bazin","Soie","Dentelle","Velours","Coton","Lin","Satin","Kente","Bogolan","Autre"];
 const NOW = Date.now();
@@ -9724,7 +9717,7 @@ export default function App() {
   const droits  = activeAssign?.droits;
   const isOwner = activeAssign?.role === "Propriétaire";
   const isReadOnly = activeAssign?.role === "Compte Mère";
-  function canAccess(perm: Permission) { return isOwner || isReadOnly || !!(droits?.[perm]); }
+  function canAccess(perm: Permission) { return isOwner || !!(droits?.[perm]); }
   // Margins are sensitive: only owners or users explicitly granted "Voir les marges".
   // Read-only accounts do NOT see margins unless the right is set.
   const canSeeMargin = isOwner || !!(droits?.marges);
