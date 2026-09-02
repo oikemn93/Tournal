@@ -25,7 +25,7 @@ jobs:
             node scripts/apply-margin-dashboard-isolation.mjs
             git config user.name 'github-actions[bot]'
             git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git add src/lib/api.ts src/app/App.tsx .github/workflows/ci.yml
+            git add src/lib/api.ts src/app/App.tsx
             git commit -m 'security: route sensitive reads through masked views'
             git push
           else
