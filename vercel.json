@@ -1,4 +1,10 @@
 {
+  "rewrites": [
+    {
+      "source": "/d/:token",
+      "destination": "https://cnxtylngddwmhugxkzju.supabase.co/functions/v1/document-share?token=:token"
+    }
+  ],
   "headers": [
     {
       "source": "/(.*)",
