@@ -73,10 +73,12 @@ jobs:
           test ! -e scripts/security_hardening_patch.py
           test ! -e scripts/realtime_coverage_patch.py
           test ! -e scripts/refine-client-invoice-actions.mjs
+          test ! -e scripts/apply-margin-dashboard-isolation.mjs
           test ! -e .github/workflows/refund-method-patcher.yml
           test ! -e .github/workflows/security-hardening-patcher.yml
           test ! -e .github/workflows/realtime-coverage-patcher.yml
           test ! -e .github/workflows/refine-client-invoice-actions.yml
+          test ! -e .github/workflows/apply-margin-dashboard-isolation.yml
 
       - name: Production build
         run: pnpm build
