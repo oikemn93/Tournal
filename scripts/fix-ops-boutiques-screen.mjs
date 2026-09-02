@@ -1,86 +1,24 @@
 import fs from 'node:fs';
 const path='src/app/App.tsx';
 let s=fs.readFileSync(path,'utf8');
-const oldHydrate=`  const hydrateBoutique = useCallback(async (boutiqueId: string) => {
-    setBusinessLoading(true);
-    setAppSessionReady(false);
-    try {
-      // All writes and protected reads require this short-lived application
-      // session. Starting it once here removes the former race with the
-      // notifications effect and with the first user action.
-      const appSession = await startAppSession(boutiqueId);`;
-const newHydrate=`  const hydrateBoutique = useCallback(async (boutiqueId: string): Promise<boolean> => {
-    setBusinessLoading(true);
-    setAppSessionReady(false);
-    try {
-      // All writes and protected reads require this short-lived application
-      // session. Starting it once here removes the former race with the
-      // notifications effect and with the first user action.
-      const appSession = await startAppSession(boutiqueId);`;
-if(!s.includes(oldHydrate)) throw new Error('hydrate signature target not found');
-s=s.replace(oldHydrate,newHydrate);
-const oldSnapshot=`      const remoteB = await loadBoutiqueSnapshot<Boutique[]>(boutiqueId);
-      if (remoteB?.[0]) {
-        const hydrated = remoteB[0];
-        lastRemoteB.current = JSON.stringify(remoteB);
-        setBoutiques(prev => prev.some(b=>b.id===boutiqueId)
-          ? prev.map(b=>b.id===boutiqueId?hydrated:b)
-          : [...prev, hydrated]);
-      }
-      setLastSyncAt(Date.now());
-      setAppSessionReady(true);`;
-const newSnapshot=`      const remoteB = await loadBoutiqueSnapshot<Boutique[]>(boutiqueId);
-      if (!remoteB?.[0]) throw new Error("Snapshot boutique introuvable");
-      const hydrated = remoteB[0];
-      lastRemoteB.current = JSON.stringify(remoteB);
-      setBoutiques(prev => prev.some(b=>b.id===boutiqueId)
-        ? prev.map(b=>b.id===boutiqueId?hydrated:b)
-        : [...prev, hydrated]);
-      setLastSyncAt(Date.now());
-      setAppSessionReady(true);`;
-if(!s.includes(oldSnapshot)) throw new Error('snapshot target not found');
-s=s.replace(oldSnapshot,newSnapshot);
-const oldCatch=`    } catch (error) {
-      setBackendOk(false);
-      toast.error("Données boutique indisponibles : " + (error instanceof Error ? error.message : String(error)), { duration:8000 });
-    } finally {
-      setBusinessLoading(false);
-    }
-  }, []);`;
-const newCatch=`      return true;
-    } catch (error) {
-      setBackendOk(false);
-      toast.error("Données boutique indisponibles : " + (error instanceof Error ? error.message : String(error)), { duration:8000 });
-      return false;
-    } finally {
-      setBusinessLoading(false);
-    }
-  }, []);`;
-if(!s.includes(oldCatch)) throw new Error('hydrate return target not found');
-s=s.replace(oldCatch,newCatch);
-const oldEnter=`  function handleEnterBoutiqueAsAdmin(b: Boutique) {
-    const assign: BoutiqueAssignment = { boutiqueId:b.id, role:"Propriétaire", droits:{ dashboard:true, stock:true, fournisseurs:true, clients:true, factures:true, remboursement:true, charges:true, compta:true, vente:true, inventaire:true, marges:true, encaissement_vente:true, annulation_commande:true, decaissement:true, transferts:true } };
-    activeBoutiqueIdRef.current=b.id; setActiveBoutiqueId(b.id); setActiveAssign(assign); setTab("dashboard"); setBusinessLoading(true); setScreen("app");
-    void loadAuthSettings(b.id);
-    setTimeout(()=>{ void hydrateBoutique(b.id); },0);
-    if (currentUser) saveSession(currentUser.id, b.id, assign);
-  }`;
-const newEnter=`  function handleEnterBoutiqueAsAdmin(b: Boutique) {
-    const assign: BoutiqueAssignment = { boutiqueId:b.id, role:"Propriétaire", droits:{ dashboard:true, stock:true, fournisseurs:true, clients:true, factures:true, remboursement:true, charges:true, compta:true, vente:true, inventaire:true, marges:true, encaissement_vente:true, annulation_commande:true, decaissement:true, transferts:true } };
-    activeBoutiqueIdRef.current=b.id; setActiveBoutiqueId(b.id); setActiveAssign(assign); setTab("dashboard"); setBusinessLoading(true);
-    void loadAuthSettings(b.id);
-    if (currentUser) saveSession(currentUser.id, b.id, assign);
-    setTimeout(()=>{ void (async()=>{
-      const ok=await hydrateBoutique(b.id);
-      if(ok){ setScreen("app"); return; }
-      activeBoutiqueIdRef.current=null;
-      setActiveBoutiqueId(null);
-      setActiveAssign(null);
-      if(currentUser) saveSession(currentUser.id,null,null);
-      setScreen("superadmin");
-    })(); },0);
-  }`;
-if(!s.includes(oldEnter)) throw new Error('admin enter target not found');
-s=s.replace(oldEnter,newEnter);
+
+const anchor='const useNotif = () => React.useContext(NotifCtx);';
+if(!s.includes(anchor)) throw new Error('notification context anchor not found');
+if(!s.includes('class BoutiqueAppErrorBoundary')) {
+  s=s.replace(anchor, `${anchor}\n\nclass BoutiqueAppErrorBoundary extends React.Component<{onReset:()=>void;children:React.ReactNode},{error:Error|null}> {\n  state:{error:Error|null}={error:null};\n  static getDerivedStateFromError(error:Error){return {error};}\n  componentDidCatch(error:Error,info:React.ErrorInfo){console.error('Boutique app render crash',error,info);}\n  render(){\n    if(this.state.error){\n      return <div className=\"min-h-screen flex items-center justify-center px-5 bg-background text-foreground\"><div className=\"w-full max-w-md rounded-3xl border bg-card p-6 shadow-sm\"><div className=\"w-12 h-12 rounded-2xl bg-red-50 text-red-600 flex items-center justify-center mb-4\"><AlertTriangle size={22}/></div><h1 className=\"text-xl font-black\">Ouverture de la boutique impossible</h1><p className=\"text-sm text-muted-foreground mt-2\">Une erreur de rendu a été interceptée au lieu d’afficher un écran blanc.</p><pre className=\"mt-4 whitespace-pre-wrap break-words rounded-2xl bg-red-50 p-3 text-xs text-red-800\">{this.state.error.message||String(this.state.error)}</pre><button type=\"button\" onClick={()=>{this.setState({error:null});this.props.onReset();}} className=\"mt-4 w-full rounded-2xl bg-slate-950 py-3 text-sm font-black text-white\">Retour à Tournal Ops</button></div></div>;\n    }\n    return this.props.children;\n  }\n}`);
+}
+
+const nullGuard='  if (!boutique||!currentUser||!activeAssign) return null;';
+if(!s.includes(nullGuard)) throw new Error('blank null guard not found');
+s=s.replace(nullGuard, `  if (!boutique||!currentUser||!activeAssign) {\n    const missing=[!boutique?\"boutique\":\"\",!currentUser?\"utilisateur\":\"\",!activeAssign?\"affectation\":\"\"].filter(Boolean).join(\", \" );\n    return <div className=\"min-h-screen flex items-center justify-center px-5 bg-background text-foreground\"><div className=\"w-full max-w-md rounded-3xl border bg-card p-6 shadow-sm\"><div className=\"w-12 h-12 rounded-2xl bg-amber-50 text-amber-700 flex items-center justify-center mb-4\"><AlertTriangle size={22}/></div><h1 className=\"text-xl font-black\">État boutique incomplet</h1><p className=\"text-sm text-muted-foreground mt-2\">Tournal a empêché l’écran blanc. Élément manquant : {missing||\"inconnu\"}.</p><button type=\"button\" onClick={()=>{activeBoutiqueIdRef.current=null;setActiveBoutiqueId(null);setActiveAssign(null);if(currentUser)saveSession(currentUser.id,null,null);setScreen(\"superadmin\");}} className=\"mt-4 w-full rounded-2xl bg-slate-950 py-3 text-sm font-black text-white\">Retour à Tournal Ops</button></div></div>;\n  }`);
+
+const returnStart='  return (\n    <NotifCtx.Provider value={sendNotif}>';
+if(!s.includes(returnStart)) throw new Error('app return start not found');
+s=s.replace(returnStart, `  return (\n    <BoutiqueAppErrorBoundary onReset={()=>{activeBoutiqueIdRef.current=null;setActiveBoutiqueId(null);setActiveAssign(null);if(currentUser)saveSession(currentUser.id,null,null);setScreen(\"superadmin\");}}>\n    <NotifCtx.Provider value={sendNotif}>`);
+
+const returnEnd='  </NotifCtx.Provider>\n  );\n}';
+if(!s.includes(returnEnd)) throw new Error('app return end not found');
+s=s.replace(returnEnd, '  </NotifCtx.Provider>\n  </BoutiqueAppErrorBoundary>\n  );\n}');
+
 fs.writeFileSync(path,s);
-// run-shared-entry-repair
+// run-crash-boundary
