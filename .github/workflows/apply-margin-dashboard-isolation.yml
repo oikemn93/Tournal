@@ -21,12 +21,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if grep -q 'products?select=\*' src/lib/api.ts || ! grep -q 'RelationalDashboardView' src/app/App.tsx; then
+          if grep -q 'products?select=\*' src/lib/api.ts || ! grep -q 'RelationalDashboardView' src/app/App.tsx || grep -q "i.invoice_date) day," supabase/migrations/20260903_isolate_margin_data_and_dashboard.sql; then
             node scripts/apply-margin-dashboard-isolation.mjs
             git config user.name 'github-actions[bot]'
             git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git add src/lib/api.ts src/app/App.tsx
-            git commit -m 'security: route sensitive reads through masked views'
+            git add src/lib/api.ts src/app/App.tsx supabase/migrations/20260903_isolate_margin_data_and_dashboard.sql
+            git commit -m 'security: finalize masked read routing'
             git push
           else
             echo 'Patch already applied.'
