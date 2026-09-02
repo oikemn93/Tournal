@@ -299,7 +299,9 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
         : expMethod;
       logAction("Vente express", `${newInv.id} · ${expressModal.nom} · ${fmt(saved.total)} · ${paymentLabel}`, "⚡");
       setExpDone(true);
-      setTimeout(() => doPrint(buildReceiptHtml(newInv, boutique, currentUser.nom), "Ticket de vente"), 150);
+      // A paid express sale must attempt its receipt before the express flow is dismissed.
+      // Awaiting the print adapter avoids losing the job if the modal/view unmounts immediately.
+      await doPrint(buildReceiptHtml(newInv, boutique, currentUser.nom), "Ticket de vente");
       setTimeout(() => {
         setExpressModal(null); setExpDone(false); setExpBusy(false);
         if (newInv.clientId != null) onOrderCreated?.(newInv.clientId, newInv.id, "payment");
