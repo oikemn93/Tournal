@@ -14,7 +14,7 @@ import { getDefaultSaleUnit, getLastSalePrice, getSaleUnitOptions, getSaleUnitLa
 
 // ─── SHARE INVOICE MODAL ──────────────────────────────────────────────────────
 
-function ShareInvoiceModal({ inv, boutique, clients, onClose }: { inv: Invoice; boutique: Boutique; clients: Client[]; onClose: () => void }) {
+export function ShareInvoiceModal({ inv, boutique, clients, onClose }: { inv: Invoice; boutique: Boutique; clients: Client[]; onClose: () => void }) {
   const phone = inv.clientTel ? inv.clientTel.replace(/[\s\-().]/g, "").replace("+", "") : "";
   const clientRecord = inv.clientId != null ? clients.find(c=>c.id===inv.clientId) : clients.find(c=>c.nom===inv.client);
   const isReturn = inv.type.toLowerCase() === "retour";

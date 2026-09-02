@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Search, MapPin, Phone, Lock, Store, ChevronRight, Plus, Minus, ArrowLeft, FilePlus, Wallet, CheckCircle, CalendarClock, Edit2, Trash2, FileText, RotateCcw } from "lucide-react";
+import { Search, MapPin, Phone, Lock, Store, ChevronRight, Plus, Minus, ArrowLeft, FilePlus, Wallet, CheckCircle, CalendarClock, Edit2, Trash2, FileText, RotateCcw, Send } from "lucide-react";
 import type { Boutique, Client, ClientType, Invoice, InvoiceLine, PaymentMethod, PlatformUser } from "../types";
 import { SEM, inputCls, searchInputCls } from "../constants";
 import { fmt, today, ini } from "../utils/formatting";
@@ -9,11 +9,12 @@ import { getSiblings } from "../utils/inventory";
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
-import { applyClientAdvanceFifo, applyClientAdvanceToInvoice, cancelPendingInvoice, createClient, deleteClientIfUnused, recordClientPayment, refundClientAdvance, returnSale, updateClientContact, updateClientPaymentTerms, updateClientProfile, WHOLESALE_MARKER } from "../../lib/api";
+import { applyClientAdvanceFifo, applyClientAdvanceToInvoice, cancelPendingInvoice, createClient, createInvoiceShare, deleteClientIfUnused, recordClientPayment, refundClientAdvance, returnSale, updateClientContact, updateClientPaymentTerms, updateClientProfile, WHOLESALE_MARKER } from "../../lib/api";
 import { PhoneField } from "../components/PhoneField";
 import { formatPreciseDateTime, invoicePaidAmount, invoiceRemainingAmount as baseInvoiceRemainingAmount, roundMoney } from "../utils/payments";
-import { openInvoicePDF, openOrderDocument, openReceiptPreview } from "../utils/invoice";
+import { generatePaymentReceiptPDFBlob, openInvoicePDF, openOrderDocument, openPaymentReceiptPreview, openReceiptPreview } from "../utils/invoice";
 import { POSView as EmbeddedClientPOSView } from "./POSView";
+import { ShareInvoiceModal } from "./FacturesView";
 import { getFifoInvoiceMargin, type FifoRealizedMarginReport } from "../../lib/inventoryApi";
 
 function normalizePhone(value?: string): string {
@@ -63,6 +64,8 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
   const [orderClient, setOrderClient] = useState<Client|null>(null);
   const [editingClientInvoice, setEditingClientInvoice] = useState<Invoice|null>(null);
   const [viewedInvoice, setViewedInvoice] = useState<Invoice|null>(null);
+  const [shareInvoice, setShareInvoice] = useState<Invoice|null>(null);
+  const [sharingPaymentId, setSharingPaymentId] = useState<number|string|null>(null);
   const [viewedInvoiceMargin, setViewedInvoiceMargin] = useState<FifoRealizedMarginReport|null>(null);
   const [viewedInvoiceMarginLoading, setViewedInvoiceMarginLoading] = useState(false);
   const [clientReturnInv, setClientReturnInv] = useState<Invoice|null>(null);
@@ -323,6 +326,10 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
     const clientPayments = clientInvoices.filter(inv => inv.status !== "annulée").flatMap(inv => (inv.payments ?? []).map(payment => ({ ...payment, invoiceId:inv.id })))
       .sort((a,b)=>b.paidAt.localeCompare(a.paidAt));
     const paymentHistoryCount = clientPayments.length + clientAdvances.length + clientCreditRefunds.length;
+    async function sharePaymentReceipt(payment: typeof clientPayments[number]) {
+      if(sharingPaymentId!==null)return; const inv=clientInvoices.find(item=>item.id===payment.invoiceId); if(!inv)return; setSharingPaymentId(payment.id);
+      try{const pdf=await generatePaymentReceiptPDFBlob(payment,inv,c,boutique);const share=await createInvoiceShare({boutiqueId:boutique.id,invoiceId:inv.id,pdf});const amount=new Intl.NumberFormat("fr-FR").format(payment.amount);const text=`Justificatif de versement · ${c.nom} · ${amount} F · facture ${inv.id}\n${share.url}\nLien valable 48 h.`;if(navigator.share)await navigator.share({title:`Justificatif de versement - ${c.nom}`,text});else{const phone=(c.tel??"").replace(/[\s\-().+]/g,"");if(phone)window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`,"_blank");else{await navigator.clipboard?.writeText(text);alert("Lien du justificatif copié.");}}}catch(error){if(error instanceof DOMException&&error.name==="AbortError")return;alert(error instanceof Error?error.message:"Envoi du justificatif impossible");}finally{setSharingPaymentId(null);}
+    }
     const visibleInvoices = showAllInvoices ? clientInvoices : clientInvoices.slice(0, 5);
 
     async function submitClientPayment() {
@@ -684,10 +691,10 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
           {showPaymentHistory&&<>
           {clientPayments.length>0&&<div className="mt-4 border-t border-border pt-4">
             <div className="space-y-2">
-              {clientPayments.slice(0,20).map(payment=><div key={`${payment.invoiceId}-${payment.id}`} className="flex items-center justify-between gap-3 text-xs">
-                <div><p className="font-bold">{payment.invoiceId} · {payment.paymentMethod}</p><p className="text-muted-foreground">{formatPreciseDateTime(payment.paidAt)} · {payment.operatorName}</p></div>
-                <p className="font-black" style={{color:SEM.success.accent}}>{fmt(payment.amount)}</p>
-              </div>)}
+              {clientPayments.slice(0,20).map(payment=>{const inv=clientInvoices.find(item=>item.id===payment.invoiceId);return <div key={`${payment.invoiceId}-${payment.id}`} className="rounded-xl border border-border px-3 py-2 text-xs">
+                <div className="flex items-center justify-between gap-3"><div><p className="font-bold">{payment.invoiceId} · {payment.paymentMethod}</p><p className="text-muted-foreground">{formatPreciseDateTime(payment.paidAt)} · {payment.operatorName}</p></div><p className="font-black" style={{color:SEM.success.accent}}>{fmt(payment.amount)}</p></div>
+                {inv&&<div className="mt-2 flex gap-2"><button type="button" onClick={()=>openPaymentReceiptPreview(payment,inv,c,boutique)} className="rounded-lg bg-muted px-2.5 py-1.5 font-black">Justificatif</button><button type="button" onClick={()=>void sharePaymentReceipt(payment)} disabled={sharingPaymentId!==null} className="rounded-lg bg-emerald-50 px-2.5 py-1.5 font-black text-emerald-700 disabled:opacity-50 inline-flex items-center gap-1"><Send size={12}/>{sharingPaymentId===payment.id?"Envoi…":"Envoyer"}</button></div>}
+              </div>})}
             </div>
           </div>}
           {clientAdvances.length>0&&<div className="mt-4 border-t border-border pt-4">
@@ -813,8 +820,9 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
             </div> : <p className="mt-1 text-xs text-amber-700">Marge FIFO indisponible pour cette facture.</p>}
           </div>}
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
             <button type="button" onClick={()=>openInvoicePDF(viewedInvoice,boutique,boutique.clients)} className="rounded-xl border border-border bg-card py-3 px-2 text-xs font-black">📄 {viewedInvoice.type.toLowerCase()==="retour" ? "Avoir PDF" : "Facture PDF"}</button>
+            <button type="button" onClick={()=>{setShareInvoice(viewedInvoice);setViewedInvoice(null);}} className="rounded-xl border border-border bg-card py-3 px-2 text-xs font-black inline-flex items-center justify-center gap-1.5"><Send size={14}/> Envoyer</button>
             <button type="button" onClick={()=>openReceiptPreview(viewedInvoice,boutique,currentUser.nom)} className="rounded-xl border border-border bg-card py-3 px-2 text-xs font-black">🧾 {viewedInvoice.type.toLowerCase()==="retour" ? (Number(viewedInvoice.returnRefundAmount??0)>0 ? "Justificatif remboursement" : "Justificatif avoir") : "Ticket caisse"}</button>
             {viewedInvoice.type.toLowerCase() !== "retour" && <button type="button" onClick={()=>openOrderDocument(viewedInvoice,boutique,boutique.clients)} className="rounded-xl border border-border bg-card py-3 px-2 text-xs font-black">📋 Bon de commande</button>}
           </div>
@@ -825,6 +833,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
           {canCollectPayment && viewedInvoice.type.toLowerCase() !== "retour" && invoiceRemainingAmount(viewedInvoice)>0 && <button type="button" onClick={()=>{setPaymentMethod("Espèces");setPaymentAmount(String(invoiceRemainingAmount(viewedInvoice)));setViewedInvoice(null);setPaymentSummary(null);setPaymentModal(true);}} className="w-full rounded-xl bg-emerald-600 py-3 text-sm font-black text-white">Enregistrer un versement</button>}
           <p className="text-xs text-muted-foreground">Le backend applique les versements en FIFO : les factures les plus anciennes sont réglées en premier et tout excédent devient un avoir.</p>
         </Modal>}
+        {shareInvoice&&<ShareInvoiceModal inv={shareInvoice} boutique={boutique} clients={boutique.clients} onClose={()=>setShareInvoice(null)}/>}
         {editClient&&<Modal title="Modifier le client" color={CC} onClose={()=>!savingClient&&setEditClient(null)}>
           <Field label="NOM"><input value={editName} onChange={e=>setEditName(e.target.value)} className={inputCls}/></Field>
           <Field label="TÉLÉPHONE"><input value={editPhone} onChange={e=>setEditPhone(e.target.value)} className={inputCls}/></Field>
