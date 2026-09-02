@@ -1646,8 +1646,9 @@ export async function updateProductCategory(params:{ boutiqueId:string; productI
   if (updated.length !== 1) throw new Error("Catégorie du produit non modifiée");
 }
 
-export async function updateProduct(params:{ boutiqueId:string; productId:number; name:string; categoryId?:string|null; purchasePrice:number }) {
-  const body: Record<string, unknown> = { nom:params.name, prix_achat:params.purchasePrice };
+export async function updateProduct(params:{ boutiqueId:string; productId:number; name:string; categoryId?:string|null; purchasePrice?:number }) {
+  const body: Record<string, unknown> = { nom:params.name };
+  if (params.purchasePrice !== undefined) body.prix_achat = params.purchasePrice;
   if (params.categoryId !== undefined) body.category_id = params.categoryId;
   const updated = await dataRequest<Array<{ id:number }>>(`products?id=eq.${params.productId}&boutique_id=eq.${encodeURIComponent(params.boutiqueId)}&select=id`, {
     method:"PATCH", headers:{ Prefer:"return=representation" }, body:JSON.stringify(body),

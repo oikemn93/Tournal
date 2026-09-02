@@ -17,9 +17,10 @@ function sortStockEntriesNewestFirst(a: StockEntry, b: StockEntry) {
   return byTimestamp || b.id - a.id;
 }
 
-export function StockView({ boutique, onUpdate, logAction, initialFilter, initialSupplierId, initialEntryId, onInitialRoutePrepared, onReceiptSaved }: {
+export function StockView({ boutique, onUpdate, logAction, canSeeMargin, initialFilter, initialSupplierId, initialEntryId, onInitialRoutePrepared, onReceiptSaved }: {
   boutique: Boutique; onUpdate: (u: Partial<Boutique>) => void;
   logAction: (action: string, detail: string, icon: string) => void;
+  canSeeMargin: boolean;
   initialFilter?: string;
   initialSupplierId?: number;
   initialEntryId?: number;
@@ -223,8 +224,8 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter, initia
   }
 
   async function saveProductEdit() {
-    const purchasePrice = Number(editPrixAchat);
-    if (!detail || !editNom.trim() || !Number.isFinite(purchasePrice) || purchasePrice < 0 || savingProduct) return;
+    const purchasePrice = canSeeMargin ? Number(editPrixAchat) : undefined;
+    if (!detail || !editNom.trim() || (canSeeMargin && (!Number.isFinite(purchasePrice) || Number(purchasePrice) < 0)) || savingProduct) return;
     const category = cats.find(c => c.nom === editCat);
     setSavingProduct(true);
     try {
@@ -233,9 +234,9 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter, initia
         productId:detail.id,
         name:editNom.trim(),
         categoryId:editCat ? category?.id : null,
-        purchasePrice,
+        ...(canSeeMargin ? { purchasePrice: Number(purchasePrice) } : {}),
       });
-      const updated = { ...detail, nom:editNom.trim(), categorie:editCat || undefined, prixAchat:purchasePrice };
+      const updated = { ...detail, nom:editNom.trim(), categorie:editCat || undefined, ...(canSeeMargin ? { prixAchat:Number(purchasePrice) } : {}) };
       onUpdate({ products:products.map(p => p.id === detail.id ? updated : p) });
       setDetail(updated);
       setEditingProduct(false);
@@ -441,7 +442,7 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter, initia
                 </div>
               </div>
               <div className="flex gap-2">
-                <button onClick={() => { setEditingProduct(true); setEditNom(detail.nom); setEditCat(detail.categorie ?? ""); setEditPrixAchat(String(detail.prixAchat ?? 0)); }}
+                <button onClick={() => { setEditingProduct(true); setEditNom(detail.nom); setEditCat(detail.categorie ?? ""); setEditPrixAchat(canSeeMargin ? String(detail.prixAchat ?? 0) : ""); }}
                   className="flex-1 flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs font-bold text-left" style={{ background: "#EEE9D8", color: "#7A7055" }}>
                   <Edit2 size={13}/> Modifier
                 </button>
@@ -520,11 +521,13 @@ export function StockView({ boutique, onUpdate, logAction, initialFilter, initia
                   ))}
                 </div>
               </Field>
-              <Field label="PRIX D'ACHAT UNITAIRE">
-                <input value={editPrixAchat} onChange={e => setEditPrixAchat(e.target.value)} type="number" min="0" step="0.01" inputMode="decimal" placeholder="0" className={inputCls}/>
-              </Field>
-              <p className="text-xs text-muted-foreground">Ce prix sera utilisé pour les prochains mouvements ; les mouvements déjà enregistrés restent inchangés.</p>
-              <SubmitBtn color={boutique.color} label={savingProduct ? "Enregistrement…" : "Enregistrer les modifications"} onClick={saveProductEdit} disabled={!editNom.trim() || !Number.isFinite(Number(editPrixAchat)) || Number(editPrixAchat) < 0 || savingProduct}/>
+              {canSeeMargin && <>
+                <Field label="PRIX D'ACHAT UNITAIRE">
+                  <input value={editPrixAchat} onChange={e => setEditPrixAchat(e.target.value)} type="number" min="0" step="0.01" inputMode="decimal" placeholder="0" className={inputCls}/>
+                </Field>
+                <p className="text-xs text-muted-foreground">Ce prix sera utilisé pour les prochains mouvements ; les mouvements déjà enregistrés restent inchangés.</p>
+              </>}
+              <SubmitBtn color={boutique.color} label={savingProduct ? "Enregistrement…" : "Enregistrer les modifications"} onClick={saveProductEdit} disabled={!editNom.trim() || (canSeeMargin && (!Number.isFinite(Number(editPrixAchat)) || Number(editPrixAchat) < 0)) || savingProduct}/>
             </>
           )}
 
