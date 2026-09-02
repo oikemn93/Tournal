@@ -663,7 +663,10 @@ export async function assignUserToBoutique(
   role: "owner" | "manager" | "employee",
   droits: Record<string, boolean>,
 ) {
-  return adminProvision<{ ok: true }>("assign_user", { boutiqueId, userId, role, droits });
+  return dataRequest<{ ok: true }>("rpc/update_boutique_assignment_permissions", {
+    method: "POST",
+    body: JSON.stringify({ p_boutique_id:boutiqueId, p_user_id:userId, p_role:role, p_droits:droits }),
+  });
 }
 
 export async function unassignUserFromBoutique(boutiqueId: string, userId: string) {
