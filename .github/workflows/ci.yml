@@ -59,6 +59,9 @@ jobs:
       - name: Client invoice and express receipt regressions
         run: node scripts/test-client-invoice-actions.mjs
 
+      - name: Permission read boundaries
+        run: node scripts/test-permission-read-boundaries.mjs
+
       - name: Verify temporary patchers are gone
         shell: bash
         run: |
