@@ -1,0 +1,33 @@
+name: Apply margin safe stock edit
+
+on:
+  push:
+    branches: [fix/margin-safe-stock-edit-20260903]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/margin-safe-stock-edit-20260903
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! grep -q 'canSeeMargin: boolean' src/app/screens/StockView.tsx; then
+            node scripts/apply-margin-safe-stock-edit.mjs
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add src/app/screens/StockView.tsx src/lib/api.ts src/app/App.tsx
+            git commit -m 'fix: preserve masked purchase price on stock edit'
+            git push
+          else
+            echo 'Patch already applied.'
+          fi
