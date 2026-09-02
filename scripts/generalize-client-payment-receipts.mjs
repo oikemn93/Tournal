@@ -1,3 +1,4 @@
+// Triggered after workflow registration.
 import fs from 'node:fs';
 
 const apiPath='src/lib/api.ts';
