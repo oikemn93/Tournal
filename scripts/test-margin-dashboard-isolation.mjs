@@ -3,6 +3,7 @@ import fs from "node:fs";
 const api = fs.readFileSync("src/lib/api.ts", "utf8");
 const app = fs.readFileSync("src/app/App.tsx", "utf8");
 const dashboard = fs.readFileSync("src/app/screens/DashboardView.tsx", "utf8");
+const stock = fs.readFileSync("src/app/screens/StockView.tsx", "utf8");
 const prepare = fs.readFileSync("supabase/migrations/20260903_prepare_margin_dashboard_secure_reads.sql", "utf8");
 const enforce = fs.readFileSync("supabase/migrations/20260903_enforce_margin_dashboard_isolation.sql", "utf8");
 const migration = `${prepare}\n${enforce}`;
@@ -35,5 +36,13 @@ assert(enforce.includes("revoke select on public.products from authenticated"), 
 assert(enforce.includes("revoke select on public.invoice_lines from authenticated"), "Phase 2 must revoke direct invoice-line cost reads");
 assert(enforce.includes("revoke select on public.stock_entries from authenticated"), "Phase 2 must revoke direct stock cost reads");
 assert(!enforce.includes("'dashboard'"), "Dashboard must not remain in raw-table permission unions after phase 2");
+
+assert(app.includes("<RelationalStockView boutique={boutique} canSeeMargin={canSeeMargin}"), "StockView must receive the explicit margin permission");
+assert(stock.includes("canSeeMargin: boolean"), "StockView must declare the margin permission prop");
+assert(stock.includes("const purchasePrice = canSeeMargin ? Number(editPrixAchat) : undefined"), "Stock edit must not synthesize a masked purchase price");
+assert(stock.includes("...(canSeeMargin ? { purchasePrice: Number(purchasePrice) } : {})"), "Stock edit must omit purchasePrice without margins permission");
+assert(stock.includes("{canSeeMargin && <>"), "Purchase-price edit controls must be hidden without margins permission");
+assert(api.includes("purchasePrice?:number"), "updateProduct purchasePrice must be optional");
+assert(api.includes("if (params.purchasePrice !== undefined) body.prix_achat = params.purchasePrice"), "updateProduct must preserve the stored cost when purchasePrice is omitted");
 
 console.log("margin-dashboard-isolation: ok");
