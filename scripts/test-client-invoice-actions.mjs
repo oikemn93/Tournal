@@ -13,6 +13,7 @@ assert.ok(clients.includes('viewedInvoice&&<Modal'), 'Opened invoice modal must 
 assert.ok(clients.includes('!!viewedInvoice.stockDeductedAt'), 'Return action must still require committed stock');
 assert.ok(clients.includes('viewedInvoice.origin === "client_profile" && viewedInvoice.status === "en attente"'), 'Edit action must remain restricted to pending Client orders');
 assert.ok(pos.includes('await doPrint(buildReceiptHtml(newInv, boutique, currentUser.nom), "Ticket de vente");'), 'Paid express sale must await receipt print attempt');
+assert.ok(pos.includes('await doPrint(buildOrderTicketHtml(newInv, boutique, currentUser.nom), \"Commande express non encaissée\");'), 'Unpaid express order must await printable non-paid ticket');
 assert.ok(!pos.includes('setTimeout(() => doPrint(buildReceiptHtml(newInv, boutique, currentUser.nom), "Ticket de vente"), 150);'), 'Express receipt printing must not be fire-and-forget');
 
 console.log('Client invoice actions and express receipt regressions: OK');

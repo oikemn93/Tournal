@@ -241,6 +241,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
         onUpdate({ invoices:[...invoices, newInv] });
         logAction("Commande express", `${newInv.id} · ${expressModal.nom} · ${fmt(saved.total)} · en attente`, "🛒");
         setExpDone(true);
+        await doPrint(buildOrderTicketHtml(newInv, boutique, currentUser.nom), "Commande express non encaissée");
         setTimeout(() => { setExpressModal(null); setExpDone(false); setExpBusy(false); }, 1200);
         return;
       }
