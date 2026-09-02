@@ -24,3 +24,4 @@ for(const [oldText,newText] of replacements){
   s=s.split(oldText).join(newText);
 }
 fs.writeFileSync(path,s);
+// run-detail-repair
