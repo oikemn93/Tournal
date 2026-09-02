@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - scripts/secure-cashout-delivery.mjs
+      - .github/workflows/secure-cashout-delivery.yml
 permissions:
   contents: write
 jobs:
