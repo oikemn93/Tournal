@@ -3,7 +3,9 @@ import fs from "node:fs";
 const api = fs.readFileSync("src/lib/api.ts", "utf8");
 const app = fs.readFileSync("src/app/App.tsx", "utf8");
 const dashboard = fs.readFileSync("src/app/screens/DashboardView.tsx", "utf8");
-const migration = fs.readFileSync("supabase/migrations/20260903_isolate_margin_data_and_dashboard.sql", "utf8");
+const prepare = fs.readFileSync("supabase/migrations/20260903_prepare_margin_dashboard_secure_reads.sql", "utf8");
+const enforce = fs.readFileSync("supabase/migrations/20260903_enforce_margin_dashboard_isolation.sql", "utf8");
+const migration = `${prepare}\n${enforce}`;
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -22,13 +24,16 @@ assert(dashboard.includes("loadDashboardSummary"), "Dashboard must use aggregate
 assert(!dashboard.includes("boutique.invoices") && !dashboard.includes("boutique.charges") && !dashboard.includes("boutique.clients"), "Dashboard must not compute from raw boutique datasets");
 
 for (const view of ["products_app", "stock_entries_app", "invoices_app"]) {
-  assert(migration.includes(`public.${view}`), `Missing ${view} view`);
+  assert(prepare.includes(`public.${view}`), `Missing phase-1 ${view} view`);
 }
-assert(migration.includes("case when private.auth_has_permission(p.boutique_id, 'marges') then p.prix_achat else null end"), "Product purchase price must be masked by marges");
-assert(migration.includes("'prix_achat', case when private.auth_has_permission(l.boutique_id, 'marges') then l.prix_achat else null end"), "Invoice-line purchase cost must be masked by marges");
-assert(migration.includes("revoke select on public.products from authenticated"), "Direct product cost reads must be revoked");
-assert(migration.includes("revoke select on public.invoice_lines from authenticated"), "Direct invoice-line cost reads must be revoked");
-assert(migration.includes("revoke select on public.stock_entries from authenticated"), "Direct stock cost reads must be revoked");
-assert(migration.includes("create or replace function public.get_dashboard_summary"), "Dashboard aggregate RPC missing");
+assert(prepare.includes("case when private.auth_has_permission(p.boutique_id, 'marges') then p.prix_achat else null end"), "Product purchase price must be masked by marges");
+assert(prepare.includes("'prix_achat', case when private.auth_has_permission(l.boutique_id, 'marges') then l.prix_achat else null end"), "Invoice-line purchase cost must be masked by marges");
+assert(prepare.includes("create or replace function public.get_dashboard_summary"), "Dashboard aggregate RPC missing from phase 1");
+
+assert(!prepare.includes("revoke select on public.products from authenticated"), "Phase 1 must remain backwards compatible with the current frontend");
+assert(enforce.includes("revoke select on public.products from authenticated"), "Phase 2 must revoke direct product cost reads");
+assert(enforce.includes("revoke select on public.invoice_lines from authenticated"), "Phase 2 must revoke direct invoice-line cost reads");
+assert(enforce.includes("revoke select on public.stock_entries from authenticated"), "Phase 2 must revoke direct stock cost reads");
+assert(!enforce.includes("'dashboard'"), "Dashboard must not remain in raw-table permission unions after phase 2");
 
 console.log("margin-dashboard-isolation: ok");
