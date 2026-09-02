@@ -17,6 +17,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Repair temporary patch script quoting
+        shell: python
+        run: |
+          from pathlib import Path
+          p=Path('scripts/secure-cashout-delivery.mjs')
+          s=p.read_text()
+          s=s.replace('logAction("Livraison client confirmée",`${invoice.id} · ${invoice.client}`,"📦");','logAction("Livraison client confirmée",invoice.id+" · "+invoice.client,"📦");')
+          s=s.replace('Stock déduit{viewedInvoice.deliveryConfirmedAt?` · livraison confirmée ${formatPreciseDateTime(viewedInvoice.deliveryConfirmedAt)}`:" · ancien flux déjà comptabilisé"}', 'Stock déduit{viewedInvoice.deliveryConfirmedAt?" · livraison confirmée "+formatPreciseDateTime(viewedInvoice.deliveryConfirmedAt):" · ancien flux déjà comptabilisé"}')
+          p.write_text(s)
       - name: Apply patch
         id: patch
         shell: bash
