@@ -9,7 +9,7 @@ import { getSiblings } from "../utils/inventory";
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
-import { applyClientAdvanceFifo, applyClientAdvanceToInvoice, cancelPendingInvoice, confirmClientDelivery, createClient, createInvoiceShare, createPaymentReceiptShare, deleteClientIfUnused, recordClientPayment, refundClientAdvance, returnSale, updateClientContact, updateClientPaymentTerms, updateClientProfile, WHOLESALE_MARKER } from "../../lib/api";
+import { applyClientAdvanceFifo, applyClientAdvanceToInvoice, cancelPendingInvoice, createClient, createInvoiceShare, createPaymentReceiptShare, deleteClientIfUnused, recordClientPayment, refundClientAdvance, returnSale, updateClientContact, updateClientPaymentTerms, updateClientProfile, WHOLESALE_MARKER } from "../../lib/api";
 import { PhoneField } from "../components/PhoneField";
 import { formatPreciseDateTime, invoicePaidAmount, invoiceRemainingAmount as baseInvoiceRemainingAmount, roundMoney } from "../utils/payments";
 import { generatePaymentReceiptPDFBlob, openInvoicePDF, openOrderDocument, openPaymentReceiptPreview, openReceiptPreview } from "../utils/invoice";
@@ -66,7 +66,6 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
   const [viewedInvoice, setViewedInvoice] = useState<Invoice|null>(null);
   const [shareInvoice, setShareInvoice] = useState<Invoice|null>(null);
   const [sharingPaymentId, setSharingPaymentId] = useState<number|string|null>(null);
-  const [confirmingDeliveryId, setConfirmingDeliveryId] = useState<string|null>(null);
   const [viewedInvoiceMargin, setViewedInvoiceMargin] = useState<FifoRealizedMarginReport|null>(null);
   const [viewedInvoiceMarginLoading, setViewedInvoiceMarginLoading] = useState(false);
   const [clientReturnInv, setClientReturnInv] = useState<Invoice|null>(null);
@@ -491,19 +490,6 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
       }
     }
 
-    async function confirmDelivery(invoice: Invoice) {
-      if (confirmingDeliveryId || invoice.origin!=="client_profile" || invoice.status==="annulée" || invoice.stockDeductedAt) return;
-      setConfirmingDeliveryId(invoice.id);
-      try {
-        const result=await confirmClientDelivery({boutiqueId:boutique.id,invoiceId:invoice.id});
-        const updated=boutique.invoices.map(item=>item.id===invoice.id?{...item,stockDeductedAt:result.stock_deducted_at,deliveryConfirmedAt:result.delivery_confirmed_at,deliveryConfirmedBy:result.delivery_confirmed_by}:item);
-        onUpdate({invoices:updated});
-        setViewedInvoice(current=>current?.id===invoice.id?{...current,stockDeductedAt:result.stock_deducted_at,deliveryConfirmedAt:result.delivery_confirmed_at,deliveryConfirmedBy:result.delivery_confirmed_by}:current);
-        logAction("Livraison client confirmée",invoice.id+" · "+invoice.client,"📦");
-      } catch(error) { alert(error instanceof Error?error.message:"Confirmation de livraison impossible"); }
-      finally { setConfirmingDeliveryId(null); }
-    }
-
     async function applyAdvanceToInvoice(invoice: Invoice) {
       const amount = Math.min(totalAvoir, invoiceRemainingAmount(invoice));
       if (amount <= 0 || applyingAdvanceInvoiceId) return;
@@ -659,7 +645,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
             <button type="button" onClick={()=>{setEditClient(c);setEditName(c.nom);setEditPhone(c.tel||"");setEditCity(c.ville||"");setEditAddress(c.adresse||"");setEditEmail(c.email||"");setEditContact(c.contact||"");}} className="flex-1 rounded-xl border border-border bg-card py-2.5 text-xs font-black"><Edit2 size={14} className="mr-1 inline"/>Modifier</button>
             <button type="button" onClick={()=>setDeleteClientTarget(c)} className="rounded-xl bg-red-50 px-4 py-2.5 text-xs font-black text-red-600" title="Supprimer le client"><Trash2 size={14}/></button>
           </div>
-          {pendingDeliveries.length>0&&<div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-black text-amber-900"><CalendarClock size={13} className="mr-1 inline"/> {pendingDeliveries.length} livraison{pendingDeliveries.length>1?"s":""} à confirmer · stock non déduit</div>}
+          
           {(canCreateOrder || canCollectPayment) && <div className={`grid gap-2 mt-4 ${canCreateOrder && canCollectPayment ? "grid-cols-2" : "grid-cols-1"}`}>
             {canCreateOrder && <button onClick={()=>setOrderClient(c)} className="py-3 rounded-xl text-xs font-black flex items-center justify-center gap-2" style={{ background:CC, color:"#fff" }}>
               <FilePlus size={15}/> Nouvelle commande
@@ -695,7 +681,6 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
               const canCancel = canCancelPendingOrder && (canManageAnyPendingOrder || inv.operatorId === currentUser.id) && inv.origin === "client_profile" && inv.status === "en attente" && paid <= 0;
               const canEdit = canCreateOrder && (canManageAnyPendingOrder || inv.operatorId === currentUser.id) && inv.origin === "client_profile" && inv.status === "en attente" && paid <= 0;
               const canReturnInvoice = canReturn && !isReturn && inv.status !== "annulée" && !!inv.stockDeductedAt && (inv.lines?.length ?? 0) > 0 && invoiceHasReturnable(inv);
-              const deliveryPending = !isReturn && inv.origin==="client_profile" && inv.status!=="annulée" && !inv.stockDeductedAt;
               const paymentNotice = isHighlighted && advanceAppliedNotice?.invoiceId === inv.id
                 ? `✓ Avoir déduit : ${fmt(advanceAppliedNotice.amount)}`
                 : null;
@@ -705,7 +690,6 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
                   <p className="text-xs text-muted-foreground mt-0.5">{formatPreciseDateTime(inv.dateRaw) === "—" ? inv.date : formatPreciseDateTime(inv.dateRaw)} · {inv.type}</p>
                   {inv.paymentMethod&&<p className="text-xs text-muted-foreground">{PM_ICON[inv.paymentMethod]} {inv.paymentMethod}</p>}
                   {maturity&&<p className="mt-1 inline-flex rounded px-1.5 py-0.5 text-[11px] font-bold" style={{background:maturity.bg,color:maturity.color}}>{maturity.text}</p>}
-                  {deliveryPending&&<p className="ml-1 mt-1 inline-flex rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-black text-amber-800">📦 Livraison à confirmer</p>}
                   {!isReturn&&inv.origin==="client_profile"&&inv.stockDeductedAt&&<p className="ml-1 mt-1 inline-flex rounded bg-emerald-50 px-1.5 py-0.5 text-[11px] font-black text-emerald-700">✓ Stock déduit</p>}
                   {!isReturn&&retours.some(r=>r.returnOfInvoiceId===inv.id)&&<p className="mt-1 text-[11px] font-black text-red-700">↩ {invoiceHasReturnable(inv)?"Retour partiel":"Retournée intégralement"}</p>}
                 </div>
