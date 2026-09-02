@@ -1,0 +1,33 @@
+name: Secure cashout and client delivery
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - scripts/secure-cashout-delivery.mjs
+permissions:
+  contents: write
+jobs:
+  implement:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/secure-cashout-delivery.mjs
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Commit implementation
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/app/types.ts src/lib/api.ts src/app/screens/ClientsView.tsx supabase/migrations/20260902214000_secure_cashout_and_delivery_confirmation.sql
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "fix: secure cash outflows and client delivery stock"
+          git pull --rebase origin main
+          git push origin main
