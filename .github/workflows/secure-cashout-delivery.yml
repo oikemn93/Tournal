@@ -27,17 +27,8 @@ jobs:
           s=s.replace('Stock déduit{viewedInvoice.deliveryConfirmedAt?` · livraison confirmée ${formatPreciseDateTime(viewedInvoice.deliveryConfirmedAt)}`:" · ancien flux déjà comptabilisé"}', 'Stock déduit{viewedInvoice.deliveryConfirmedAt?" · livraison confirmée "+formatPreciseDateTime(viewedInvoice.deliveryConfirmedAt):" · ancien flux déjà comptabilisé"}')
           p.write_text(s)
       - name: Apply patch
-        id: patch
         shell: bash
-        run: |
-          set -o pipefail
-          node scripts/secure-cashout-delivery.mjs 2>&1 | tee /tmp/patch.log
-      - name: Upload patch diagnostics
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: cashout-delivery-patch-log
-          path: /tmp/patch.log
+        run: node scripts/secure-cashout-delivery.mjs
       - uses: pnpm/action-setup@v4
         with:
           version: 10
@@ -50,5 +41,6 @@ jobs:
           git add src/app/types.ts src/lib/api.ts src/app/screens/ClientsView.tsx supabase/migrations/20260902214000_secure_cashout_and_delivery_confirmation.sql
           if git diff --cached --quiet; then exit 0; fi
           git commit -m "fix: secure cash outflows and client delivery stock"
+          git restore scripts/secure-cashout-delivery.mjs
           git pull --rebase origin main
           git push origin main
