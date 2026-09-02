@@ -44,4 +44,4 @@ const newText=`  function handleEnterBoutiqueAsAdmin(b: Boutique) {
 if(!s.includes(oldText)) throw new Error('current admin boutique entry block not found');
 s=s.replace(oldText,newText);
 fs.writeFileSync(path,s);
-// run-deferred-activation
+// run-deferred-activation-retry
