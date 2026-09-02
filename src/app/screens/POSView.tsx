@@ -332,7 +332,21 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
       unit: baseUnit, qty: baseQty, prixUnit: prix,
       ...(isSell ? { sellUnit: addSellUnit, sellQty: sellQtyN } : {}),
     };
-    setCart(prev => [...prev, item]);
+    setCart(prev => {
+      const matchIndex = prev.findIndex(existing =>
+        existing.productId === item.productId
+        && (existing.sellUnit ?? existing.unit) === (item.sellUnit ?? item.unit)
+        && Math.abs(existing.prixUnit - item.prixUnit) < 0.000001
+      );
+      if (matchIndex < 0) return [...prev, item];
+      return prev.map((existing, index) => {
+        if (index !== matchIndex) return existing;
+        if (existing.sellUnit && existing.sellQty !== undefined && item.sellUnit && item.sellQty !== undefined) {
+          return { ...existing, qty:existing.qty + item.qty, sellQty:existing.sellQty + item.sellQty };
+        }
+        return { ...existing, qty:existing.qty + item.qty };
+      });
+    });
     setAddModal(null);
   }
   function removeFromCart(lineIndex: number) { setCart(prev => prev.filter((_, index) => index !== lineIndex)); }

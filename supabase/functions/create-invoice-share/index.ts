@@ -104,11 +104,6 @@ Deno.serve(async (req: Request) => {
     const { data: existing, error: listErr } = await admin.storage.from(BUCKET).list(safeFolder, { limit: 1000 });
     if (listErr) throw listErr;
     const oldPaths = (existing ?? []).filter((entry) => entry.name.startsWith(`${safeRef}-`) && entry.name.endsWith(".pdf")).map((entry) => `${safeFolder}/${entry.name}`);
-    if (oldPaths.length) {
-      const { error } = await admin.storage.from(BUCKET).remove(oldPaths);
-      if (error) throw error;
-    }
-    await admin.from("document_shares").delete().eq("boutique_id", boutiqueId).eq("document_type", documentType).eq("document_ref", documentRef);
 
     const path = `${safeFolder}/${safeRef}-${crypto.randomUUID()}.pdf`;
     const { error: uploadErr } = await admin.storage.from(BUCKET).upload(path, bytes, { contentType: "application/pdf", cacheControl: "0", upsert: false });
@@ -129,6 +124,12 @@ Deno.serve(async (req: Request) => {
     if (shareErr) {
       await admin.storage.from(BUCKET).remove([path]);
       throw shareErr;
+    }
+
+    await admin.from("document_shares").delete().eq("boutique_id", boutiqueId).eq("document_type", documentType).eq("document_ref", documentRef).neq("token_hash", tokenHash);
+    if (oldPaths.length) {
+      const { error: cleanupErr } = await admin.storage.from(BUCKET).remove(oldPaths.filter(oldPath => oldPath !== path));
+      if (cleanupErr) console.warn("create-invoice-share old document cleanup", cleanupErr);
     }
 
     return reply({ url: `${PUBLIC_APP_URL}/d/${token}`, expires_at: expiresAt });
