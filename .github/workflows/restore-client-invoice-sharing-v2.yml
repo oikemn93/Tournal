@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - scripts/restore-client-invoice-sharing-v2.mjs
+      - scripts/run-client-docs-v2.trigger
 permissions:
   contents: write
 jobs:
