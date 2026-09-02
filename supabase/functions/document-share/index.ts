@@ -1,7 +1,6 @@
 import { createClient } from "jsr:@supabase/supabase-js@2.49.8";
 
 const BUCKET = "invoice-pdfs";
-const APP_URL = "https://tournal.vercel.app";
 
 function htmlEscape(value: unknown) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({
@@ -13,6 +12,15 @@ function htmlEscape(value: unknown) {
   }[char] ?? char));
 }
 
+// Vercel proxies this public Edge Function through /d/:token. Some intermediary
+// responses have historically re-decoded UTF-8 bytes as Latin-1, producing
+// mojibake such as "partagÃ©". Keep the HTML body strictly ASCII on the wire:
+// browsers reconstruct every French/dynamic Unicode character from numeric
+// HTML entities, so the page remains readable even if a proxy mishandles charset.
+function asciiHtml(value: string) {
+  return value.replace(/[^\x00-\x7F]/gu, (char) => `&#${char.codePointAt(0)};`);
+}
+
 async function sha256(value: string) {
   const bytes = new TextEncoder().encode(value);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
@@ -20,7 +28,7 @@ async function sha256(value: string) {
 }
 
 function page(title: string, body: string, status = 200) {
-  return new Response(`<!doctype html>
+  const html = `<!doctype html>
 <html lang="fr">
 <head>
   <meta charset="utf-8"/>
@@ -31,7 +39,9 @@ function page(title: string, body: string, status = 200) {
   <style>
     *{box-sizing:border-box}body{margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f7f7f4;color:#161616;min-height:100vh;display:grid;place-items:center;padding:24px}.card{width:min(100%,480px);background:#fff;border:1px solid #e9e9e3;border-radius:28px;padding:28px;box-shadow:0 18px 50px rgba(0,0,0,.07)}.brand{font-size:15px;font-weight:900;letter-spacing:.08em;text-transform:uppercase;color:#111827}.mark{width:48px;height:48px;border-radius:16px;background:#111827;color:#fff;display:grid;place-items:center;font-weight:900;margin-bottom:18px}.title{font-size:26px;line-height:1.1;font-weight:900;margin:8px 0 10px}.muted{color:#6b7280;font-size:14px;line-height:1.6}.meta{margin:22px 0;border:1px solid #ecece7;border-radius:18px;padding:15px 16px;background:#fafaf8}.row{display:flex;justify-content:space-between;gap:20px;padding:7px 0;font-size:13px}.row span:first-child{color:#6b7280}.row strong{text-align:right}.btn{display:flex;align-items:center;justify-content:center;width:100%;padding:14px 18px;border-radius:16px;background:#111827;color:#fff;text-decoration:none;font-weight:900;font-size:14px}.foot{margin-top:16px;text-align:center;color:#9ca3af;font-size:11px;line-height:1.5}
   </style>
-</head><body><main class="card">${body}</main></body></html>`, {
+</head><body><main class="card">${body}</main></body></html>`;
+
+  return new Response(asciiHtml(html), {
     status,
     headers: {
       "Content-Type": "text/html; charset=utf-8",
