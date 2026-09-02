@@ -83,3 +83,4 @@ const newEnter=`  function handleEnterBoutiqueAsAdmin(b: Boutique) {
 if(!s.includes(oldEnter)) throw new Error('admin enter target not found');
 s=s.replace(oldEnter,newEnter);
 fs.writeFileSync(path,s);
+// run-shared-entry-repair
