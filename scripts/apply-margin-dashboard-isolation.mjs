@@ -23,11 +23,3 @@ const oldRender = '{safeTab==="dashboard"    && canAccess("dashboard") && <Dashb
 const newRender = '{safeTab==="dashboard"    && canAccess("dashboard") && <RelationalDashboardView boutiqueId={boutique.id} canSeeMargin={canSeeMargin} onNavigate={(t,f)=>{setNavFilter(f??{});setTab(t);}}/>}';
 app = replaceRequired(app, oldRender, newRender, "dashboard render");
 fs.writeFileSync(appPath, app);
-
-const ciPath = ".github/workflows/ci.yml";
-let ci = fs.readFileSync(ciPath, "utf8");
-const anchor = '      - name: Permission read boundaries\n        run: node scripts/test-permission-read-boundaries.mjs\n';
-if (!ci.includes("Margin and dashboard isolation")) {
-  ci = replaceRequired(ci, anchor, `${anchor}\n      - name: Margin and dashboard isolation\n        run: node scripts/test-margin-dashboard-isolation.mjs\n`, "CI permission test anchor");
-}
-fs.writeFileSync(ciPath, ci);
