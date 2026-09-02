@@ -3,6 +3,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2.49.8";
 const BUCKET = "invoice-pdfs";
 const EXPIRES_SECONDS = 48 * 60 * 60;
 const MAX_PDF_BYTES = 12 * 1024 * 1024;
+const PUBLIC_APP_URL = (Deno.env.get("TOURNAL_PUBLIC_URL") ?? "https://tournal.vercel.app").replace(/\/$/, "");
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -13,6 +14,17 @@ const corsHeaders = {
 
 function reply(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+}
+
+function randomToken(bytes = 18) {
+  const raw = crypto.getRandomValues(new Uint8Array(bytes));
+  return btoa(String.fromCharCode(...raw)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+async function sha256(value: string) {
+  const bytes = new TextEncoder().encode(value);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 Deno.serve(async (req: Request) => {
@@ -96,16 +108,30 @@ Deno.serve(async (req: Request) => {
       const { error } = await admin.storage.from(BUCKET).remove(oldPaths);
       if (error) throw error;
     }
+    await admin.from("document_shares").delete().eq("boutique_id", boutiqueId).eq("document_type", documentType).eq("document_ref", documentRef);
 
     const path = `${safeFolder}/${safeRef}-${crypto.randomUUID()}.pdf`;
     const { error: uploadErr } = await admin.storage.from(BUCKET).upload(path, bytes, { contentType: "application/pdf", cacheControl: "0", upsert: false });
     if (uploadErr) throw uploadErr;
-    const { data: signed, error: signErr } = await admin.storage.from(BUCKET).createSignedUrl(path, EXPIRES_SECONDS, { download: downloadName });
-    if (signErr || !signed?.signedUrl) {
+
+    const token = randomToken();
+    const tokenHash = await sha256(token);
+    const expiresAt = new Date(Date.now() + EXPIRES_SECONDS * 1000).toISOString();
+    const { error: shareErr } = await admin.from("document_shares").insert({
+      token_hash: tokenHash,
+      boutique_id: boutiqueId,
+      document_type: documentType,
+      document_ref: documentRef,
+      storage_path: path,
+      download_name: downloadName,
+      expires_at: expiresAt,
+    });
+    if (shareErr) {
       await admin.storage.from(BUCKET).remove([path]);
-      throw signErr ?? new Error("Signing failed");
+      throw shareErr;
     }
-    return reply({ url: signed.signedUrl, expires_at: new Date(Date.now() + EXPIRES_SECONDS * 1000).toISOString() });
+
+    return reply({ url: `${PUBLIC_APP_URL}/d/${token}`, expires_at: expiresAt });
   } catch (err) {
     console.error("create-invoice-share", err);
     return reply({ error: "Création du lien impossible" }, 500);
