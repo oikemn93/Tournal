@@ -1,3 +1,4 @@
+// One-shot branch patcher. Removed before merge.
 import fs from "node:fs";
 
 function replaceRequired(text, from, to, label) {
