@@ -41,12 +41,13 @@ create policy "stock_entries: select permitted"
 on public.stock_entries for select to authenticated
 using (private.auth_has_any_permission(boutique_id, array['stock','inventaire','transferts','dashboard','fournisseurs']));
 
--- Customer PII is a Clients-domain read. Payment/return flows operate through
--- SECURITY DEFINER RPCs and therefore do not need blanket table visibility.
+-- Client rows are normally a Clients-domain read. Dashboard remains in the
+-- compatibility union until its customer KPI moves to an aggregate-only RPC;
+-- this avoids changing visible dashboard counts in the security rollout.
 drop policy if exists "clients: select" on public.clients;
 create policy "clients: select permitted"
 on public.clients for select to authenticated
-using (private.auth_has_permission(boutique_id, 'clients'));
+using (private.auth_has_any_permission(boutique_id, array['clients','dashboard']));
 
 -- Supplier directory can be required from stock receipts and charge workflows.
 drop policy if exists "suppliers: select" on public.suppliers;
