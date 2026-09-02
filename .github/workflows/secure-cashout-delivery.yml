@@ -16,7 +16,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: node scripts/secure-cashout-delivery.mjs
+      - name: Apply patch
+        id: patch
+        shell: bash
+        run: |
+          set -o pipefail
+          node scripts/secure-cashout-delivery.mjs 2>&1 | tee /tmp/patch.log
+      - name: Upload patch diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cashout-delivery-patch-log
+          path: /tmp/patch.log
       - uses: pnpm/action-setup@v4
         with:
           version: 10
