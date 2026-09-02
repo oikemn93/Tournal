@@ -1,172 +1,121 @@
-import React, { useState } from "react";
-import { Boxes, Users, CreditCard, TrendingDown, ArrowUpRight, BarChart2, PieChart as PieChartIcon } from "lucide-react";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, Cell, PieChart, Pie, Legend, ResponsiveContainer } from "recharts";
-import type { Boutique, Tab, DashPeriod } from "../types";
-import { SEM, MONTHLY, inputCls } from "../constants";
-import { fmt } from "../utils/formatting";
-import { productQty, invBadge, filterByPeriod } from "../utils/inventory";
-import { filterPaymentEventsByPeriod, invoiceRemainingAmount } from "../utils/payments";
+import React, { useEffect, useMemo, useState } from "react";
+import { AlertTriangle, ArrowRight, BarChart3, CircleDollarSign, PackageSearch, ReceiptText, TrendingUp, Users } from "lucide-react";
+import { loadDashboardSummary, type DashboardSummary } from "../../lib/dashboardApi";
+import type { Tab } from "../types";
 
-export function DashboardView({ boutique, onNavigate }: { boutique: Boutique; onNavigate: (tab: Tab, filter?: Record<string,string>) => void }) {
-  const { products, entries, clients, invoices } = boutique;
-  const charges = boutique.charges ?? [];
-  const [period, setPeriod] = useState<DashPeriod>("jour");
-  const [customFrom, setCustomFrom] = useState("");
-  const [customTo, setCustomTo] = useState("");
+const fmt = (value: number) => `${new Intl.NumberFormat("fr-FR").format(Math.round(value || 0))} F`;
 
-  const filtInv = filterByPeriod(invoices, period, customFrom, customTo);
-  const filtPayments = filterPaymentEventsByPeriod(invoices, period, customFrom, customTo);
-  const filtCh  = filterByPeriod(charges, period, customFrom, customTo);
-  const invoiceSign = (invoice: typeof invoices[number]) => invoice.type.toLowerCase() === "retour" ? -1 : 1;
-  const chargeCashAmount = (charge: typeof charges[number]) => charge.source === "transfer" ? Number(charge.paidAmount ?? 0) : charge.montant;
+type Period = "7d" | "30d" | "month";
 
-  const ca          = filtPayments.reduce((s,p) => s + p.signedAmount, 0);
-  const caTotal     = filtInv.reduce((s,i) => s + invoiceSign(i) * i.montant, 0);
-  const totalCharges= filtCh.reduce((s,c) => s + chargeCashAmount(c), 0);
-  const margeBrute  = ca - totalCharges;
-  const tauxMarge   = ca !== 0 ? Math.round((margeBrute/Math.abs(ca))*100) : 0;
-  const impayées    = filtInv.filter(i=>invoiceSign(i)>0 && invoiceRemainingAmount(i)>0);
-  const totalImpayé = impayées.reduce((s,i)=>s+invoiceRemainingAmount(i),0);
-  const totalQty    = products.reduce((s,p)=>s+productQty(p.id,entries),0);
-  const rupture     = products.filter(p=>productQty(p.id,entries)<=0).length;
-  const grossistes  = clients.filter(c=>c.type==="Grossiste").length;
+function periodBounds(period: Period) {
+  const now = new Date();
+  const to = new Date(now.getTime() + 1000);
+  if (period === "month") {
+    return { from: new Date(now.getFullYear(), now.getMonth(), 1).toISOString(), to: to.toISOString() };
+  }
+  const days = period === "30d" ? 29 : 6;
+  const from = new Date(now);
+  from.setHours(0, 0, 0, 0);
+  from.setDate(from.getDate() - days);
+  return { from: from.toISOString(), to: to.toISOString() };
+}
 
-  const pieData = [
-    { name:"Encaissé", value:ca, color:"#475569" },
-    { name:"Charges",  value:totalCharges, color:"#ef4444" },
-  ].filter(d=>d.value>0);
+export function DashboardView({ boutiqueId, canSeeMargin, onNavigate }: {
+  boutiqueId: string;
+  canSeeMargin: boolean;
+  onNavigate: (tab: Tab, filter?: Record<string, string>) => void;
+}) {
+  const [period, setPeriod] = useState<Period>("7d");
+  const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
-  const barData = (() => {
-    if (period === "annee") return MONTHLY;
-    if (period === "semaine") {
-      const days = ["Lun","Mar","Mer","Jeu","Ven","Sam","Dim"];
-      return days.map((d,i) => {
-        const v = filtPayments.filter(payment => (new Date(payment.paidAt).getDay()+6)%7 === i)
-          .reduce((s,payment)=>s+payment.signedAmount,0);
-        return { m:d, v:Math.round(v/1000) };
-      });
-    }
-    const map = new Map<string,number>();
-    filtPayments.forEach(payment => {
-      const date = new Date(payment.paidAt);
-      const k = Number.isNaN(date.getTime()) ? payment.paidAt.slice(0,10) : date.toLocaleDateString("fr-FR",{day:"2-digit",month:"short"});
-      map.set(k,(map.get(k)??0)+payment.signedAmount);
-    });
-    return Array.from(map.entries()).slice(-10).map(([m,v])=>({ m, v:Math.round(v/1000) }));
-  })();
+  useEffect(() => {
+    let cancelled = false;
+    const bounds = periodBounds(period);
+    setLoading(true);
+    setError("");
+    void loadDashboardSummary({ boutiqueId, ...bounds })
+      .then((result) => { if (!cancelled) setSummary(result); })
+      .catch((cause) => { if (!cancelled) setError(cause instanceof Error ? cause.message : "Dashboard indisponible"); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [boutiqueId, period]);
 
-  const kpis: Array<{ label:string; value:string; icon:React.ElementType; color:string; sub:string; tab:Tab; filter?:Record<string,string> }> = [
-    { label:"Stock",   value:`${totalQty} pcs`, icon:Boxes,       color:SEM.neutral.accent, sub:`${rupture} en rupture`,        tab:"stock",    filter:{ stockFilter:"critical" } },
-    { label:"Clients", value:`${clients.length}`,icon:Users,       color:SEM.neutral.accent, sub:`${grossistes} grossistes`,     tab:"clients",  filter:{ clientTab:"Grossiste" } },
-    { label:"Impayés", value:fmt(totalImpayé),   icon:CreditCard,  color:SEM.danger.accent,  sub:`${impayées.length} factures`,  tab:"factures", filter:{ statusFilter:"impayé" } },
-    { label:"Charges", value:fmt(totalCharges),  icon:TrendingDown,color:SEM.neutral.accent, sub:`${filtCh.length} entrées`,     tab:"charges" },
+  const maxSeries = useMemo(() => Math.max(1, ...(summary?.series ?? []).map(point => Number(point.sales) || 0)), [summary?.series]);
+
+  if (loading && !summary) {
+    return <div className="py-16 text-center text-sm font-semibold text-muted-foreground">Chargement du tableau de bord…</div>;
+  }
+  if (error && !summary) {
+    return <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{error}</div>;
+  }
+  if (!summary) return null;
+
+  const cards = [
+    { label: "Chiffre d’affaires", value: fmt(summary.sales), icon: TrendingUp },
+    { label: "Encaissé", value: fmt(summary.collected), icon: CircleDollarSign },
+    { label: "Impayé", value: fmt(summary.outstanding), icon: ReceiptText },
+    { label: "Charges payées", value: fmt(summary.charges), icon: BarChart3 },
   ];
 
-  const periodBtns: Array<{id:DashPeriod;label:string}> = [
-    {id:"jour",label:"Jour"},{id:"semaine",label:"Sem."},{id:"mois",label:"Mois"},{id:"annee",label:"An"},{id:"custom",label:"📅"},
-  ];
-
-  return (
-    <div className="space-y-4 pb-4">
-      {/* Period selector */}
-      <div className="flex gap-1.5 bg-card rounded-2xl p-1.5 border border-border">
-        {periodBtns.map(p=>(
-          <button key={p.id} onClick={()=>setPeriod(p.id)} className="flex-1 py-2 rounded-xl text-xs font-bold transition-all" style={{background:period===p.id?"#1f2937":"transparent",color:period===p.id?"#fff":"#6b7280"}}>
-            {p.label}
-          </button>
-        ))}
+  return <div className="space-y-4 pb-24">
+    <div className="flex items-center justify-between gap-3">
+      <div>
+        <h1 className="text-xl font-black">Tableau de bord</h1>
+        <p className="text-xs text-muted-foreground mt-1">Agrégats sécurisés, sans téléchargement des tables métier.</p>
       </div>
-      {period==="custom" && (
-        <div className="flex gap-2">
-          <div className="flex-1"><label className="text-xs text-muted-foreground font-bold block mb-1">DU</label><input type="date" value={customFrom} onChange={e=>setCustomFrom(e.target.value)} className={inputCls}/></div>
-          <div className="flex-1"><label className="text-xs text-muted-foreground font-bold block mb-1">AU</label><input type="date" value={customTo} onChange={e=>setCustomTo(e.target.value)} className={inputCls}/></div>
-        </div>
-      )}
+      <select value={period} onChange={e => setPeriod(e.target.value as Period)} className="rounded-xl bg-muted px-3 py-2 text-sm font-bold outline-none">
+        <option value="7d">7 jours</option>
+        <option value="30d">30 jours</option>
+        <option value="month">Ce mois</option>
+      </select>
+    </div>
 
-      {/* Margin summary */}
-      <div className="bg-card rounded-2xl p-4 border border-border">
-        <div className="flex items-center justify-between mb-3">
-          <p className="font-bold text-sm">Résultat de la période</p>
-          <span className="text-xs px-2.5 py-1 rounded-full font-bold" style={{background:margeBrute>=0?SEM.success.bg:"#ef444422",color:margeBrute>=0?SEM.success.accent:SEM.danger.accent}}>{tauxMarge}% marge</span>
-        </div>
-        <div className="grid grid-cols-3 gap-2">
-          {[
-            {label:"CA Encaissé", value:ca, color:"#1f2937"},
-            {label:"Charges",     value:totalCharges, color:"#ef4444"},
-            {label:"Solde net", value:margeBrute, color:margeBrute>=0?SEM.success.accent:SEM.danger.accent},
-          ].map(m=>(
-            <div key={m.label} className="rounded-xl p-2.5 text-center" style={{background:m.color+"11"}}>
-              <p className="text-base font-black leading-tight" style={{color:m.color,fontFamily:"'Nunito',sans-serif"}}>{fmt(m.value)}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">{m.label}</p>
-            </div>
-          ))}
-        </div>
+    {error && <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">Données précédentes conservées · {error}</div>}
+
+    <div className="grid grid-cols-2 gap-3">
+      {cards.map(({ label, value, icon: Icon }) => <div key={label} className="rounded-2xl border border-border bg-card p-4">
+        <Icon size={17} className="text-muted-foreground" />
+        <p className="mt-3 text-xs font-bold text-muted-foreground">{label}</p>
+        <p className="mt-1 text-lg font-black">{value}</p>
+      </div>)}
+    </div>
+
+    <div className="rounded-2xl border border-border bg-card p-4">
+      <div className="flex items-center justify-between">
+        <div><p className="text-sm font-black">Activité commerciale</p><p className="text-xs text-muted-foreground">Ventes nettes par jour</p></div>
+        <span className="text-xs font-bold text-muted-foreground">{summary.sales_count} vente{summary.sales_count !== 1 ? "s" : ""}</span>
       </div>
-
-      {/* KPI cards */}
-      <div className="grid grid-cols-2 gap-3">
-        {kpis.map(k=>{
-          const isSemantic = k.color===SEM.danger.accent||k.color===SEM.success.accent||k.color===SEM.warning.accent;
-          return (
-          <button key={k.label} onClick={()=>onNavigate(k.tab, k.filter)}
-            className="bg-card rounded-2xl p-4 border text-left active:scale-[0.97] transition-transform"
-            style={{ borderColor: isSemantic ? k.color+"44" : "var(--border)" }}>
-            <div className="flex items-center justify-between mb-3">
-              <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{background:isSemantic?k.color+"15":"#f3f4f6"}}>
-                <k.icon size={22} style={{color:isSemantic?k.color:"#374151"}}/>
-              </div>
-              <ArrowUpRight size={14} style={{color:isSemantic?k.color:"#9ca3af"}}/>
-            </div>
-            <p className="text-lg font-black leading-tight" style={{fontFamily:"'Nunito',sans-serif",color:isSemantic?k.color:"#1f2937"}}>{k.value}</p>
-            <p className="text-xs text-muted-foreground mt-0.5">{k.label}</p>
-            <p className="text-xs font-bold mt-1" style={{color:isSemantic?k.color:"#6b7280"}}>{k.sub}</p>
-          </button>);
+      <div className="mt-4 flex h-28 items-end gap-2">
+        {(summary.series ?? []).length === 0 ? <div className="m-auto text-xs text-muted-foreground">Aucune vente sur la période</div> : summary.series.map(point => {
+          const height = Math.max(4, Math.round((Number(point.sales) || 0) / maxSeries * 100));
+          return <div key={point.date} className="flex min-w-0 flex-1 flex-col items-center justify-end gap-1 h-full">
+            <div className="w-full rounded-t-lg bg-foreground/15" style={{ height: `${height}%` }} title={`${point.date} · ${fmt(Number(point.sales))}`} />
+            <span className="text-[9px] text-muted-foreground">{new Date(point.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" })}</span>
+          </div>;
         })}
       </div>
-
-      {/* Charts */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {barData.length > 0 && (
-          <div className="bg-card rounded-2xl p-4 border border-border">
-            <div className="flex items-center justify-between mb-3"><p className="font-bold text-sm">Ventes <span className="text-muted-foreground font-normal text-xs">(×1 000 F)</span></p><BarChart2 size={16} className="text-muted-foreground"/></div>
-            <ResponsiveContainer width="100%" height={130}>
-              <BarChart data={barData} barSize={20} margin={{top:4,right:0,left:0,bottom:0}}>
-                <XAxis dataKey="m" tick={{fill:"#6b7280",fontSize:10}} axisLine={false} tickLine={false}/>
-                <YAxis hide/>
-                <Tooltip cursor={{fill:"rgba(0,0,0,0.04)"}} content={({active,payload})=>active&&payload?.length?<div className="bg-popover border border-border rounded-xl px-3 py-1.5 text-xs font-bold" style={{color:"#1f2937"}}>{payload[0].value}k F</div>:null}/>
-                <Bar key="bar-ventes" name="ventes" dataKey="v" radius={[4,4,0,0]}>
-                  {barData.map((_d,i)=><Cell key={`bar-cell-${i}`} fill={i===barData.length-1?"#1f2937":"#cbd5e1"}/>)}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        )}
-        {pieData.length > 0 && (
-          <div className="bg-card rounded-2xl p-4 border border-border">
-            <div className="flex items-center justify-between mb-3"><p className="font-bold text-sm">Répartition</p><PieChartIcon size={16} className="text-muted-foreground"/></div>
-            <ResponsiveContainer width="100%" height={130}>
-              <PieChart>
-                <Pie key="pie-repartition" name="repartition" data={pieData} dataKey="value" cx="50%" cy="50%" outerRadius={52} paddingAngle={3}>
-                  {pieData.map((e,i)=><Cell key={`pie-cell-${i}`} fill={e.color}/>)}
-                </Pie>
-                <Tooltip formatter={(v:number)=>fmt(v)} contentStyle={{borderRadius:12,border:"1px solid var(--border)",fontSize:11}}/>
-                <Legend iconType="circle" iconSize={8} wrapperStyle={{fontSize:11}}/>
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-        )}
-      </div>
-
-      {/* Recent invoices */}
-      <div className="bg-card rounded-2xl border border-border overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-3"><p className="font-bold text-sm">Factures récentes</p><button onClick={()=>onNavigate("factures")} className="text-xs font-bold" style={{color:SEM.neutral.accent}}>Voir tout →</button></div>
-        {[...invoices].reverse().slice(0,4).map(inv=>{const [tc,bc]=invBadge(inv.status);return(
-          <div key={inv.id} className="flex items-center justify-between px-4 py-3 border-t border-border">
-            <div><p className="text-sm font-semibold">{inv.client}</p><p className="text-xs text-muted-foreground">{inv.id} · {inv.date}</p></div>
-            <div className="text-right"><p className="text-sm font-black" style={{fontFamily:"'Nunito',sans-serif"}}>{fmt(inv.montant)}</p><span className="text-xs px-2 py-0.5 rounded-full font-bold capitalize" style={{background:bc,color:tc}}>{inv.status}</span></div>
-          </div>
-        );})}
-      </div>
     </div>
-  );
+
+    <div className="grid grid-cols-2 gap-3">
+      <button type="button" onClick={() => onNavigate("clients")} className="rounded-2xl border border-border bg-card p-4 text-left active:scale-[0.99]">
+        <Users size={18} /><p className="mt-2 text-2xl font-black">{summary.clients_count}</p><p className="text-xs text-muted-foreground">Clients actifs sur la période</p><ArrowRight size={14} className="mt-3" />
+      </button>
+      <button type="button" onClick={() => onNavigate("stock", { stockFilter: "low" })} className="rounded-2xl border border-border bg-card p-4 text-left active:scale-[0.99]">
+        {summary.low_stock_count > 0 ? <AlertTriangle size={18} /> : <PackageSearch size={18} />}
+        <p className="mt-2 text-2xl font-black">{summary.low_stock_count}</p><p className="text-xs text-muted-foreground">Articles en stock bas</p><ArrowRight size={14} className="mt-3" />
+      </button>
+    </div>
+
+    {canSeeMargin && summary.margin != null && <div className="rounded-2xl border border-border bg-card p-4">
+      <div className="flex items-center justify-between"><p className="text-sm font-black">Marge réalisée</p><span className="text-lg font-black">{fmt(summary.margin)}</span></div>
+      {summary.stock_value != null && <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground"><span>Valeur d’achat du stock</span><span className="font-bold text-foreground">{fmt(summary.stock_value)}</span></div>}
+    </div>}
+
+    <div className="flex gap-2">
+      <button onClick={() => onNavigate("factures")} className="flex-1 rounded-xl border border-border px-3 py-2 text-xs font-bold">Factures</button>
+      <button onClick={() => onNavigate("charges")} className="flex-1 rounded-xl border border-border px-3 py-2 text-xs font-bold">Charges</button>
+    </div>
+  </div>;
 }

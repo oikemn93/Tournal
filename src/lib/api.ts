@@ -775,10 +775,10 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string, options: Bouti
     const caisseWindow = `&or=(opened_at.gte.${historyFromFilter},closed_at.is.null)`;
     const [boutiques, categories, products, entries, clients, suppliers, invoices, payments, advances, creditRefunds, charges, sessions, auditLogs, userScope] = await Promise.all([
       dataRequest<any[]>(`boutiques?select=*${boutiqueFilter}&order=nom.asc`),
-      (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`categories?select=*${scoped()}`)), (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`products?select=*${scoped()}`)),
-      (options.historyOnly ? Promise.resolve([]) : dataRequestAll<any>(`stock_entries?select=*${scoped()}${stockWindow}`, "entry_date.desc,id.desc")), dataRequest<any[]>(`clients?select=*${scoped()}`),
+      (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`categories?select=*${scoped()}`)), (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`products_app?select=*${scoped()}`)),
+      (options.historyOnly ? Promise.resolve([]) : dataRequestAll<any>(`stock_entries_app?select=*${scoped()}${stockWindow}`, "entry_date.desc,id.desc")), dataRequest<any[]>(`clients?select=*${scoped()}`),
       (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`suppliers?select=*${scoped()}`)),
-      dataRequest<any[]>(`invoices?select=*,invoice_lines(*)${scoped()}${invoiceWindow}&order=invoice_date.desc`),
+      dataRequest<any[]>(`invoices_app?select=*${scoped()}${invoiceWindow}&order=invoice_date.desc`),
       dataRequest<any[]>(`invoice_payments?select=*${scoped()}${paymentWindow}&order=paid_at.asc`), (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`client_advances?select=*${scoped()}&order=paid_at.desc,id.desc`)),
       (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`client_credit_refunds?select=*${scoped()}&refunded_at=gte.${historyFromFilter}&order=refunded_at.desc,id.desc`)), (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`charges?select=*${scoped()}${chargeWindow}`)),
       (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`caisse_sessions?select=*${scoped()}${caisseWindow}`)),
@@ -1167,11 +1167,11 @@ export async function loadBoutiqueSyncPatch(boutiqueId: string, sourceEvents: Bo
   const entryIds = records("stock_entry");
 
   const [directProducts, categoryProducts, categories, entries, invoices, payments, clients, advances, suppliers, charges, receiptCharges, sessions, logs] = await Promise.all([
-    productIds.length ? dataRequest<any[]>(`products?select=*${scoped}${syncInFilter("id", productIds)}`) : Promise.resolve([]),
-    categoryIds.length ? dataRequest<any[]>(`products?select=*${scoped}${syncInFilter("category_id", categoryIds)}`) : Promise.resolve([]),
+    productIds.length ? dataRequest<any[]>(`products_app?select=*${scoped}${syncInFilter("id", productIds)}`) : Promise.resolve([]),
+    categoryIds.length ? dataRequest<any[]>(`products_app?select=*${scoped}${syncInFilter("category_id", categoryIds)}`) : Promise.resolve([]),
     categoryIds.length ? dataRequest<any[]>(`categories?select=*${scoped}${syncInFilter("id", categoryIds)}`) : Promise.resolve([]),
-    entryIds.length ? dataRequest<any[]>(`stock_entries?select=*${scoped}${syncInFilter("id", entryIds)}`) : Promise.resolve([]),
-    invoiceIds.length ? dataRequest<any[]>(`invoices?select=*,invoice_lines(*)${scoped}${syncInFilter("id", invoiceIds)}`) : Promise.resolve([]),
+    entryIds.length ? dataRequest<any[]>(`stock_entries_app?select=*${scoped}${syncInFilter("id", entryIds)}`) : Promise.resolve([]),
+    invoiceIds.length ? dataRequest<any[]>(`invoices_app?select=*${scoped}${syncInFilter("id", invoiceIds)}`) : Promise.resolve([]),
     invoiceIds.length ? dataRequest<any[]>(`invoice_payments?select=*${scoped}${syncInFilter("invoice_id", invoiceIds)}&order=paid_at.asc`) : Promise.resolve([]),
     clientIds.length ? dataRequest<any[]>(`clients?select=*${scoped}${syncInFilter("id", clientIds)}`) : Promise.resolve([]),
     advanceIds.length ? dataRequest<any[]>(`client_advances?select=*${scoped}${syncInFilter("id", advanceIds)}&order=paid_at.desc,id.desc`) : Promise.resolve([]),
@@ -1262,7 +1262,7 @@ export async function loadBoutiqueHistoryRange(boutiqueId:string, fromAt:string,
 
 export async function loadProductStockHistory(boutiqueId:string, productId:number) {
   const bid=encodeURIComponent(boutiqueId);
-  const rows=await dataRequestAll<any>(`stock_entries?select=*&boutique_id=eq.${bid}&product_id=eq.${encodeURIComponent(String(productId))}`,"entry_date.desc,id.desc");
+  const rows=await dataRequestAll<any>(`stock_entries_app?select=*&boutique_id=eq.${bid}&product_id=eq.${encodeURIComponent(String(productId))}`,"entry_date.desc,id.desc");
   const day=(value?:string|null)=>value?new Date(value).toLocaleDateString("fr-FR"):"";
   return rows.map(row=>({id:Number(row.id),productId:Number(row.product_id),qty:Number(row.qty),unit:"unité",montantDu:Number(row.qty)*Number(row.prix_unit??0),movementType:row.type??undefined,date:day(row.entry_date),recordedAt:row.entry_date,fournisseur:row.note??"",supplierId:row.supplier_id??undefined,reference:row.reference??undefined,operatorId:row.operator_id??undefined,invoiceId:row.source_invoice_id??undefined}));
 }
