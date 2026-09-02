@@ -104,6 +104,9 @@ export type Invoice    = {
   cancelReason?: string;
   cancelledAt?: string;
   cancelledBy?: string;
+  stockDeductedAt?: string;
+  deliveryConfirmedAt?: string;
+  deliveryConfirmedBy?: string;
 };
 
 export type ProductParam = { productId: number; nbPiecesParLot: number; longueurParPiece: number; unitVente: string };

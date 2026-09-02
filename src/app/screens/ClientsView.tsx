@@ -9,7 +9,7 @@ import { getSiblings } from "../utils/inventory";
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
-import { applyClientAdvanceFifo, applyClientAdvanceToInvoice, cancelPendingInvoice, createClient, createInvoiceShare, createPaymentReceiptShare, deleteClientIfUnused, recordClientPayment, refundClientAdvance, returnSale, updateClientContact, updateClientPaymentTerms, updateClientProfile, WHOLESALE_MARKER } from "../../lib/api";
+import { applyClientAdvanceFifo, applyClientAdvanceToInvoice, cancelPendingInvoice, confirmClientDelivery, createClient, createInvoiceShare, createPaymentReceiptShare, deleteClientIfUnused, recordClientPayment, refundClientAdvance, returnSale, updateClientContact, updateClientPaymentTerms, updateClientProfile, WHOLESALE_MARKER } from "../../lib/api";
 import { PhoneField } from "../components/PhoneField";
 import { formatPreciseDateTime, invoicePaidAmount, invoiceRemainingAmount as baseInvoiceRemainingAmount, roundMoney } from "../utils/payments";
 import { generatePaymentReceiptPDFBlob, openInvoicePDF, openOrderDocument, openPaymentReceiptPreview, openReceiptPreview } from "../utils/invoice";
@@ -66,6 +66,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
   const [viewedInvoice, setViewedInvoice] = useState<Invoice|null>(null);
   const [shareInvoice, setShareInvoice] = useState<Invoice|null>(null);
   const [sharingPaymentId, setSharingPaymentId] = useState<number|string|null>(null);
+  const [confirmingDeliveryId, setConfirmingDeliveryId] = useState<string|null>(null);
   const [viewedInvoiceMargin, setViewedInvoiceMargin] = useState<FifoRealizedMarginReport|null>(null);
   const [viewedInvoiceMarginLoading, setViewedInvoiceMarginLoading] = useState(false);
   const [clientReturnInv, setClientReturnInv] = useState<Invoice|null>(null);
@@ -305,6 +306,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
     const totalFacturé  = totalVentesFacturées-totalRetours;
     const totalEncaissé = ventes.reduce((s,i)=>s+invoicePaidAmount(i),0)-retours.reduce((s,i)=>s+invoicePaidAmount(i),0)-clientCreditRefunds.reduce((s,r)=>s+r.amount,0);
     const totalImpayé   = ventes.reduce((s,i)=>s+invoiceRemainingAmount(i),0);
+    const pendingDeliveries = ventes.filter(i=>i.origin==="client_profile"&&i.status!=="annulée"&&!i.stockDeductedAt);
     const clientAdvances = (boutique.clientAdvances ?? []).filter(advance => advance.clientId === c.id)
       .sort((a,b)=>b.paidAt.localeCompare(a.paidAt));
     const advanceRemaining = (advance: typeof clientAdvances[number]) => Math.max(0, advance.amount - (advance.allocatedAmount ?? 0));
@@ -489,6 +491,19 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
       }
     }
 
+    async function confirmDelivery(invoice: Invoice) {
+      if (confirmingDeliveryId || invoice.origin!=="client_profile" || invoice.status==="annulée" || invoice.stockDeductedAt) return;
+      setConfirmingDeliveryId(invoice.id);
+      try {
+        const result=await confirmClientDelivery({boutiqueId:boutique.id,invoiceId:invoice.id});
+        const updated=boutique.invoices.map(item=>item.id===invoice.id?{...item,stockDeductedAt:result.stock_deducted_at,deliveryConfirmedAt:result.delivery_confirmed_at,deliveryConfirmedBy:result.delivery_confirmed_by}:item);
+        onUpdate({invoices:updated});
+        setViewedInvoice(current=>current?.id===invoice.id?{...current,stockDeductedAt:result.stock_deducted_at,deliveryConfirmedAt:result.delivery_confirmed_at,deliveryConfirmedBy:result.delivery_confirmed_by}:current);
+        logAction("Livraison client confirmée",invoice.id+" · "+invoice.client,"📦");
+      } catch(error) { alert(error instanceof Error?error.message:"Confirmation de livraison impossible"); }
+      finally { setConfirmingDeliveryId(null); }
+    }
+
     async function applyAdvanceToInvoice(invoice: Invoice) {
       const amount = Math.min(totalAvoir, invoiceRemainingAmount(invoice));
       if (amount <= 0 || applyingAdvanceInvoiceId) return;
@@ -644,6 +659,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
             <button type="button" onClick={()=>{setEditClient(c);setEditName(c.nom);setEditPhone(c.tel||"");setEditCity(c.ville||"");setEditAddress(c.adresse||"");setEditEmail(c.email||"");setEditContact(c.contact||"");}} className="flex-1 rounded-xl border border-border bg-card py-2.5 text-xs font-black"><Edit2 size={14} className="mr-1 inline"/>Modifier</button>
             <button type="button" onClick={()=>setDeleteClientTarget(c)} className="rounded-xl bg-red-50 px-4 py-2.5 text-xs font-black text-red-600" title="Supprimer le client"><Trash2 size={14}/></button>
           </div>
+          {pendingDeliveries.length>0&&<div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-black text-amber-900"><CalendarClock size={13} className="mr-1 inline"/> {pendingDeliveries.length} livraison{pendingDeliveries.length>1?"s":""} à confirmer · stock non déduit</div>}
           {(canCreateOrder || canCollectPayment) && <div className={`grid gap-2 mt-4 ${canCreateOrder && canCollectPayment ? "grid-cols-2" : "grid-cols-1"}`}>
             {canCreateOrder && <button onClick={()=>setOrderClient(c)} className="py-3 rounded-xl text-xs font-black flex items-center justify-center gap-2" style={{ background:CC, color:"#fff" }}>
               <FilePlus size={15}/> Nouvelle commande
@@ -678,7 +694,8 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
               const canUseAdvance = canCollectPayment && !isReturn && remaining>0 && totalAvoir>0;
               const canCancel = canCancelPendingOrder && (canManageAnyPendingOrder || inv.operatorId === currentUser.id) && inv.origin === "client_profile" && inv.status === "en attente" && paid <= 0;
               const canEdit = canCreateOrder && (canManageAnyPendingOrder || inv.operatorId === currentUser.id) && inv.origin === "client_profile" && inv.status === "en attente" && paid <= 0;
-              const canReturnInvoice = canReturn && !isReturn && inv.status !== "annulée" && paid > 0 && (inv.lines?.length ?? 0) > 0 && invoiceHasReturnable(inv);
+              const canReturnInvoice = canReturn && !isReturn && inv.status !== "annulée" && !!inv.stockDeductedAt && (inv.lines?.length ?? 0) > 0 && invoiceHasReturnable(inv);
+              const deliveryPending = !isReturn && inv.origin==="client_profile" && inv.status!=="annulée" && !inv.stockDeductedAt;
               const paymentNotice = isHighlighted && advanceAppliedNotice?.invoiceId === inv.id
                 ? `✓ Avoir déduit : ${fmt(advanceAppliedNotice.amount)}`
                 : null;
@@ -688,6 +705,8 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
                   <p className="text-xs text-muted-foreground mt-0.5">{formatPreciseDateTime(inv.dateRaw) === "—" ? inv.date : formatPreciseDateTime(inv.dateRaw)} · {inv.type}</p>
                   {inv.paymentMethod&&<p className="text-xs text-muted-foreground">{PM_ICON[inv.paymentMethod]} {inv.paymentMethod}</p>}
                   {maturity&&<p className="mt-1 inline-flex rounded px-1.5 py-0.5 text-[11px] font-bold" style={{background:maturity.bg,color:maturity.color}}>{maturity.text}</p>}
+                  {deliveryPending&&<p className="ml-1 mt-1 inline-flex rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-black text-amber-800">📦 Livraison à confirmer</p>}
+                  {!isReturn&&inv.origin==="client_profile"&&inv.stockDeductedAt&&<p className="ml-1 mt-1 inline-flex rounded bg-emerald-50 px-1.5 py-0.5 text-[11px] font-black text-emerald-700">✓ Stock déduit</p>}
                   {!isReturn&&retours.some(r=>r.returnOfInvoiceId===inv.id)&&<p className="mt-1 text-[11px] font-black text-red-700">↩ {invoiceHasReturnable(inv)?"Retour partiel":"Retournée intégralement"}</p>}
                 </div>
                 <div className="text-right flex-shrink-0"><p className="font-black text-sm" style={{ fontFamily:"'Nunito',sans-serif" }}>{fmt(inv.montant)}</p>{isReturn?<>{Number(inv.returnReceivableReduction??0)>0&&<p className="text-[11px] font-semibold text-amber-700">Créance −{fmt(Number(inv.returnReceivableReduction))}</p>}{Number(inv.returnCreditRestore??0)>0&&<p className="text-[11px] font-semibold" style={{color:SEM.success.accent}}>Avoir +{fmt(Number(inv.returnCreditRestore))}</p>}{Number(inv.returnRefundAmount??0)>0&&<p className="text-[11px] font-semibold text-red-700">Remboursé {fmt(Number(inv.returnRefundAmount))}</p>}</>:<>{paid>0&&<p className="text-xs font-semibold" style={{ color:SEM.success.accent }}>✓ {fmt(paid)}</p>}{remaining>0&&<p className="text-xs font-semibold" style={{ color:SEM.warning.accent }}>⏳ {fmt(remaining)}</p>}</>}</div>
@@ -701,6 +720,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
                     ? <button type="button" onClick={()=>setViewedInvoice(inv)} className="flex flex-1 min-w-0 items-center gap-3 text-left active:scale-[0.99]">{content}</button>
                     : <div className="flex flex-1 min-w-0 items-center gap-3">{content}</div>}
                   {canUseAdvance&&<button type="button" onClick={()=>applyAdvanceToInvoice(inv)} disabled={!!applyingAdvanceInvoiceId} className="rounded-lg px-2 py-2 text-[11px] font-black disabled:opacity-50" style={{background:"#ccfbf1",color:"#0f766e"}}>{applyingAdvanceInvoiceId===inv.id?"Application…":"🎟️ Utiliser"}</button>}
+                  {deliveryPending&&canCreateOrder&&<button type="button" onClick={()=>void confirmDelivery(inv)} disabled={confirmingDeliveryId!==null} className="rounded-lg bg-amber-50 px-2 py-2 text-[11px] font-black text-amber-800 disabled:opacity-50" title="Confirmer la livraison et déduire le stock">{confirmingDeliveryId===inv.id?"Confirmation…":"📦 Livrer"}</button>}
                   {canReturnInvoice&&<button type="button" onClick={()=>startClientReturn(inv)} className="rounded-lg px-2 py-2 text-[11px] font-black inline-flex items-center gap-1" style={{background:"#fef2f2",color:"#dc2626"}} title="Retourner des articles"><RotateCcw size={12}/> Retour</button>}
                   {canEdit&&<button type="button" onClick={()=>{setEditingClientInvoice(inv);setOrderClient(c);}} className="rounded-lg px-2 py-2 text-[11px] font-black" style={{background:"#eff6ff",color:"#1d4ed8"}}>Modifier</button>}
                   {canCancel&&<button type="button" onClick={()=>{setCancelReason("");setCancelInvoice(inv);}} className="rounded-lg px-2 py-2 text-[11px] font-black" style={{background:"#fef2f2",color:"#dc2626"}} title="Annuler cette commande">Annuler</button>}
@@ -854,6 +874,8 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
             <button type="button" onClick={()=>openReceiptPreview(viewedInvoice,boutique,currentUser.nom)} className="rounded-xl border border-border bg-card py-3 px-2 text-xs font-black">🧾 {viewedInvoice.type.toLowerCase()==="retour" ? (Number(viewedInvoice.returnRefundAmount??0)>0 ? "Justificatif remboursement" : "Justificatif avoir") : "Ticket caisse"}</button>
             {viewedInvoice.type.toLowerCase() !== "retour" && <button type="button" onClick={()=>openOrderDocument(viewedInvoice,boutique,boutique.clients)} className="rounded-xl border border-border bg-card py-3 px-2 text-xs font-black">📋 Bon de commande</button>}
           </div>
+          {viewedInvoice.origin==="client_profile"&&viewedInvoice.type.toLowerCase()!=="retour"&&viewedInvoice.status!=="annulée"&&!viewedInvoice.stockDeductedAt&&<div className="rounded-xl border border-amber-200 bg-amber-50 p-3"><p className="text-sm font-black text-amber-900">📦 Livraison non confirmée</p><p className="mt-1 text-xs text-amber-800">Le stock n'est pas encore déduit. Le paiement reste indépendant de la livraison.</p>{canCreateOrder&&<button type="button" onClick={()=>void confirmDelivery(viewedInvoice)} disabled={confirmingDeliveryId!==null} className="mt-2 w-full rounded-xl bg-amber-600 py-2.5 text-sm font-black text-white disabled:opacity-50">{confirmingDeliveryId===viewedInvoice.id?"Confirmation…":"Confirmer la livraison et déduire le stock"}</button>}</div>}
+          {viewedInvoice.origin==="client_profile"&&viewedInvoice.stockDeductedAt&&<div className="rounded-xl bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-700"><CheckCircle size={14} className="mr-1 inline"/> Stock déduit{viewedInvoice.deliveryConfirmedAt?" · livraison confirmée "+formatPreciseDateTime(viewedInvoice.deliveryConfirmedAt):" · ancien flux déjà comptabilisé"}</div>}
           {viewedInvoice.type.toLowerCase() === "retour" && viewedInvoice.returnOfInvoiceId && <div className="rounded-xl bg-red-50 px-3 py-2 text-xs font-black text-red-700 inline-flex items-center gap-2"><RotateCcw size={14}/> Retour sur facture {viewedInvoice.returnOfInvoiceId}</div>}
           {canReturn && viewedInvoice.type.toLowerCase() !== "retour" && viewedInvoice.status !== "annulée" && invoicePaidAmount(viewedInvoice) > 0 && (viewedInvoice.lines?.length ?? 0) > 0 && invoiceHasReturnable(viewedInvoice) && <button type="button" onClick={()=>startClientReturn(viewedInvoice)} className="w-full rounded-xl bg-red-50 py-3 text-sm font-black text-red-700 inline-flex items-center justify-center gap-2"><RotateCcw size={16}/> Retourner des articles</button>}
           {canCreateOrder && viewedInvoice.origin === "client_profile" && viewedInvoice.status === "en attente" && invoicePaidAmount(viewedInvoice) <= 0 && (canManageAnyPendingOrder || viewedInvoice.operatorId === currentUser.id) && <button type="button" onClick={()=>{setViewedInvoice(null);setEditingClientInvoice(viewedInvoice);setOrderClient(c);}} className="w-full rounded-xl bg-blue-50 py-3 text-sm font-black text-blue-700">Modifier la commande</button>}
