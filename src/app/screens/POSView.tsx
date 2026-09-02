@@ -33,7 +33,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
   const canManagePendingOrder = (invoice: Invoice) => canManageAnyPendingOrder || invoice.operatorId === currentUser.id;
   const canEditPendingOrder = (invoice: Invoice) => canManagePendingOrder(invoice) && invoice.origin !== "client_profile";
   const hasCancelPermission = canCancelPendingOrder || currentUser.isSuperAdmin || isBoutiqueOwner || !!activeAssignment?.droits?.annulation_commande;
-  const canCancelOrder = (invoice: Invoice) => hasCancelPermission && canManagePendingOrder(invoice) && invoice.origin !== "client_profile";
+  const canCancelOrder = (invoice: Invoice) => hasCancelPermission && invoice.origin !== "client_profile";
 
   // Order taking
   const [search, setSearch] = useState("");
