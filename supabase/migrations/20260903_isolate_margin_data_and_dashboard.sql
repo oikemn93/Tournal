@@ -229,10 +229,10 @@ begin
     and coalesce(p.actif,true)
     and p.stock <= coalesce(p.low_stock_threshold,0);
 
-  select coalesce(jsonb_agg(jsonb_build_object('date', d.day::date, 'sales', d.net_sales) order by d.day), '[]'::jsonb)
+  select coalesce(jsonb_agg(jsonb_build_object('date', d.bucket_day::date, 'sales', d.net_sales) order by d.bucket_day), '[]'::jsonb)
   into v_series
   from (
-    select date_trunc('day', i.invoice_date) day,
+    select date_trunc('day', i.invoice_date) as bucket_day,
            coalesce(sum(case when lower(trim(coalesce(i.type,''))) = 'retour' then -i.montant else i.montant end),0) net_sales
     from public.invoices i
     where i.boutique_id = p_boutique_id
