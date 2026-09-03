@@ -65,6 +65,9 @@ jobs:
       - name: Margin and dashboard isolation
         run: node scripts/test-margin-dashboard-isolation.mjs
 
+      - name: Numeric keypads
+        run: node scripts/test-numeric-keypads.mjs
+
       - name: Verify temporary patchers are gone
         shell: bash
         run: |
@@ -75,12 +78,14 @@ jobs:
           test ! -e scripts/refine-client-invoice-actions.mjs
           test ! -e scripts/apply-margin-dashboard-isolation.mjs
           test ! -e scripts/apply-margin-safe-stock-edit.mjs
+          test ! -e scripts/apply-numeric-keypads.mjs
           test ! -e .github/workflows/refund-method-patcher.yml
           test ! -e .github/workflows/security-hardening-patcher.yml
           test ! -e .github/workflows/realtime-coverage-patcher.yml
           test ! -e .github/workflows/refine-client-invoice-actions.yml
           test ! -e .github/workflows/apply-margin-dashboard-isolation.yml
           test ! -e .github/workflows/apply-margin-safe-stock-edit.yml
+          test ! -e .github/workflows/apply-numeric-keypads.yml
 
       - name: Production build
         run: pnpm build

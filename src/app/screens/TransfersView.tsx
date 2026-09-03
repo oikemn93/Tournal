@@ -519,8 +519,8 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
                     <Field label="CATÉGORIE" color={TRANSFER_COLOR}><select className={inputCls} value={config.categoryId} onChange={e=>update({categoryId:e.target.value})}><option value="">Reprendre / aucune catégorie</option>{(boutique.categories ?? []).map(cat=><option key={cat.id} value={cat.id}>{cat.nom}</option>)}</select></Field>
                     <div className="grid grid-cols-3 gap-2">
                       <Field label="UNITÉ DE VENTE" color={TRANSFER_COLOR}><input className={inputCls} value={config.sellUnit} onChange={e=>update({sellUnit:e.target.value})}/></Field>
-                      <Field label="PIÈCES / LOT" color={TRANSFER_COLOR}><input type="number" min="0" className={inputCls} value={config.piecesPerLot} onChange={e=>update({piecesPerLot:e.target.value})} placeholder="Reprendre"/></Field>
-                      <Field label="LONGUEUR / PIÈCE" color={TRANSFER_COLOR}><input type="number" min="0" step="any" className={inputCls} value={config.lengthPerPiece} onChange={e=>update({lengthPerPiece:e.target.value})} placeholder="Reprendre"/></Field>
+                      <Field label="PIÈCES / LOT" color={TRANSFER_COLOR}><input type="number" inputMode="numeric" min="0" className={inputCls} value={config.piecesPerLot} onChange={e=>update({piecesPerLot:e.target.value})} placeholder="Reprendre"/></Field>
+                      <Field label="LONGUEUR / PIÈCE" color={TRANSFER_COLOR}><input type="number" inputMode="numeric" min="0" step="any" className={inputCls} value={config.lengthPerPiece} onChange={e=>update({lengthPerPiece:e.target.value})} placeholder="Reprendre"/></Field>
                     </div>
                     <p className="text-[11px] text-muted-foreground">L’unité de stock reste {line.unit} pour préserver la quantité reçue. Le nom, la catégorie et le conditionnement peuvent être adaptés à votre catalogue.</p>
                   </div>;
@@ -605,8 +605,8 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
                 ) : null;
               })()}
               <div className="grid grid-cols-2 gap-2">
-                <div><input type="number" min="0.01" step="any" value={dLineQty} onChange={e => setDLineQty(e.target.value)} placeholder={dLineSellUnit === "Lot" ? "Nombre de lots" : dLineSellUnit === "Pièce" ? "Nombre de pièces" : dLineSellUnit ? `Quantité ${dLineSellUnit}` : "Quantité"} className={inputCls}/><p className="text-[10px] text-muted-foreground mt-1 px-1">Saisie dans le conditionnement sélectionné</p></div>
-                <div><input type="number" min="0" step="any" value={dLinePrice} onChange={e => setDLinePrice(e.target.value)} placeholder="Prix cession" className={inputCls}/><p className="text-[10px] text-muted-foreground mt-1 px-1">Prix par {dLineSellUnit || "unité"}</p></div>
+                <div><input type="number" inputMode="numeric" min="0.01" step="any" value={dLineQty} onChange={e => setDLineQty(e.target.value)} placeholder={dLineSellUnit === "Lot" ? "Nombre de lots" : dLineSellUnit === "Pièce" ? "Nombre de pièces" : dLineSellUnit ? `Quantité ${dLineSellUnit}` : "Quantité"} className={inputCls}/><p className="text-[10px] text-muted-foreground mt-1 px-1">Saisie dans le conditionnement sélectionné</p></div>
+                <div><input type="number" inputMode="numeric" min="0" step="any" value={dLinePrice} onChange={e => setDLinePrice(e.target.value)} placeholder="Prix cession" className={inputCls}/><p className="text-[10px] text-muted-foreground mt-1 px-1">Prix par {dLineSellUnit || "unité"}</p></div>
               </div>
               {dLineProductId && Number(dLineQty)>0 && (() => {
                 const product = availableProducts.find(p => p.id === Number(dLineProductId));
