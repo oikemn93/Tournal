@@ -68,6 +68,9 @@ jobs:
       - name: Permission audit hardening
         run: node scripts/test-permission-audit-hardening.mjs
 
+      - name: Client order permission contract
+        run: node scripts/test-client-order-permissions.mjs
+
       - name: Numeric keypads
         run: node scripts/test-numeric-keypads.mjs
 
