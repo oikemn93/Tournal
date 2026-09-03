@@ -1,0 +1,34 @@
+name: Apply numeric keypads
+
+on:
+  push:
+    branches: [ux/numeric-keypads-20260903]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ux/numeric-keypads-20260903
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply numeric keypad attributes
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/apply-numeric-keypads.mjs
+          node scripts/test-numeric-keypads.mjs
+          if ! git diff --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add src
+            git commit -m 'ux: use numeric keypad for number inputs'
+            git push
+          else
+            echo 'Numeric keypad attributes already applied.'
+          fi
