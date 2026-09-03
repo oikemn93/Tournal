@@ -1269,9 +1269,9 @@ function SuperAdminScreen(props: React.ComponentProps<typeof LegacySuperAdminScr
     boutiques={props.boutiques}
     users={props.platformUsers}
     canSystemAdmin={canSystemAdmin}
-    canEnterBoutique={canSystemAdmin}
+    canEnterBoutique={canSystemAdmin || Boolean(opsRole)}
     opsRole={opsRole}
-    onOpenBoutique={(boutiqueId)=>{ if (!canSystemAdmin) return; const boutique = props.boutiques.find(item=>item.id===boutiqueId); if (boutique) props.onEnterBoutique(boutique); }}
+    onOpenBoutique={(boutiqueId)=>{ if (!canSystemAdmin && !opsRole) return; const boutique = props.boutiques.find(item=>item.id===boutiqueId); if (boutique) props.onEnterBoutique(boutique); }}
     onSystem={()=>{ if (canSystemAdmin) setShowSystemAdmin(true); }}
     onLogout={props.onLogout}
   />;
