@@ -64,32 +64,20 @@ create policy "transfer_charge_payments: select"
 on public.transfer_charge_payments for select to authenticated
 using (private.auth_has_any_read_permission(boutique_id, array['charges','transferts']));
 
--- Direct charge-table access is reserved for the Charges / Accounting domains.
--- Stock and Suppliers consume the filtered charges_app projection below.
+-- Charges/Accounting read the full expense ledger. Stock/Suppliers read only
+-- supplier-payable and transfer entries required by their current screens.
+-- This keeps the existing raw `charges` bootstrap compatible without exposing
+-- unrelated rent, salary, marketing, tax, etc. rows.
 drop policy if exists "charges: select permitted" on public.charges;
 create policy "charges: select permitted"
 on public.charges for select to authenticated
-using (private.auth_has_any_read_permission(boutique_id, array['charges','compta']));
-
--- SECURITY DEFINER view owned by the migration owner. The WHERE clause is the
--- authorization boundary: Charges/Accounting receive the complete ledger;
--- Stock/Suppliers receive only supplier-payable and transfer records required
--- by their screens. No unrelated rent/salary/marketing charge is exposed.
-drop view if exists public.charges_app;
-create view public.charges_app
-with (security_barrier = true)
-as
-select c.*
-from public.charges c
-where
-  private.auth_has_any_read_permission(c.boutique_id, array['charges','compta'])
+using (
+  private.auth_has_any_read_permission(boutique_id, array['charges','compta'])
   or (
-    private.auth_has_any_read_permission(c.boutique_id, array['stock','fournisseurs'])
-    and c.source in ('supplier_receipt','supplier_payment','transfer')
-  );
-
-revoke all on public.charges_app from public, anon;
-grant select on public.charges_app to authenticated;
+    private.auth_has_any_read_permission(boutique_id, array['stock','fournisseurs'])
+    and source in ('supplier_receipt','supplier_payment','transfer')
+  )
+);
 
 -- Inventory internally stores valuation snapshots so finalization remains
 -- deterministic. Public responses, however, must not expose purchase/FIFO cost
