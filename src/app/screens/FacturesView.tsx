@@ -1293,7 +1293,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
                 </div>
                 {/* Amount + remove */}
                 <div className="flex items-center gap-2">
-                  <input type="number" placeholder="Montant" value={entry.amount || ""}
+                  <input type="number" inputMode="numeric" placeholder="Montant" value={entry.amount || ""}
                     onChange={e=>setEncaissSplit(prev=>prev.map((en,i)=>i===idx?{...en,amount:Number(e.target.value)||0}:en))}
                     className={inputCls+" flex-1 text-center font-black text-sm"} autoFocus={idx===0}/>
                   {encaissSplit.length > 1 && (

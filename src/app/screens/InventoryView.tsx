@@ -463,20 +463,20 @@ export function InventoryView({ boutique, currentUser, onUpdate, logAction, init
 
               {draft.mode === "conditioning" && conditioningAvailable ? <div className="grid sm:grid-cols-3 gap-3 rounded-2xl bg-amber-50 p-4">
                 <label className="text-xs font-black">Lots
-                  <input type="number" min="0" step="1" value={draft.lots} onChange={event => setDrafts(prev => ({ ...prev, [line.productId]: { ...draft, lots: event.target.value } }))} className="mt-1 w-full rounded-xl border border-amber-200 bg-white p-3" placeholder="0"/>
+                  <input type="number" inputMode="numeric" min="0" step="1" value={draft.lots} onChange={event => setDrafts(prev => ({ ...prev, [line.productId]: { ...draft, lots: event.target.value } }))} className="mt-1 w-full rounded-xl border border-amber-200 bg-white p-3" placeholder="0"/>
                   <span className="block text-[10px] font-normal text-muted-foreground mt-1">{number(line.piecesPerLot)} pièce(s) / lot</span>
                 </label>
                 <label className="text-xs font-black">Pièces hors lot
-                  <input type="number" min="0" step="1" value={draft.loosePieces} onChange={event => setDrafts(prev => ({ ...prev, [line.productId]: { ...draft, loosePieces: event.target.value } }))} className="mt-1 w-full rounded-xl border border-amber-200 bg-white p-3" placeholder="0"/>
+                  <input type="number" inputMode="numeric" min="0" step="1" value={draft.loosePieces} onChange={event => setDrafts(prev => ({ ...prev, [line.productId]: { ...draft, loosePieces: event.target.value } }))} className="mt-1 w-full rounded-xl border border-amber-200 bg-white p-3" placeholder="0"/>
                   {line.lengthPerPiece > 0 && <span className="block text-[10px] font-normal text-muted-foreground mt-1">{number(line.lengthPerPiece)} {line.unit} / pièce</span>}
                 </label>
                 <label className="text-xs font-black">Complément {line.unit}
-                  <input type="number" min="0" step="any" value={draft.extraQty} onChange={event => setDrafts(prev => ({ ...prev, [line.productId]: { ...draft, extraQty: event.target.value } }))} className="mt-1 w-full rounded-xl border border-amber-200 bg-white p-3" placeholder="0"/>
+                  <input type="number" inputMode="numeric" min="0" step="any" value={draft.extraQty} onChange={event => setDrafts(prev => ({ ...prev, [line.productId]: { ...draft, extraQty: event.target.value } }))} className="mt-1 w-full rounded-xl border border-amber-200 bg-white p-3" placeholder="0"/>
                   <span className="block text-[10px] font-normal text-muted-foreground mt-1">Quantité libre non conditionnée</span>
                 </label>
                 <div className="sm:col-span-3 text-sm font-black">Total compté : {number(conditionedQuantity(line, draft))} {line.unit}</div>
               </div> : <label className="block text-sm font-black">Quantité réellement comptée
-                <input inputMode="decimal" type="number" min="0" step="any" value={draft.direct} onChange={event => setDrafts(prev => ({ ...prev, [line.productId]: { ...draft, direct: event.target.value } }))} className="mt-2 w-full rounded-xl border border-border bg-background p-3" placeholder="0"/>
+                <input inputMode="numeric" type="number" min="0" step="any" value={draft.direct} onChange={event => setDrafts(prev => ({ ...prev, [line.productId]: { ...draft, direct: event.target.value } }))} className="mt-2 w-full rounded-xl border border-border bg-background p-3" placeholder="0"/>
               </label>}
 
               <button onClick={() => void saveLine(line)} disabled={savingProductId != null || counted == null} className="rounded-xl bg-slate-900 px-4 py-3 text-sm font-black text-white disabled:opacity-50 flex items-center justify-center gap-2 sm:w-fit">

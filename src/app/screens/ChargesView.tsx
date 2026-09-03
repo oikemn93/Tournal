@@ -189,7 +189,7 @@ export function ChargesView({ boutique, onUpdate, logAction, canDisburse = false
       </Modal>}
       {paymentCharge&&<Modal title="Régler la charge B2B" color="#111827" onClose={()=>!paying&&setPaymentCharge(null)}>
         <div className="rounded-xl bg-muted/50 p-3 text-sm"><p className="font-bold">{paymentCharge.label}</p><p className="text-muted-foreground">Reste dû : {fmt(Math.max(0,paymentCharge.montant-Number(paymentCharge.paidAmount??0)))}</p></div>
-        <Field label="MONTANT"><input type="number" min="1" max={Math.max(0,paymentCharge.montant-Number(paymentCharge.paidAmount??0))} value={paymentAmount} onChange={(event)=>setPaymentAmount(event.target.value)} className={inputCls}/></Field>
+        <Field label="MONTANT"><input type="number" inputMode="numeric" min="1" max={Math.max(0,paymentCharge.montant-Number(paymentCharge.paidAmount??0))} value={paymentAmount} onChange={(event)=>setPaymentAmount(event.target.value)} className={inputCls}/></Field>
         <Field label="MODE DE PAIEMENT"><div className="grid grid-cols-2 gap-2">{["Espèces","Wave","Orange Money","Autre"].map((method)=><button key={method} type="button" onClick={()=>setPaymentMethod(method)} className="rounded-xl p-3 text-xs font-bold" style={{background:paymentMethod===method?"#111827":"#EEE9D8",color:paymentMethod===method?"white":"#374151"}}>{method}</button>)}</div></Field>
         <button onClick={()=>void payTransferCharge()} disabled={paying||Number(paymentAmount)<=0} className="flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 py-4 font-black text-white disabled:opacity-50">{paying&&<Loader2 className="animate-spin" size={16}/>}Confirmer le règlement</button>
       </Modal>}

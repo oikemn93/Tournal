@@ -734,7 +734,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
                         <label className="ml-1 flex items-center gap-1 text-xs text-muted-foreground">
                           {dUnit} ×
                           <input
-                            type="number"
+                            type="number" inputMode="numeric"
                             min="0"
                             step="1"
                             value={item.prixUnit}

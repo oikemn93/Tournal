@@ -828,7 +828,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
         </Modal>}
         {termsModalClient&&<Modal title="Délai de paiement client" color={CC} onClose={()=>!savingTerms&&setTermsModalClient(null)}>
           <p className="mb-3 text-xs text-muted-foreground">Laissez vide pour reprendre le délai par défaut de la boutique ({defaultPaymentTermsDays} jours). Ce réglage s’applique aux prochaines factures B2B ou grossistes.</p>
-          <Field label="DÉLAI EN JOURS"><input type="number" min="0" max="3650" value={termsDraft} onChange={event=>setTermsDraft(event.target.value)} placeholder={String(defaultPaymentTermsDays)} className={inputCls}/></Field>
+          <Field label="DÉLAI EN JOURS"><input type="number" inputMode="numeric" min="0" max="3650" value={termsDraft} onChange={event=>setTermsDraft(event.target.value)} placeholder={String(defaultPaymentTermsDays)} className={inputCls}/></Field>
           <SubmitBtn color={CC} label={savingTerms?"Enregistrement…":"Enregistrer le délai"} onClick={saveClientTerms} disabled={savingTerms}/>
         </Modal>}
         {viewedInvoice&&<Modal title={viewedInvoice.type.toLowerCase() === "retour" ? `Avoir de retour ${viewedInvoice.id}` : `Facture ${viewedInvoice.id}`} color={viewedInvoice.type.toLowerCase() === "retour" ? "#dc2626" : CC} onClose={()=>setViewedInvoice(null)}>

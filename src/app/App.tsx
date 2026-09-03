@@ -2261,7 +2261,7 @@ function ChargesView({ boutique, onUpdate, logAction }: {
         ) : (
           <>
             <Field label="MONTANT DU PAIEMENT">
-              <div className="relative"><input type="number" value={b2bPayAmtCv} onChange={e=>setB2bPayAmtCv(e.target.value)} className={inputCls+" pr-10"} placeholder="0"/><span className="absolute right-4 top-1/2 -translate-y-1/2 text-sm font-bold text-muted-foreground">F</span></div>
+              <div className="relative"><input type="number" inputMode="numeric" value={b2bPayAmtCv} onChange={e=>setB2bPayAmtCv(e.target.value)} className={inputCls+" pr-10"} placeholder="0"/><span className="absolute right-4 top-1/2 -translate-y-1/2 text-sm font-bold text-muted-foreground">F</span></div>
             </Field>
             <SubmitBtn color="#d97706" label="Confirmer le paiement" onClick={submitB2BPaymentCv} disabled={!Number(b2bPayAmtCv)||Number(b2bPayAmtCv)<=0}/>
           </>
@@ -3058,19 +3058,19 @@ function TransfertsView({ boutique, allBoutiques, platformUsers, groupes, curren
                     <div className="grid grid-cols-3 gap-2">
                       <div>
                         <label className="text-xs text-muted-foreground block mb-1">Qté</label>
-                        <input type="number" min="0" max={item.stockQty} value={item.qty||""} placeholder="0"
+                        <input type="number" inputMode="numeric" min="0" max={item.stockQty} value={item.qty||""} placeholder="0"
                           onChange={e=>setCrItems(prev=>prev.map((x,i)=>i===realIdx?{...x,qty:Math.min(item.stockQty,Math.max(0,Number(e.target.value)||0))}:x))}
                           className="w-full bg-muted rounded-lg px-2 py-1.5 text-sm font-bold text-center outline-none"/>
                       </div>
                       <div>
                         <label className="text-xs text-muted-foreground block mb-1">Prix cession</label>
-                        <input type="number" min="0" value={item.prixCession||""} placeholder="0"
+                        <input type="number" inputMode="numeric" min="0" value={item.prixCession||""} placeholder="0"
                           onChange={e=>setCrItems(prev=>prev.map((x,i)=>i===realIdx?{...x,prixCession:Math.max(0,Number(e.target.value)||0)}:x))}
                           className="w-full bg-muted rounded-lg px-2 py-1.5 text-sm font-bold text-center outline-none"/>
                       </div>
                       <div>
                         <label className="text-xs text-muted-foreground block mb-1">Remise %</label>
-                        <input type="number" min="0" max="100" value={item.remise||""} placeholder="0"
+                        <input type="number" inputMode="numeric" min="0" max="100" value={item.remise||""} placeholder="0"
                           onChange={e=>setCrItems(prev=>prev.map((x,i)=>i===realIdx?{...x,remise:Math.min(100,Math.max(0,Number(e.target.value)||0))}:x))}
                           className="w-full bg-muted rounded-lg px-2 py-1.5 text-sm font-bold text-center outline-none"/>
                       </div>
@@ -3613,7 +3613,7 @@ function InventaireView({ boutique, currentUser, onUpdate, logAction, onClose, i
               <p className="text-xs text-muted-foreground">{l.unit}{l.categorie ? ` · ${l.categorie}` : ""}</p>
             </div>
             {!blindMode && <span className="w-16 text-center text-sm text-muted-foreground tabular-nums">{l.theorique}</span>}
-            <input type="number" min="0"
+            <input type="number" inputMode="numeric" min="0"
               value={countVals[l.productId] ?? ""}
               onChange={e=>setCountVals(prev=>({...prev,[l.productId]:e.target.value}))}
               placeholder="—"
@@ -4725,7 +4725,7 @@ function FournisseursView({ boutique, onUpdate, logAction }: {
           <>
             <Field label="MONTANT DU PAIEMENT">
               <div className="relative">
-                <input type="number" value={b2bPayAmt} onChange={e=>setB2bPayAmt(e.target.value)} className={inputCls+" pr-10"} placeholder="0"/>
+                <input type="number" inputMode="numeric" value={b2bPayAmt} onChange={e=>setB2bPayAmt(e.target.value)} className={inputCls+" pr-10"} placeholder="0"/>
                 <span className="absolute right-4 top-1/2 -translate-y-1/2 text-sm font-bold text-muted-foreground">F</span>
               </div>
             </Field>
@@ -6028,7 +6028,7 @@ function FacturesView({ boutique, allBoutiques, platformUsers, groupes, currentU
                     className="flex-1 bg-muted rounded-xl px-3 py-2.5 text-xs font-bold outline-none">
                     {PAYMENT_METHODS.map(m=><option key={m} value={m}>{PM_ICON[m]} {m}</option>)}
                   </select>
-                  <input type="number" placeholder="0" value={row.amount}
+                  <input type="number" inputMode="numeric" placeholder="0" value={row.amount}
                     onChange={e=>setEncaissSplit(prev=>prev.map((r,i)=>i===idx?{...r,amount:e.target.value}:r))}
                     className={inputCls+" w-28 text-center font-black"} autoFocus={idx===0}/>
                   {encaissSplit.length > 1 && (
@@ -7250,7 +7250,7 @@ function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdat
             <div className="px-4 py-3 border-b border-border"><p className="font-bold text-sm">Expiration de session</p><p className="text-xs text-muted-foreground mt-0.5">Durée maximale d'inactivité avant une reconnexion complète. Elle ne peut pas être inférieure au délai de verrouillage.</p></div>
             <div className="px-4 py-4 space-y-3">
               <div className="flex items-center gap-2">
-                <input type="number" min={1} value={sessValue}
+                <input type="number" inputMode="numeric" min={1} value={sessValue}
                   onChange={e => setSessValue(Math.max(1, Number(e.target.value)))}
                   className="w-24 px-3 py-2.5 rounded-xl border border-border bg-background text-sm font-bold text-center focus:outline-none focus:ring-2 focus:ring-primary/30"/>
                 <div className="flex gap-1">
@@ -7301,11 +7301,11 @@ function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdat
           </div>
           <div className="bg-card rounded-2xl border border-border p-4 space-y-3">
             <div><p className="font-bold text-sm">Fournisseurs</p><p className="text-xs text-muted-foreground mt-0.5">Délai par défaut appliqué à chaque nouvelle réception de stock.</p></div>
-            <div className="flex items-center gap-3"><input type="number" min="0" max="3650" value={supplierTermsDays} onChange={event=>setSupplierTermsDays(Math.max(0, Math.min(3650, Number(event.target.value))))} className="w-28 rounded-xl border border-border bg-background px-3 py-2.5 text-center text-sm font-black focus:outline-none focus:ring-2 focus:ring-primary/30"/><span className="text-sm font-bold text-muted-foreground">jours</span></div>
+            <div className="flex items-center gap-3"><input type="number" inputMode="numeric" min="0" max="3650" value={supplierTermsDays} onChange={event=>setSupplierTermsDays(Math.max(0, Math.min(3650, Number(event.target.value))))} className="w-28 rounded-xl border border-border bg-background px-3 py-2.5 text-center text-sm font-black focus:outline-none focus:ring-2 focus:ring-primary/30"/><span className="text-sm font-bold text-muted-foreground">jours</span></div>
           </div>
           <div className="bg-card rounded-2xl border border-border p-4 space-y-3">
             <div><p className="font-bold text-sm">Clients B2B et grossistes</p><p className="text-xs text-muted-foreground mt-0.5">Délai par défaut des nouvelles factures à crédit. Les ventes B2C n’ont pas d’échéance.</p></div>
-            <div className="flex items-center gap-3"><input type="number" min="0" max="3650" value={clientTermsDays} onChange={event=>setClientTermsDays(Math.max(0, Math.min(3650, Number(event.target.value))))} className="w-28 rounded-xl border border-border bg-background px-3 py-2.5 text-center text-sm font-black focus:outline-none focus:ring-2 focus:ring-primary/30"/><span className="text-sm font-bold text-muted-foreground">jours</span></div>
+            <div className="flex items-center gap-3"><input type="number" inputMode="numeric" min="0" max="3650" value={clientTermsDays} onChange={event=>setClientTermsDays(Math.max(0, Math.min(3650, Number(event.target.value))))} className="w-28 rounded-xl border border-border bg-background px-3 py-2.5 text-center text-sm font-black focus:outline-none focus:ring-2 focus:ring-primary/30"/><span className="text-sm font-bold text-muted-foreground">jours</span></div>
           </div>
           {authSaveError&&<p className="text-xs font-semibold" style={{color:SEM.danger.text}}>{authSaveError}</p>}
           <button onClick={async()=>{
@@ -7335,7 +7335,7 @@ function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdat
             </label>
             <div>
               <label className="mb-1.5 block text-xs font-black tracking-wider text-muted-foreground">FOND D'OUVERTURE PAR DÉFAUT (F CFA)</label>
-              <input type="number" min="0" step="1" value={caisseDefaults.openingFloat} onChange={event=>setCaisseDefaults(current=>({...current,openingFloat:Math.max(0,Number(event.target.value)||0)}))} className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm font-black focus:outline-none focus:ring-2 focus:ring-primary/30"/>
+              <input type="number" inputMode="numeric" min="0" step="1" value={caisseDefaults.openingFloat} onChange={event=>setCaisseDefaults(current=>({...current,openingFloat:Math.max(0,Number(event.target.value)||0)}))} className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm font-black focus:outline-none focus:ring-2 focus:ring-primary/30"/>
               <p className="mt-1.5 text-xs text-muted-foreground">Le caissier peut toujours ajuster ce montant avant l'ouverture.</p>
             </div>
             {caisseDefaults.enabled&&<div className="grid grid-cols-2 gap-3">
