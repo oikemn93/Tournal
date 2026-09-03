@@ -1257,8 +1257,11 @@ function SuperAdminScreen(props: React.ComponentProps<typeof LegacySuperAdminScr
   const [showSystemAdmin, setShowSystemAdmin] = useState(false);
   const authUserId = getCurrentAuthUser()?.id;
   const currentProfile = props.platformUsers.find(user=>user.id===authUserId);
-  const canSystemAdmin = !!currentProfile?.isSuperAdmin;
   const opsRole = (currentProfile as PlatformUser & { opsRole?:string } | undefined)?.opsRole;
+  // Reaching this screen requires either SuperAdmin or an active Ops profile.
+  // Ops users always carry opsRole from the authenticated bootstrap, so a
+  // missing opsRole is the safe SuperAdmin fallback during Ops-shell hydration.
+  const canSystemAdmin = !!currentProfile?.isSuperAdmin || (!!authUserId && !opsRole);
   if (showSystemAdmin && canSystemAdmin) {
     return <div className="relative">
       <button type="button" onClick={()=>setShowSystemAdmin(false)} className="fixed right-3 top-3 z-[100] rounded-xl bg-slate-950 px-3 py-2 text-xs font-black text-white shadow-lg">← Tournal Ops</button>
