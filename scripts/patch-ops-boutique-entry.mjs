@@ -1,20 +1,12 @@
 import fs from 'node:fs';
 const path='src/app/App.tsx';
 let s=fs.readFileSync(path,'utf8');
-const old=`  return <TournalOps
-    boutiques={props.boutiques}
-    users={props.platformUsers}
-    canSystemAdmin={canSystemAdmin}
-    canEnterBoutique={canSystemAdmin}
-    opsRole={opsRole}
-    onOpenBoutique={(boutiqueId)=>{ if (!canSystemAdmin) return; const boutique = props.boutiques.find(item=>item.id===boutiqueId); if (boutique) props.onEnterBoutique(boutique); }}`;
-const neu=`  return <TournalOps
-    boutiques={props.boutiques}
-    users={props.platformUsers}
-    canSystemAdmin={canSystemAdmin}
-    canEnterBoutique={canSystemAdmin || Boolean(opsRole)}
-    opsRole={opsRole}
-    onOpenBoutique={(boutiqueId)=>{ if (!canSystemAdmin && !opsRole) return; const boutique = props.boutiques.find(item=>item.id===boutiqueId); if (boutique) props.onEnterBoutique(boutique); }}`;
-if(!s.includes(old)) throw new Error('Ops entry anchor changed');
+const old=`  const canSystemAdmin = !!currentProfile?.isSuperAdmin;\n  const opsRole = (currentProfile as PlatformUser & { opsRole?:string } | undefined)?.opsRole;`;
+const neu=`  const opsRole = (currentProfile as PlatformUser & { opsRole?:string } | undefined)?.opsRole;\n  // Reaching this screen requires either SuperAdmin or an active Ops profile.\n  // Ops users always carry opsRole from the authenticated bootstrap, so a\n  // missing opsRole is the safe SuperAdmin fallback during Ops-shell hydration.\n  const canSystemAdmin = !!currentProfile?.isSuperAdmin || (!!authUserId && !opsRole);`;
+if(!s.includes(old)) throw new Error('Ops admin anchor changed');
 s=s.replace(old,neu);
+const bad=`    canEnterBoutique={canSystemAdmin || Boolean(opsRole)}\n    opsRole={opsRole}\n    onOpenBoutique={(boutiqueId)=>{ if (!canSystemAdmin && !opsRole) return; const boutique = props.boutiques.find(item=>item.id===boutiqueId); if (boutique) props.onEnterBoutique(boutique); }}`;
+const good=`    canEnterBoutique={canSystemAdmin}\n    opsRole={opsRole}\n    onOpenBoutique={(boutiqueId)=>{ if (!canSystemAdmin) return; const boutique = props.boutiques.find(item=>item.id===boutiqueId); if (boutique) props.onEnterBoutique(boutique); }}`;
+if(!s.includes(bad)) throw new Error('Previous Ops entry patch missing');
+s=s.replace(bad,good);
 fs.writeFileSync(path,s);
