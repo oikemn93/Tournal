@@ -65,6 +65,9 @@ jobs:
       - name: Margin and dashboard isolation
         run: node scripts/test-margin-dashboard-isolation.mjs
 
+      - name: Permission audit hardening
+        run: node scripts/test-permission-audit-hardening.mjs
+
       - name: Numeric keypads
         run: node scripts/test-numeric-keypads.mjs
 
