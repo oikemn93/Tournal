@@ -71,6 +71,9 @@ jobs:
       - name: Client order permission contract
         run: node scripts/test-client-order-permissions.mjs
 
+      - name: Ops boutique entry contract
+        run: node scripts/test-ops-boutique-entry.mjs
+
       - name: Numeric keypads
         run: node scripts/test-numeric-keypads.mjs
 
@@ -85,6 +88,7 @@ jobs:
           test ! -e scripts/apply-margin-dashboard-isolation.mjs
           test ! -e scripts/apply-margin-safe-stock-edit.mjs
           test ! -e scripts/apply-numeric-keypads.mjs
+          test ! -e scripts/patch-ops-boutique-entry.mjs
           test ! -e .github/workflows/refund-method-patcher.yml
           test ! -e .github/workflows/security-hardening-patcher.yml
           test ! -e .github/workflows/realtime-coverage-patcher.yml
@@ -92,6 +96,7 @@ jobs:
           test ! -e .github/workflows/apply-margin-dashboard-isolation.yml
           test ! -e .github/workflows/apply-margin-safe-stock-edit.yml
           test ! -e .github/workflows/apply-numeric-keypads.yml
+          test ! -e .github/workflows/patch-ops-boutique-entry.yml
 
       - name: Production build
         run: pnpm build
