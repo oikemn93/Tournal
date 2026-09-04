@@ -1,0 +1,34 @@
+name: Database Behavior
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  database-behavior:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.116.0
+
+      - name: Initialize local Supabase config
+        run: supabase init --force
+
+      - name: Start local database and apply migrations
+        run: supabase db start
+
+      - name: Run behavioral database matrix
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f scripts/test-db-behavior.sql
+
+      - name: Stop local database
+        if: always()
+        run: supabase stop --no-backup
