@@ -74,6 +74,9 @@ jobs:
       - name: Canonical Permission type
         run: node scripts/test-permission-type-contract.mjs
 
+      - name: Disbursement trigger contract
+        run: node scripts/test-disbursement-trigger-contract.mjs
+
       - name: Ops boutique entry contract
         run: node scripts/test-ops-boutique-entry.mjs
 
