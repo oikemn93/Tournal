@@ -105,3 +105,6 @@ jobs:
 
       - name: Production build
         run: pnpm build
+
+      - name: Production bundle budget
+        run: node scripts/check-bundle-budget.mjs
