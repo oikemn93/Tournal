@@ -71,6 +71,15 @@ jobs:
       - name: Client order permission contract
         run: node scripts/test-client-order-permissions.mjs
 
+      - name: Canonical Permission type
+        run: node scripts/test-permission-type-contract.mjs
+
+      - name: Disbursement trigger contract
+        run: node scripts/test-disbursement-trigger-contract.mjs
+
+      - name: Read RPC session contract
+        run: node scripts/test-read-rpc-session-contract.mjs
+
       - name: Ops boutique entry contract
         run: node scripts/test-ops-boutique-entry.mjs
 

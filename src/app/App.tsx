@@ -36,6 +36,7 @@ import { TournalOpsWorkspace as TournalOps } from "./components/TournalOpsWorksp
 import { loadMyOpsStaffProfile, loadOpsShell } from "../lib/ops";
 import { NotificationCenter } from "./components/NotificationCenter";
 import { ROLE_PRESETS } from "./permissions";
+import type { Permission } from "./types";
 import { filterPaymentEventsByPeriod, formatPreciseDateTime, invoicePaymentEvents, invoiceRemainingAmount } from "./utils/payments";
 
 const ReadOnlyCtx = React.createContext(false);
@@ -87,7 +88,6 @@ function RelationalMigrationNotice({ title }: { title: string }) {
 type CartItem   = { productId: number; nom: string; img: string; unit: string; qty: number; prixUnit: number; sellUnit?: string; sellQty?: number };
 type InvoiceStatus = "payé" | "acompte" | "en attente" | "en retard" | "annulée";
 type PaymentMethod = "Espèces" | "Wave" | "Orange Money" | "Autre" | "Avoir client";
-type Permission = "dashboard" | "stock" | "fournisseurs" | "clients" | "factures" | "remboursement" | "charges" | "compta" | "vente" | "encaissement_vente" | "inventaire" | "marges" | "annulation_commande" | "decaissement" | "transferts";
 type InventaireLine = { productId: number; nom: string; unit: string; categorie?: string; theorique: number; compte?: number };
 type InventaireSession = { id: string; date: string; dateRaw: string; userId: string; userNom: string; userColor: string; statut: "en_cours" | "terminé"; perimetre: "tout" | string[]; lines: InventaireLine[]; valeurEcart?: number; chiffreAffaires?: number; benefice?: number };
 type ChargeCategorie = "Loyer" | "Salaires" | "Électricité" | "Transport" | "Achat stock" | "Marketing" | "Taxes" | "Autre";
