@@ -74,6 +74,9 @@ jobs:
       - name: Ops boutique entry contract
         run: node scripts/test-ops-boutique-entry.mjs
 
+      - name: Performance read contract
+        run: node scripts/test-performance-read-contract.mjs
+
       - name: Numeric keypads
         run: node scripts/test-numeric-keypads.mjs
 
@@ -89,6 +92,7 @@ jobs:
           test ! -e scripts/apply-margin-safe-stock-edit.mjs
           test ! -e scripts/apply-numeric-keypads.mjs
           test ! -e scripts/patch-ops-boutique-entry.mjs
+          test ! -e scripts/apply-performance-code-splitting.mjs
           test ! -e .github/workflows/refund-method-patcher.yml
           test ! -e .github/workflows/security-hardening-patcher.yml
           test ! -e .github/workflows/realtime-coverage-patcher.yml
@@ -97,6 +101,7 @@ jobs:
           test ! -e .github/workflows/apply-margin-safe-stock-edit.yml
           test ! -e .github/workflows/apply-numeric-keypads.yml
           test ! -e .github/workflows/patch-ops-boutique-entry.yml
+          test ! -e .github/workflows/apply-performance-code-splitting.yml
 
       - name: Production build
         run: pnpm build
