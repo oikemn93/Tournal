@@ -15,16 +15,22 @@ import {
   Printer, Settings, Check, ChevronLeft, ClipboardCheck,
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, Cell, PieChart, Pie } from "recharts";
-import { StockView as RelationalStockView } from "./screens/StockView";
-import { DashboardView as RelationalDashboardView } from "./screens/DashboardView";
-import { FacturesView as RelationalFacturesView } from "./screens/FacturesView";
-import { POSView as RelationalPOSView } from "./screens/POSView";
-import { ClientsView as RelationalClientsView } from "./screens/ClientsView";
-import { FournisseursView as RelationalFournisseursView } from "./screens/FournisseursView";
-import { ChargesView as RelationalChargesView } from "./screens/ChargesView";
-import { ComptabiliteView as RelationalComptabiliteView } from "./screens/RapportView";
-import { TransfersView as RelationalTransfersView } from "./screens/TransfersView";
-import { InventoryView as RelationalInventoryView } from "./screens/InventoryView";
+const lazyScreen = (loader: () => Promise<{ default: React.ComponentType<any> }>) => {
+  const Component = React.lazy(loader);
+  return function TransactionLazyScreen(props: any) {
+    return <React.Suspense fallback={<div className="min-h-[45vh] flex items-center justify-center text-sm font-bold text-muted-foreground">Chargement…</div>}><Component {...props}/></React.Suspense>;
+  };
+};
+const RelationalStockView = lazyScreen(() => import("./screens/StockView").then(m => ({ default: m.StockView })));
+const RelationalDashboardView = lazyScreen(() => import("./screens/DashboardView").then(m => ({ default: m.DashboardView })));
+const RelationalFacturesView = lazyScreen(() => import("./screens/FacturesView").then(m => ({ default: m.FacturesView })));
+const RelationalPOSView = lazyScreen(() => import("./screens/POSView").then(m => ({ default: m.POSView })));
+const RelationalClientsView = lazyScreen(() => import("./screens/ClientsView").then(m => ({ default: m.ClientsView })));
+const RelationalFournisseursView = lazyScreen(() => import("./screens/FournisseursView").then(m => ({ default: m.FournisseursView })));
+const RelationalChargesView = lazyScreen(() => import("./screens/ChargesView").then(m => ({ default: m.ChargesView })));
+const RelationalComptabiliteView = lazyScreen(() => import("./screens/RapportView").then(m => ({ default: m.ComptabiliteView })));
+const RelationalTransfersView = lazyScreen(() => import("./screens/TransfersView").then(m => ({ default: m.TransfersView })));
+const RelationalInventoryView = lazyScreen(() => import("./screens/InventoryView").then(m => ({ default: m.InventoryView })));
 import { SuperAdminUserActions } from "./components/SuperAdminUserActions";
 import { TournalOpsWorkspace as TournalOps } from "./components/TournalOpsWorkspace";
 import { loadMyOpsStaffProfile, loadOpsShell } from "../lib/ops";
