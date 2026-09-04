@@ -747,7 +747,8 @@ export type BoutiqueSnapshotOptions = {
   historyOnly?: boolean;
 };
 
-const BOOTSTRAP_HISTORY_DAYS = 30;
+const BOOTSTRAP_HISTORY_DAYS = 7;
+export const FULL_BOOTSTRAP_HISTORY_DAYS = 30;
 export const BOUNDED_BOOTSTRAP_HISTORY_DAYS = BOOTSTRAP_HISTORY_DAYS;
 export function boundedBootstrapCutoffIso(now = Date.now()) {
   return new Date(now - BOOTSTRAP_HISTORY_DAYS * 86_400_000).toISOString();
@@ -770,13 +771,13 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string, options: Bouti
       ? `${historyFrom ? `&invoice_date=gte.${historyFromFilter}` : ""}${historyTo ? `&invoice_date=lt.${encodeURIComponent(historyTo)}` : ""}`
       : `&or=(invoice_date.gte.${historyFromFilter},status.eq.en_attente)`;
     const paymentWindow = `${historyFrom ? `&paid_at=gte.${historyFromFilter}` : ""}${historyTo ? `&paid_at=lt.${encodeURIComponent(historyTo)}` : ""}`;
-    const stockWindow = `&entry_date=gte.${historyFromFilter}`;
+    const stockWindow = `${historyFrom ? `&entry_date=gte.${historyFromFilter}` : ""}${historyTo ? `&entry_date=lt.${encodeURIComponent(historyTo)}` : ""}`;
     const chargeWindow = `&or=(charge_date.gte.${historyFromFilter},status.neq.paid)`;
     const caisseWindow = `&or=(opened_at.gte.${historyFromFilter},closed_at.is.null)`;
     const [boutiques, categories, products, entries, clients, suppliers, invoices, payments, advances, creditRefunds, charges, sessions, auditLogs, userScope] = await Promise.all([
       dataRequest<any[]>(`boutiques?select=*${boutiqueFilter}&order=nom.asc`),
       (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`categories?select=*${scoped()}`)), (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`products_app?select=*${scoped()}`)),
-      (options.historyOnly ? Promise.resolve([]) : dataRequestAll<any>(`stock_entries_app?select=*${scoped()}${stockWindow}`, "entry_date.desc,id.desc")), dataRequest<any[]>(`clients?select=*${scoped()}`),
+      dataRequestAll<any>(`stock_entries_app?select=*${scoped()}${stockWindow}`, "entry_date.desc,id.desc"), dataRequest<any[]>(`clients?select=*${scoped()}`),
       (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`suppliers?select=*${scoped()}`)),
       dataRequest<any[]>(`invoices_app?select=*${scoped()}${invoiceWindow}&order=invoice_date.desc`),
       dataRequest<any[]>(`invoice_payments?select=*${scoped()}${paymentWindow}&order=paid_at.asc`), (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`client_advances?select=*${scoped()}&order=paid_at.desc,id.desc`)),
