@@ -20,11 +20,21 @@ jobs:
         with:
           version: 2.116.0
 
-      - name: Initialize local Supabase config
-        run: supabase init --force
+      - name: Initialize isolated local Supabase
+        run: |
+          mkdir -p .ci-historical-migrations
+          mv supabase/migrations/*.sql .ci-historical-migrations/
+          supabase init --force
+          supabase db start
 
-      - name: Start local database and apply migrations
-        run: supabase db start
+      - name: Load canonical CI baseline
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f scripts/ci-db-baseline.sql
+
+      - name: Apply candidate migrations
+        run: |
+          psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f .ci-historical-migrations/20260904183500_consolidate_disbursement_guards.sql
+          psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f .ci-historical-migrations/20260904184500_make_read_rpcs_session_independent.sql
+          psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f .ci-historical-migrations/20260904184600_make_inventory_reads_session_independent.sql
 
       - name: Run behavioral database matrix
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f scripts/test-db-behavior.sql
