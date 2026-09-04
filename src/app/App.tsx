@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { checkBackend, signQZ, sendInvoiceEmail, storePDFForSMS, getCurrentAuthUser, hasAuthenticatedSession, validateServerSession, refreshSessionIfNeeded, getAuthBootstrap, signInWithPhone, changeOwnPassword, getPinStatus, setQuickPin, verifyQuickPin, startAppSession, validateAppSession, lockAppSession, setAppSessionRecoveryHandler, signOut as signOutFromSupabase, createBoutique, createUser, resetUserPassword, subscribeToBoutiqueChanges, subscribeToBoutiqueSync, isBoutiqueSyncV2Enabled, assignUserToBoutique, unassignUserFromBoutique, upsertAssignmentDirect, deleteAssignmentDirect, recordAuditLog, loadBoutiqueSnapshot, loadBoutiqueSyncPatch, loadBoutiquePlatformUsers, loadPlatformUsers, loadGroupes, saveGroupes, loadAuthSettings as loadStoredAuthSettings, saveAuthSettings, updateBoutiqueProfile, createCategory, updateCategory, deleteCategory, updateProductCategory, type BoutiqueSyncEvent, type BoutiqueSyncPatch, type LegacyBoutiqueChange } from "../lib/api";
+import { checkBackend, signQZ, sendInvoiceEmail, storePDFForSMS, getCurrentAuthUser, hasAuthenticatedSession, validateServerSession, refreshSessionIfNeeded, getAuthBootstrap, signInWithPhone, changeOwnPassword, getPinStatus, setQuickPin, verifyQuickPin, startAppSession, validateAppSession, lockAppSession, setAppSessionRecoveryHandler, signOut as signOutFromSupabase, createBoutique, createUser, resetUserPassword, subscribeToBoutiqueChanges, subscribeToBoutiqueSync, isBoutiqueSyncV2Enabled, assignUserToBoutique, unassignUserFromBoutique, upsertAssignmentDirect, deleteAssignmentDirect, recordAuditLog, loadBoutiqueSnapshot, FULL_BOOTSTRAP_HISTORY_DAYS, BOUNDED_BOOTSTRAP_HISTORY_DAYS, loadBoutiqueSyncPatch, loadBoutiquePlatformUsers, loadPlatformUsers, loadGroupes, saveGroupes, loadAuthSettings as loadStoredAuthSettings, saveAuthSettings, updateBoutiqueProfile, createCategory, updateCategory, deleteCategory, updateProductCategory, type BoutiqueSyncEvent, type BoutiqueSyncPatch, type LegacyBoutiqueChange } from "../lib/api";
 import { getNotifications, markNotificationRead, markAllNotificationsRead, dismissAllNotifications, subscribeToNotifications, getPushState, enableWebPush, disableWebPush, syncWebPushBoutique, type PushState } from "../lib/notifications";
 import { toast, Toaster } from "sonner";
 import {
@@ -15,16 +15,22 @@ import {
   Printer, Settings, Check, ChevronLeft, ClipboardCheck,
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, Cell, PieChart, Pie } from "recharts";
-import { StockView as RelationalStockView } from "./screens/StockView";
-import { DashboardView as RelationalDashboardView } from "./screens/DashboardView";
-import { FacturesView as RelationalFacturesView } from "./screens/FacturesView";
-import { POSView as RelationalPOSView } from "./screens/POSView";
-import { ClientsView as RelationalClientsView } from "./screens/ClientsView";
-import { FournisseursView as RelationalFournisseursView } from "./screens/FournisseursView";
-import { ChargesView as RelationalChargesView } from "./screens/ChargesView";
-import { ComptabiliteView as RelationalComptabiliteView } from "./screens/RapportView";
-import { TransfersView as RelationalTransfersView } from "./screens/TransfersView";
-import { InventoryView as RelationalInventoryView } from "./screens/InventoryView";
+const lazyScreen = (loader: () => Promise<{ default: React.ComponentType<any> }>) => {
+  const Component = React.lazy(loader);
+  return function TransactionLazyScreen(props: any) {
+    return <React.Suspense fallback={<div className="min-h-[45vh] flex items-center justify-center text-sm font-bold text-muted-foreground">Chargement…</div>}><Component {...props}/></React.Suspense>;
+  };
+};
+const RelationalStockView = lazyScreen(() => import("./screens/StockView").then(m => ({ default: m.StockView })));
+const RelationalDashboardView = lazyScreen(() => import("./screens/DashboardView").then(m => ({ default: m.DashboardView })));
+const RelationalFacturesView = lazyScreen(() => import("./screens/FacturesView").then(m => ({ default: m.FacturesView })));
+const RelationalPOSView = lazyScreen(() => import("./screens/POSView").then(m => ({ default: m.POSView })));
+const RelationalClientsView = lazyScreen(() => import("./screens/ClientsView").then(m => ({ default: m.ClientsView })));
+const RelationalFournisseursView = lazyScreen(() => import("./screens/FournisseursView").then(m => ({ default: m.FournisseursView })));
+const RelationalChargesView = lazyScreen(() => import("./screens/ChargesView").then(m => ({ default: m.ChargesView })));
+const RelationalComptabiliteView = lazyScreen(() => import("./screens/RapportView").then(m => ({ default: m.ComptabiliteView })));
+const RelationalTransfersView = lazyScreen(() => import("./screens/TransfersView").then(m => ({ default: m.TransfersView })));
+const RelationalInventoryView = lazyScreen(() => import("./screens/InventoryView").then(m => ({ default: m.InventoryView })));
 import { SuperAdminUserActions } from "./components/SuperAdminUserActions";
 import { TournalOpsWorkspace as TournalOps } from "./components/TournalOpsWorkspace";
 import { loadMyOpsStaffProfile, loadOpsShell } from "../lib/ops";
@@ -117,6 +123,20 @@ type ProductParam = { productId: number; nbPiecesParLot: number; longueurParPiec
 type Category   = { id: string; nom: string; unitVente: string; nbPiecesParLot: number; longueurParPiece: number };
 type TransferItem = { productId: number; nom: string; qty: number; unit: string; montantDu: number; img?: string; prixCession?: number; remise?: number; nbLots?: number; nbPieces?: number };
 type PendingTransfer = { id: string; fromBoutiqueId: string; fromBoutiqueNom: string; invoiceId: string; date: string; items: TransferItem[] };
+function mergeOlderBootstrapHistory(current: Boutique, older: Boutique): Boutique {
+  const byIdPreferCurrent = <T extends { id: string | number }>(currentRows: T[] = [], olderRows: T[] = []) => {
+    const merged = new Map<string, T>();
+    for (const row of olderRows) merged.set(String(row.id), row);
+    for (const row of currentRows) merged.set(String(row.id), row);
+    return [...merged.values()];
+  };
+  return {
+    ...current,
+    invoices: byIdPreferCurrent(current.invoices, older.invoices).sort((a,b)=>String(b.dateRaw ?? '').localeCompare(String(a.dateRaw ?? ''))),
+    entries: byIdPreferCurrent(current.entries, older.entries).sort((a:any,b:any)=>String(b.recordedAt ?? b.date ?? '').localeCompare(String(a.recordedAt ?? a.date ?? ''))),
+  };
+}
+
 type Boutique   = {
   id: string; nom: string; ville: string; color: string; initials: string; logo?: string; adresse?: string; email?: string; tel?: string;
   products: Product[]; entries: StockEntry[]; suppliers: Supplier[];
@@ -9164,6 +9184,20 @@ export default function App() {
       setBoutiques(prev => prev.some(b=>b.id===boutiqueId)
         ? prev.map(b=>b.id===boutiqueId?hydrated:b)
         : [...prev, hydrated]);
+
+      // Do not block boutique entry on the older history slice. The current
+      // state wins on duplicate IDs so Realtime updates received during this
+      // fetch cannot be overwritten by the deferred snapshot.
+      const now = Date.now();
+      const olderFrom = new Date(now - FULL_BOOTSTRAP_HISTORY_DAYS * 86_400_000).toISOString().slice(0,10);
+      const recentFrom = new Date(now - BOUNDED_BOOTSTRAP_HISTORY_DAYS * 86_400_000).toISOString().slice(0,10);
+      void loadBoutiqueSnapshot<Boutique[]>(boutiqueId, { historyFrom: olderFrom, historyTo: recentFrom, historyOnly: true })
+        .then(olderRows => {
+          const older = olderRows?.[0];
+          if (!older || activeBoutiqueIdRef.current !== boutiqueId) return;
+          setBoutiques(prev => prev.map(b => b.id === boutiqueId ? mergeOlderBootstrapHistory(b, older) : b));
+        })
+        .catch(error => techLog('sync','warn','Historique différé non chargé', error instanceof Error ? error.message : String(error)));
       setLastSyncAt(Date.now());
       setAppSessionReady(true);
       void checkBackend().then(setBackendOk).catch(()=>setBackendOk(false));

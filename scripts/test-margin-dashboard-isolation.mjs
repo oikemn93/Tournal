@@ -19,7 +19,7 @@ assert(api.includes("products_app?select=*"), "products_app must back applicatio
 assert(api.includes("stock_entries_app?select=*"), "stock_entries_app must back stock history reads");
 assert(api.includes("invoices_app?select=*"), "invoices_app must back invoice reads");
 
-assert(app.includes("DashboardView as RelationalDashboardView"), "App must import aggregate DashboardView");
+assert(app.includes("DashboardView as RelationalDashboardView") || app.includes('import("./screens/DashboardView")'), "App must load aggregate DashboardView");
 assert(app.includes("<RelationalDashboardView boutiqueId={boutique.id}"), "App must render aggregate DashboardView");
 assert(dashboard.includes("loadDashboardSummary"), "Dashboard must use aggregate RPC client");
 assert(!dashboard.includes("boutique.invoices") && !dashboard.includes("boutique.charges") && !dashboard.includes("boutique.clients"), "Dashboard must not compute from raw boutique datasets");
