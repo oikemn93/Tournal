@@ -71,6 +71,9 @@ jobs:
       - name: Client order permission contract
         run: node scripts/test-client-order-permissions.mjs
 
+      - name: Canonical Permission type
+        run: node scripts/test-permission-type-contract.mjs
+
       - name: Ops boutique entry contract
         run: node scripts/test-ops-boutique-entry.mjs
 
