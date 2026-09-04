@@ -1,0 +1,25 @@
+name: Apply canonical Permission type
+on:
+  push:
+    branches: [fix/audit-structural-hardening-20260904]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/audit-structural-hardening-20260904
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/patch-canonical-permission-type.mjs
+      - run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/app/App.tsx
+          git diff --cached --quiet && exit 0
+          git commit -m "refactor: use canonical Permission type"
+          git push
