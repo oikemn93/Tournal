@@ -2,6 +2,7 @@ import fs from 'node:fs';
 
 const sql = fs.readFileSync('supabase/migrations/20260904174500_optimize_read_permission_scopes.sql','utf8');
 const app = fs.readFileSync('src/app/App.tsx','utf8');
+const api = fs.readFileSync('src/lib/api.ts','utf8');
 
 const requiredSql = [
   'private.auth_read_boutique_ids',
@@ -29,4 +30,14 @@ for (const screen of lazyScreens) {
 if (!app.includes('React.lazy(loader)') || !app.includes('<React.Suspense')) {
   throw new Error('lazy screen boundary is missing');
 }
+
+if (!api.includes('const BOOTSTRAP_HISTORY_DAYS = 7;')) throw new Error('initial bootstrap window must stay bounded to 7 days');
+if (!api.includes('export const FULL_BOOTSTRAP_HISTORY_DAYS = 30;')) throw new Error('30-day history retention contract is missing');
+if (!api.includes('entry_date=lt.${encodeURIComponent(historyTo)}')) throw new Error('deferred stock history must have an upper bound');
+if (!api.includes('dataRequestAll<any>(`stock_entries_app?select=*${scoped()}${stockWindow}`')) throw new Error('history-only snapshot must still fetch bounded stock entries');
+if (!app.includes('function mergeOlderBootstrapHistory')) throw new Error('deferred history merge helper missing');
+if (!app.includes('for (const row of olderRows)') || !app.includes('for (const row of currentRows)')) throw new Error('deferred merge must prefer current/realtime rows on duplicate IDs');
+if (!app.includes('historyOnly: true')) throw new Error('older history must load outside the initial bootstrap');
+if (!app.includes('FULL_BOOTSTRAP_HISTORY_DAYS') || !app.includes('BOUNDED_BOOTSTRAP_HISTORY_DAYS')) throw new Error('deferred history window constants missing');
+
 console.log('performance_read_contract_ok');
