@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 
 function replaceRequired(source, search, replacement, label) {
+  if (source.includes(replacement)) return source;
   if (!source.includes(search)) throw new Error(`pattern not found: ${label}`);
   return source.replace(search, replacement);
 }
