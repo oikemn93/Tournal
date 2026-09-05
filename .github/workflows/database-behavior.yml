@@ -39,6 +39,20 @@ jobs:
       - name: Run behavioral database matrix
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f scripts/test-db-behavior.sql
 
+      - name: Verify deterministic return lock migration
+        run: |
+          psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f scripts/test-return-lock-order-db.sql
+          psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f .ci-historical-migrations/20260905102223_order_return_product_locks.sql
+          psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f .ci-historical-migrations/20260905102223_order_return_product_locks.sql
+          psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f scripts/test-return-lock-order-db.sql -v assert_patched=1
+
+      - name: Verify Ops RLS and foreign-key indexes
+        run: |
+          psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f scripts/test-ops-rls-index-db.sql
+          psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f .ci-historical-migrations/20260905104156_optimize_ops_rls_and_foreign_keys.sql
+          psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f .ci-historical-migrations/20260905104156_optimize_ops_rls_and_foreign_keys.sql
+          psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f scripts/test-ops-rls-index-db.sql -v assert_patched=1
+
       - name: Stop local database
         if: always()
         run: supabase stop --no-backup

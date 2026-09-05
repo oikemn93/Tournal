@@ -100,7 +100,7 @@ export function ChargesView({ boutique, onUpdate, logAction, canDisburse = false
               <Pie data={byCategorie} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70} paddingAngle={2}>
                 {byCategorie.map((entry,i) => <Cell key={`cell-${i}`} fill={entry.color}/>)}
               </Pie>
-              <Tooltip formatter={(v:number) => fmt(v)} contentStyle={{borderRadius:12,border:"1px solid var(--border)",fontSize:12}}/>
+              <Tooltip formatter={(v) => fmt(Number(v ?? 0))} contentStyle={{borderRadius:12,border:"1px solid var(--border)",fontSize:12}}/>
               <Legend iconType="circle" iconSize={8} wrapperStyle={{fontSize:11}}/>
             </PieChart>
           </ResponsiveContainer>

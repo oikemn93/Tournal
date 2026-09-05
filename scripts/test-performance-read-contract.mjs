@@ -35,6 +35,9 @@ if (!api.includes('const BOOTSTRAP_HISTORY_DAYS = 7;')) throw new Error('initial
 if (!api.includes('export const FULL_BOOTSTRAP_HISTORY_DAYS = 30;')) throw new Error('30-day history retention contract is missing');
 if (!api.includes('entry_date=lt.${encodeURIComponent(historyTo)}')) throw new Error('deferred stock history must have an upper bound');
 if (!api.includes('dataRequestAll<any>(`stock_entries_app?select=*${scoped()}${stockWindow}`')) throw new Error('history-only snapshot must still fetch bounded stock entries');
+if (!api.includes('const INVOICE_PAYMENT_SELECT = "id,boutique_id,invoice_id,amount,payment_method,paid_at,recorded_at,operator_id,operator_name,batch_id,source"')) throw new Error('snapshot payments must keep a narrow explicit projection');
+if (api.includes('dataRequest<any[]>(`invoice_payments?select=*${scoped()}${paymentWindow}')) throw new Error('snapshot payments must not regress to select=*');
+if (!api.includes('historyTo && !options.historyOnly')) throw new Error('deferred old invoices must retain newer payments needed for their current balance');
 if (!app.includes('function mergeOlderBootstrapHistory')) throw new Error('deferred history merge helper missing');
 if (!app.includes('for (const row of olderRows)') || !app.includes('for (const row of currentRows)')) throw new Error('deferred merge must prefer current/realtime rows on duplicate IDs');
 if (!app.includes('historyOnly: true')) throw new Error('older history must load outside the initial bootstrap');

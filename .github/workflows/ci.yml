@@ -89,6 +89,18 @@ jobs:
       - name: Numeric keypads
         run: node scripts/test-numeric-keypads.mjs
 
+      - name: Runtime safety contract
+        run: node scripts/test-runtime-safety-contract.mjs
+
+      - name: Return lock ordering contract
+        run: node scripts/test-return-lock-order-contract.mjs
+
+      - name: Ops RLS and foreign-key index contract
+        run: node scripts/test-ops-rls-index-contract.mjs
+
+      - name: TypeScript contract
+        run: pnpm exec tsc --noEmit
+
       - name: Verify temporary patchers are gone
         shell: bash
         run: |

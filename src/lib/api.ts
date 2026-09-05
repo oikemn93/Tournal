@@ -750,6 +750,7 @@ export type BoutiqueSnapshotOptions = {
 const BOOTSTRAP_HISTORY_DAYS = 7;
 export const FULL_BOOTSTRAP_HISTORY_DAYS = 30;
 export const BOUNDED_BOOTSTRAP_HISTORY_DAYS = BOOTSTRAP_HISTORY_DAYS;
+const INVOICE_PAYMENT_SELECT = "id,boutique_id,invoice_id,amount,payment_method,paid_at,recorded_at,operator_id,operator_name,batch_id,source";
 export function boundedBootstrapCutoffIso(now = Date.now()) {
   return new Date(now - BOOTSTRAP_HISTORY_DAYS * 86_400_000).toISOString();
 }
@@ -777,6 +778,9 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string, options: Bouti
     const invoiceWindow = options.historyOnly
       ? `${historyFrom ? `&invoice_date=gte.${historyFromFilter}` : ""}${historyTo ? `&invoice_date=lt.${encodeURIComponent(historyTo)}` : ""}`
       : `&or=(invoice_date.gte.${historyFromFilter},status.eq.en_attente)`;
+    // The deferred slice contains older invoices. Keep newer payments in that
+    // request so a recently settled old invoice is hydrated with its current
+    // balance; mergeOlderBootstrapHistory then carries the complete invoice.
     const paymentWindow = `${historyFrom ? `&paid_at=gte.${historyFromFilter}` : ""}${historyTo && !options.historyOnly ? `&paid_at=lt.${encodeURIComponent(historyTo)}` : ""}`;
     const stockWindow = `${historyFrom ? `&entry_date=gte.${historyFromFilter}` : ""}${historyTo ? `&entry_date=lt.${encodeURIComponent(historyTo)}` : ""}`;
     const chargeWindow = `&or=(charge_date.gte.${secondaryHistoryFromFilter},status.neq.paid)`;
@@ -787,7 +791,7 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string, options: Bouti
       dataRequestAll<any>(`stock_entries_app?select=*${scoped()}${stockWindow}`, "entry_date.desc,id.desc"), dataRequest<any[]>(`clients?select=*${scoped()}`),
       (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`suppliers?select=*${scoped()}`)),
       dataRequest<any[]>(`invoices_app?select=*${scoped()}${invoiceWindow}&order=invoice_date.desc`),
-      dataRequest<any[]>(`invoice_payments?select=*${scoped()}${paymentWindow}&order=paid_at.asc`), (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`client_advances?select=*${scoped()}&order=paid_at.desc,id.desc`)),
+      dataRequest<any[]>(`invoice_payments?select=${INVOICE_PAYMENT_SELECT}${scoped()}${paymentWindow}&order=paid_at.asc`), (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`client_advances?select=*${scoped()}&order=paid_at.desc,id.desc`)),
       (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`client_credit_refunds?select=*${scoped()}&refunded_at=gte.${secondaryHistoryFromFilter}&order=refunded_at.desc,id.desc`)), (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`charges?select=*${scoped()}${chargeWindow}`)),
       (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`caisse_sessions?select=*${scoped()}${caisseWindow}`)),
       // The administration view presents recent activity. Loading the entire

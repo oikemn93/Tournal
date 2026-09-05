@@ -605,9 +605,7 @@ function buildInvoicePDFHtml(inv: Invoice, boutique: Boutique, clients: Client[]
       </tr>`;
   }).join("");
 
-  const clientTypeLabel = clientRecord?.type === "B2B" ? "Client B2B (Grossiste)"
-    : clientRecord?.type === "Intergroupe" ? "Client Intergroupe"
-    : "Client B2C (Particulier)";
+  const clientTypeLabel = clientRecord?.type === "B2B" ? "Client B2B (Grossiste)" : "Client B2C (Particulier)";
 
   const dateFormatted = parseInvoiceDate(inv).toLocaleDateString("fr-FR", { day:"2-digit", month:"long", year:"numeric" });
 
@@ -985,9 +983,7 @@ async function buildInvoicePDFNative(inv: Invoice, boutique: Boutique, clients: 
   pdf.line(R2, y+1.2, R2+halfW, y+1.2);
   y += 5;
 
-  const clientTypeLabel = clientRecord?.type === "B2B" ? "Client B2B (Grossiste)"
-    : clientRecord?.type === "Intergroupe" ? "Client Intergroupe"
-    : "Client B2C (Particulier)";
+  const clientTypeLabel = clientRecord?.type === "B2B" ? "Client B2B (Grossiste)" : "Client B2C (Particulier)";
   pdf.setFont("helvetica","normal"); pdf.setFontSize(7); pdf.setTextColor(120,120,120);
   const pillW = pdf.getTextWidth(clientTypeLabel)+6;
   pdf.setFillColor(243,244,246);
@@ -1848,7 +1844,7 @@ function ShareInvoiceModal({ inv, boutique, clients, onClose }: { inv: Invoice; 
     let pdfUrl = "";
     try {
       const pdfBase64 = await generateInvoicePDFBase64(inv, boutique, clients);
-      pdfUrl = await storePDFForSMS({ invoiceId: inv.id, boutiqueId: boutique.id, pdfBase64 });
+      pdfUrl = (await storePDFForSMS({ invoiceId: inv.id, boutiqueId: boutique.id, pdfBase64 })) ?? "";
     } catch (e: any) {
       const isStorage = e?.message?.includes("Bucket") || e?.message?.includes("invoice-pdfs");
       setWaError(isStorage
@@ -1880,7 +1876,7 @@ function ShareInvoiceModal({ inv, boutique, clients, onClose }: { inv: Invoice; 
     let pdfUrl = "";
     try {
       const pdfBase64 = await generateInvoicePDFBase64(inv, boutique, clients);
-      pdfUrl = await storePDFForSMS({ invoiceId: inv.id, boutiqueId: boutique.id, pdfBase64 });
+      pdfUrl = (await storePDFForSMS({ invoiceId: inv.id, boutiqueId: boutique.id, pdfBase64 })) ?? "";
       setSmsLink(pdfUrl);
     } catch (e: any) {
       const isStorage = e?.message?.includes("Bucket") || e?.message?.includes("invoice-pdfs");
@@ -2137,7 +2133,7 @@ function ChargesView({ boutique, onUpdate, logAction }: {
               <Pie data={byCategorie} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70} paddingAngle={2}>
                 {byCategorie.map((entry,i) => <Cell key={`charges-cell-${i}`} fill={entry.color}/>)}
               </Pie>
-              <Tooltip formatter={(v:number) => fmt(v)} contentStyle={{borderRadius:12,border:"1px solid var(--border)",fontSize:12}}/>
+              <Tooltip formatter={(v) => fmt(Number(v ?? 0))} contentStyle={{borderRadius:12,border:"1px solid var(--border)",fontSize:12}}/>
             </PieChart>
           </ResponsiveContainer>
           <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2">
@@ -2555,7 +2551,7 @@ function DashboardView({ boutique, onNavigate }: { boutique: Boutique; onNavigat
                 <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={52} paddingAngle={3}>
                   {pieData.map((e,i)=><Cell key={`pie-cell-${period}-${i}`} fill={e.color}/>)}
                 </Pie>
-                <Tooltip formatter={(v:number)=>fmt(v)} contentStyle={{borderRadius:12,border:"1px solid var(--border)",fontSize:11}}/>
+                <Tooltip formatter={(v)=>fmt(Number(v ?? 0))} contentStyle={{borderRadius:12,border:"1px solid var(--border)",fontSize:11}}/>
               </PieChart>
             </ResponsiveContainer>
             <div className="flex flex-wrap justify-center gap-x-3 gap-y-1 mt-2">
@@ -2626,7 +2622,7 @@ function TransfertsView({ boutique, allBoutiques, platformUsers, groupes, curren
   const outbound  = transfers.filter(t => t.direction === "outbound");
 
   // Legacy pendingTransfers bridged to new format
-  const legacyPending = (boutique.pendingTransfers ?? []).map(pt => ({
+  const legacyPending: Transfer[] = (boutique.pendingTransfers ?? []).map(pt => ({
     id: pt.id, direction: "inbound" as const,
     fromBoutiqueId: pt.fromBoutiqueId, fromBoutiqueNom: pt.fromBoutiqueNom,
     toBoutiqueId: boutique.id, toBoutiqueNom: boutique.nom,
@@ -3510,7 +3506,7 @@ function InventaireView({ boutique, currentUser, onUpdate, logAction, onClose, i
             <div className="flex items-center justify-between px-4 py-3 border-b border-border">
               <div>
                 <p className="font-bold text-sm">{formatPreciseDateTime(viewSession.dateRaw) === "—" ? viewSession.date : formatPreciseDateTime(viewSession.dateRaw)}</p>
-                <p className="text-xs text-muted-foreground">{viewSession.userNom} · {viewSession.lines.filter(l=>l.ecart!==undefined&&(l.compte??l.theorique)!==l.theorique).length} écart(s)</p>
+                <p className="text-xs text-muted-foreground">{viewSession.userNom} · {viewSession.lines.filter(l=>(l.compte??l.theorique)!==l.theorique).length} écart(s)</p>
               </div>
               <button onClick={()=>setViewSession(null)} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-muted"><X size={16}/></button>
             </div>
@@ -5197,7 +5193,7 @@ const PA: {
   listeners: Set<()=>void>;
 } = { status:"idle", qz:null, printers:[], printer:"", lastError:null, listeners: new Set() };
 
-function onPAChange(cb: ()=>void) { PA.listeners.add(cb); return ()=>PA.listeners.delete(cb); }
+function onPAChange(cb: ()=>void) { PA.listeners.add(cb); return () => { PA.listeners.delete(cb); }; }
 function notifyPA() { PA.listeners.forEach(cb=>cb()); }
 
 function usePAStatus() {
@@ -5710,7 +5706,7 @@ function FacturesView({ boutique, allBoutiques, platformUsers, groupes, currentU
                   <div className="flex items-center gap-2 ml-3">
                     <div className="text-right"><p className="text-base font-black" style={{ fontFamily:"'Nunito', sans-serif" }}>{fmt(inv.montant)}</p><span className="text-xs px-2 py-0.5 rounded-full font-bold capitalize inline-block mt-0.5" style={{ background:bc,color:tc }}>{inv.status}</span></div>
                     {!isReturn && inv.status !== "payé" && (
-                      <button onClick={e=>{e.stopPropagation();setEncaissInv(inv);setEncaissAmt(String(inv.montant-inv.acompte));}} className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background:SEM.success.bg }} title="Encaisser">
+                      <button onClick={e=>{e.stopPropagation();setEncaissInv(inv);setEncaissSplit([{method:"Espèces",amount:String(inv.montant-inv.acompte)}]);}} className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background:SEM.success.bg }} title="Encaisser">
                         <Wallet size={15} style={{ color:SEM.success.text }}/>
                       </button>
                     )}
@@ -8813,7 +8809,7 @@ export default function App() {
       return;
     }
     let cancelled = false;
-    let unsubscribe = () => undefined;
+    let unsubscribe: () => void = () => undefined;
     const refreshPushState = () => { void getPushState().then(setPushState).catch(() => undefined); };
     const activate = async () => {
       setNotifs([]);
@@ -9197,7 +9193,7 @@ export default function App() {
           if (!older || activeBoutiqueIdRef.current !== boutiqueId) return;
           setBoutiques(prev => prev.map(b => b.id === boutiqueId ? mergeOlderBootstrapHistory(b, older) : b));
         })
-        .catch(error => techLog('sync','warn','Historique différé non chargé', error instanceof Error ? error.message : String(error)));
+        .catch(error => console.warn('Historique différé non chargé', error instanceof Error ? error.message : String(error)));
       setLastSyncAt(Date.now());
       setAppSessionReady(true);
       void checkBackend().then(setBackendOk).catch(()=>setBackendOk(false));
@@ -9813,7 +9809,7 @@ export default function App() {
       setLockBusy(true);
       setLockError("");
       try {
-        const result = await verifyQuickPin(pinValue, activeBoutiqueId);
+        const result = await verifyQuickPin(pinValue, boutique.id);
         if (result.ok) {
           setLockPin("");
           try { sessionStorage.removeItem(APP_LOCK_KEY); } catch {}
@@ -9923,12 +9919,12 @@ export default function App() {
       </div>}
       {isReadOnly && <div className="flex items-center gap-2 px-4 py-2 text-xs font-bold text-amber-800 bg-amber-50 border-b border-amber-200"><Lock size={12}/> Mode lecture seule — aucune modification possible</div>}
       <main className="flex-1 overflow-y-auto px-4 py-4 pb-20" style={{ scrollbarWidth:"none" }}>
-        {safeTab==="dashboard"    && canAccess("dashboard") && <RelationalDashboardView boutiqueId={boutique.id} canSeeMargin={canSeeMargin} onNavigate={(t,f)=>{setNavFilter(f??{});setTab(t);}}/>}
-        {safeTab==="stock"        && canAccess("stock")        && <RelationalStockView boutique={boutique} canSeeMargin={canSeeMargin} onUpdate={updateBoutique} logAction={logAction} initialFilter={navFilter.stockFilter} initialSupplierId={navFilter.supplierId?Number(navFilter.supplierId):undefined} initialEntryId={navFilter.stockEntryId?Number(navFilter.stockEntryId):undefined} onInitialRoutePrepared={()=>setNavFilter({})} onReceiptSaved={(supplierId)=>{setNavFilter({supplierDetailId:String(supplierId)});setTab("fournisseurs");}}/>}
-        {safeTab==="fournisseurs" && canAccess("fournisseurs") && <RelationalFournisseursView boutique={boutique} onUpdate={updateBoutique} logAction={logAction} canPaySupplier={(isOwner || !!currentUser?.isSuperAdmin || !!droits?.decaissement) && canAccess("charges")} canManageReceipts={canAccess("stock")} onStartReceipt={(supplierId)=>{setNavFilter({supplierId:String(supplierId)});setTab("stock");}} onCorrectReceipt={(entry,supplierId)=>{setNavFilter({supplierId:String(supplierId),stockEntryId:String(entry.id)});setTab("stock");}} initialSupplierId={navFilter.supplierDetailId?Number(navFilter.supplierDetailId):undefined} onInitialSupplierOpened={()=>setNavFilter({})} defaultPaymentTermsDays={supplierPaymentTermsDays}/>}
-        {safeTab==="clients"      && canAccess("clients")      && <RelationalClientsView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} currentUser={currentUser!} onUpdate={updateBoutique} logAction={logAction} initialTab={navFilter.clientTab as ClientType|undefined} initialClientId={navFilter.clientId?Number(navFilter.clientId):undefined} initialInvoiceId={navFilter.invoiceId} initialInvoiceNotice={navFilter.invoiceNotice === "payment" ? "payment" : "order"} onInitialClientOpened={()=>setNavFilter({})} canCreateOrder={isOwner || !!currentUser?.isSuperAdmin || !!(droits?.vente)} canCollectPayment={isOwner || !!currentUser?.isSuperAdmin || !!(droits?.encaissement_vente)} canDisburse={isOwner || !!currentUser?.isSuperAdmin || !!droits?.decaissement} canCancelPendingOrder={isOwner || !!currentUser?.isSuperAdmin || !!(droits?.annulation_commande)} canOpenInvoice={canAccess("factures")} defaultPaymentTermsDays={clientPaymentTermsDays} onOpenInvoice={(invoiceId)=>{setNavFilter({invoiceId});setTab("factures");}} onCreateOrder={(client)=>{if (!(isOwner || currentUser?.isSuperAdmin || droits?.vente)) return;setNavFilter({clientId:String(client.id),orderOrigin:"client_profile"});setTab("pos");}}/>}
-        {safeTab==="factures"     && canAccess("factures")     && <RelationalFacturesView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} currentUser={currentUser} canReturn={canAccess("remboursement")} canCollectPayment={isOwner || !!(droits?.encaissement_vente)} canSeeMargin={canSeeMargin} caisseDefaults={caisseDefaults} onUpdate={updateBoutique} onUpdateOtherBoutique={updateOtherBoutique} logAction={logAction} initialStatus={navFilter.statusFilter as InvoiceStatus|"all"|undefined} initialInvoiceId={navFilter.invoiceId} initialClientId={navFilter.clientId?Number(navFilter.clientId):undefined} onPaymentRecorded={canAccess("clients") ? (clientId,invoiceId)=>{setNavFilter({clientId:String(clientId),invoiceId,invoiceNotice:"payment"});setTab("clients");} : undefined}/>}
-        {safeTab==="pos"          && canAccess("vente")        && <RelationalPOSView boutique={boutique} allBoutiques={boutiques} currentUser={currentUser} canEncaissVente={isOwner || !!(droits?.encaissement_vente)} canCancelPendingOrder={isOwner || !!currentUser?.isSuperAdmin || !!(droits?.annulation_commande)} initialClientId={navFilter.clientId?Number(navFilter.clientId):undefined} initialOrderOrigin={navFilter.orderOrigin === "client_profile" ? "client_profile" : "pos"} onInitialClientPrepared={()=>setNavFilter({})} onOrderCreated={(clientId,invoiceId,notice="order")=>{setNavFilter({clientId:String(clientId),invoiceId,...(notice==="payment"?{invoiceNotice:"payment"}:{})});setTab("clients");}} onUpdate={updateBoutique} logAction={logAction}/>}
+        {safeTab==="dashboard"    && canAccess("dashboard") && <RelationalDashboardView boutiqueId={boutique.id} canSeeMargin={canSeeMargin} onNavigate={(t:Tab,f?:Record<string,string>)=>{setNavFilter(f??{});setTab(t);}}/>}
+        {safeTab==="stock"        && canAccess("stock")        && <RelationalStockView boutique={boutique} canSeeMargin={canSeeMargin} onUpdate={updateBoutique} logAction={logAction} initialFilter={navFilter.stockFilter} initialSupplierId={navFilter.supplierId?Number(navFilter.supplierId):undefined} initialEntryId={navFilter.stockEntryId?Number(navFilter.stockEntryId):undefined} onInitialRoutePrepared={()=>setNavFilter({})} onReceiptSaved={(supplierId:number)=>{setNavFilter({supplierDetailId:String(supplierId)});setTab("fournisseurs");}}/>}
+        {safeTab==="fournisseurs" && canAccess("fournisseurs") && <RelationalFournisseursView boutique={boutique} onUpdate={updateBoutique} logAction={logAction} canPaySupplier={(isOwner || !!currentUser?.isSuperAdmin || !!droits?.decaissement) && canAccess("charges")} canManageReceipts={canAccess("stock")} onStartReceipt={(supplierId:number)=>{setNavFilter({supplierId:String(supplierId)});setTab("stock");}} onCorrectReceipt={(entry:StockEntry,supplierId:number)=>{setNavFilter({supplierId:String(supplierId),stockEntryId:String(entry.id)});setTab("stock");}} initialSupplierId={navFilter.supplierDetailId?Number(navFilter.supplierDetailId):undefined} onInitialSupplierOpened={()=>setNavFilter({})} defaultPaymentTermsDays={supplierPaymentTermsDays}/>}
+        {safeTab==="clients"      && canAccess("clients")      && <RelationalClientsView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} currentUser={currentUser!} onUpdate={updateBoutique} logAction={logAction} initialTab={navFilter.clientTab as ClientType|undefined} initialClientId={navFilter.clientId?Number(navFilter.clientId):undefined} initialInvoiceId={navFilter.invoiceId} initialInvoiceNotice={navFilter.invoiceNotice === "payment" ? "payment" : "order"} onInitialClientOpened={()=>setNavFilter({})} canCreateOrder={isOwner || !!currentUser?.isSuperAdmin || !!(droits?.vente)} canCollectPayment={isOwner || !!currentUser?.isSuperAdmin || !!(droits?.encaissement_vente)} canDisburse={isOwner || !!currentUser?.isSuperAdmin || !!droits?.decaissement} canCancelPendingOrder={isOwner || !!currentUser?.isSuperAdmin || !!(droits?.annulation_commande)} canOpenInvoice={canAccess("factures")} defaultPaymentTermsDays={clientPaymentTermsDays} onOpenInvoice={(invoiceId:string)=>{setNavFilter({invoiceId});setTab("factures");}} onCreateOrder={(client:Client)=>{if (!(isOwner || currentUser?.isSuperAdmin || droits?.vente)) return;setNavFilter({clientId:String(client.id),orderOrigin:"client_profile"});setTab("pos");}}/>}
+        {safeTab==="factures"     && canAccess("factures")     && <RelationalFacturesView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} currentUser={currentUser} canReturn={canAccess("remboursement")} canCollectPayment={isOwner || !!(droits?.encaissement_vente)} canSeeMargin={canSeeMargin} caisseDefaults={caisseDefaults} onUpdate={updateBoutique} onUpdateOtherBoutique={updateOtherBoutique} logAction={logAction} initialStatus={navFilter.statusFilter as InvoiceStatus|"all"|undefined} initialInvoiceId={navFilter.invoiceId} initialClientId={navFilter.clientId?Number(navFilter.clientId):undefined} onPaymentRecorded={canAccess("clients") ? (clientId:number,invoiceId:string)=>{setNavFilter({clientId:String(clientId),invoiceId,invoiceNotice:"payment"});setTab("clients");} : undefined}/>}
+        {safeTab==="pos"          && canAccess("vente")        && <RelationalPOSView boutique={boutique} allBoutiques={boutiques} currentUser={currentUser} canEncaissVente={isOwner || !!(droits?.encaissement_vente)} canCancelPendingOrder={isOwner || !!currentUser?.isSuperAdmin || !!(droits?.annulation_commande)} initialClientId={navFilter.clientId?Number(navFilter.clientId):undefined} initialOrderOrigin={navFilter.orderOrigin === "client_profile" ? "client_profile" : "pos"} onInitialClientPrepared={()=>setNavFilter({})} onOrderCreated={(clientId:number,invoiceId:string,notice="order")=>{setNavFilter({clientId:String(clientId),invoiceId,...(notice==="payment"?{invoiceNotice:"payment"}:{})});setTab("clients");}} onUpdate={updateBoutique} logAction={logAction}/>}
         {safeTab==="charges"      && canAccess("charges")      && <RelationalChargesView boutique={boutique} onUpdate={updateBoutique} logAction={logAction} canDisburse={isOwner || !!currentUser?.isSuperAdmin || !!droits?.decaissement}/>}
         {safeTab==="compta"       && canAccess("compta")       && <RelationalComptabiliteView boutique={boutique} canSeeMargin={canSeeMargin}/>}
         {safeTab==="inventaire"   && canAccess("inventaire")   && (
@@ -10082,4 +10078,3 @@ export default function App() {
   </BoutiqueAppErrorBoundary>
   );
 }
-
