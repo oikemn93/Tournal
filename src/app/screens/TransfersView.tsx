@@ -16,6 +16,7 @@ const TRANSFER_COLOR = "#ea580c";
 
 type DraftLine = { draftId: string; productId: number; nom: string; unit: string; qty: number; sellUnit: string; sellQty: number; unitPrice: number };
 type ReceiveNewConfig = { name:string; categoryId:string; sellUnit:string; piecesPerLot:string; lengthPerPiece:string };
+type ReceiveMapping = { transferLineId:number; destinationProductId?:number; createNew?:boolean; newName?:string; categoryId?:string|null; piecesPerLot?:number; lengthPerPiece?:number; sellUnit?:string };
 
 const STATUS: Record<RelationalTransfer["status"], { label: string; color: string; bg: string; icon: typeof Clock }> = {
   pending:   { label:"En attente", color:"#d97706", bg:"#fffbeb", icon:Clock },
@@ -269,7 +270,7 @@ export function TransfersView({ boutique, allBoutiques, platformUsers, currentUs
   async function confirmReceive() {
     if (!receiving || saving) return;
     const seenNewSourceProducts = new Set<number>();
-    const mappings = (receiving.stock_transfer_lines ?? []).flatMap(line => {
+    const mappings = (receiving.stock_transfer_lines ?? []).flatMap<ReceiveMapping>(line => {
       const selected = receiveMappings[line.id] ?? "new";
       if (selected !== "new") return [{ transferLineId:line.id, destinationProductId:Number(selected) }];
       // For several conditioning lines of the same source product, create the

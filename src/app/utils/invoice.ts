@@ -441,7 +441,7 @@ export const PA: {
   listeners: Set<()=>void>;
 } = { status:"idle", qz:null, printers:[], printer:"", lastError:null, listeners: new Set() };
 
-export function onPAChange(cb: ()=>void) { PA.listeners.add(cb); return ()=>PA.listeners.delete(cb); }
+export function onPAChange(cb: ()=>void) { PA.listeners.add(cb); return () => { PA.listeners.delete(cb); }; }
 export function notifyPA() { PA.listeners.forEach(cb=>cb()); }
 
 export function usePAStatus() {
