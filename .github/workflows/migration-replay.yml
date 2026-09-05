@@ -188,6 +188,10 @@ jobs:
         run: |
           psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -Atc "select count(*) from supabase_migrations.schema_migrations;"
 
+      - name: Compare production schema fingerprint
+        run: |
+          psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -f .github/audit/schema-fingerprint.sql
+
       - name: Stop local Supabase
         if: always()
         run: supabase stop --no-backup
