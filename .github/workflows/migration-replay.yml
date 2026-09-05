@@ -17,6 +17,17 @@ jobs:
       - uses: supabase/setup-cli@v1
         with:
           version: 2.116.0
+      - name: Prepare relational prerequisite baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          first_line="$(head -n 1 scripts/ci-db-baseline.sql)"
+          test "$first_line" = '\set ON_ERROR_STOP on'
+          tail -n +2 scripts/ci-db-baseline.sql > supabase/migrations/20260816000000_ci_relational_baseline.sql
+          if grep -n '^\\' supabase/migrations/20260816000000_ci_relational_baseline.sql; then
+            echo 'Unexpected psql meta-command remains in audit baseline.' >&2
+            exit 2
+          fi
       - name: Start local Supabase
         run: supabase start -x studio,imgproxy,edge-runtime,logflare,vector
       - name: Replay complete Git migration history
