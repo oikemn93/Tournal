@@ -37,6 +37,24 @@ jobs:
             printf '%s\n' "$hits"
             find supabase/migrations -type f -name '*.sql' -print0 | xargs -0 sed -i -E 's/CREATE POLICY IF NOT EXISTS/CREATE POLICY/Ig'
           fi
+      - name: Normalize migration versions for schema-only replay
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/tournal-migrations
+          i=0
+          while IFS= read -r path; do
+            i=$((i + 1))
+            base="$(basename "$path")"
+            logical="${base#*_}"
+            version="$(printf '20000101%06d' "$i")"
+            cp "$path" "/tmp/tournal-migrations/${version}_${logical}"
+            printf '%s -> %s_%s\n' "$base" "$version" "$logical"
+          done < <(find supabase/migrations -maxdepth 1 -type f -name '*.sql' | sort)
+          rm -f supabase/migrations/*.sql
+          cp /tmp/tournal-migrations/*.sql supabase/migrations/
+          versions="$(find supabase/migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | cut -d_ -f1)"
+          test "$(printf '%s\n' "$versions" | sort | uniq -d | wc -l)" -eq 0
       - name: Start local Supabase
         run: supabase start -x studio,imgproxy,edge-runtime,logflare,vector
       - name: Replay complete Git migration history
