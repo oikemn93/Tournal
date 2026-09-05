@@ -95,6 +95,9 @@ jobs:
       - name: Return lock ordering contract
         run: node scripts/test-return-lock-order-contract.mjs
 
+      - name: Ops RLS and foreign-key index contract
+        run: node scripts/test-ops-rls-index-contract.mjs
+
       - name: TypeScript contract
         run: pnpm exec tsc --noEmit
 
