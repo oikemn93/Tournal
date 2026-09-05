@@ -488,7 +488,13 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
     const validSplit = encaissSplit.filter(s => s.amount > 0);
     const totalSplit = roundMoney(validSplit.reduce((s, e) => s + e.amount, 0));
     if (validSplit.length === 0 || totalSplit <= 0) return;
-    if (moneyExceeds(totalSplit, invoiceRemainingAmount(encaissInv))) {
+    const remainingDue = invoiceRemainingAmount(encaissInv);
+    const isCounterInvoice = (encaissInv.origin ?? "pos") === "pos";
+    if (isCounterInvoice && Math.abs(totalSplit - remainingDue) > 0.01) {
+      alert("Client comptoir : la facture doit être encaissée intégralement.");
+      return;
+    }
+    if (moneyExceeds(totalSplit, remainingDue)) {
       alert("Le total des paiements dépasse le reste à encaisser.");
       return;
     }
@@ -647,9 +653,13 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
     const isSiblingTransfer = !!siblingClient;
     const ct  = isSiblingTransfer ? "Inter-tenant" : (selectedClient?.type??"B2C");
     const cTel = selectedClient?.tel;
+    // A registered client always follows the Clients lifecycle even when this
+    // legacy invoice composer is used: stock is committed independently from
+    // payment, and partial/no payment remains allowed.
+    const saleOrigin: "pos"|"client_profile" = selectedClient ? "client_profile" : "pos";
     let persisted;
     try {
-      persisted = await createSale({ boutiqueId:boutique.id, clientId:selectedClient?.id, client:selectedClientName, clientTel:cTel, lines });
+      persisted = await createSale({ boutiqueId:boutique.id, clientId:selectedClient?.id, client:selectedClientName, clientTel:cTel, lines, origin:saleOrigin });
     } catch (error) {
       setSubmittingInvoice(false);
       alert(error instanceof Error ? error.message : "Création de facture impossible");
@@ -702,7 +712,8 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
     const newInv: Invoice = {
       id, clientId:selectedClient?.id, client:selectedClientName, clientTel:cTel, clientType:selectedClient?.type,
       lines, montant, acompte:paidAtCreation, date:today(), dateRaw:new Date().toISOString(), status:s, type:ct,
-      operatorNom:currentUser.nom, operatorColor:currentUser.color,
+      operatorNom:currentUser.nom, operatorColor:currentUser.color, origin:saleOrigin,
+      stockDeductedAt:saleOrigin === "client_profile" || initialPayment?.stock_deducted ? new Date().toISOString() : undefined,
       paymentMethod:initialPayment ? initialPayment.payment.payment_method as PaymentMethod : undefined,
       payments:initialPayment ? [{
         id:initialPayment.payment.id, amount:initialPayment.payment.amount, paymentMethod:initialPayment.payment.payment_method as PaymentMethod,
@@ -1245,6 +1256,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
               <span className="font-black text-base" style={{color:"#ef4444",fontFamily:"'Nunito',sans-serif"}}>{fmt(invoiceRemainingAmount(encaissInv))}</span>
             </div>
           </div>
+          {(encaissInv.origin ?? "pos") === "pos" && <div className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-black text-amber-800">Comptoir : encaissement intégral obligatoire. Plusieurs modes de paiement sont possibles, mais leur somme doit couvrir 100 % du reste dû.</div>}
 
           {/* Multi-mode payment split */}
           <div className="space-y-2">
@@ -1356,7 +1368,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
             </div>
           ) : (
             <SubmitBtn color={boutique.color} label={submittingPayment ? "Encaissement…" : "Confirmer l'encaissement"} onClick={submitEncaiss}
-              disabled={submittingPayment || encaissSplit.reduce((s,e)=>s+e.amount,0)<=0}/>
+              disabled={submittingPayment || encaissSplit.reduce((s,e)=>s+e.amount,0)<=0 || ((encaissInv.origin ?? "pos") === "pos" && Math.abs(roundMoney(encaissSplit.reduce((s,e)=>s+e.amount,0)) - invoiceRemainingAmount(encaissInv)) > 0.01)}/>
           )}
         </Modal>
       )}
