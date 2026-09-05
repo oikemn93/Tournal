@@ -93,6 +93,10 @@ from audit_actual_fingerprint a
 join audit_expected_fingerprint e using(category)
 order by a.category;
 
+\echo AUDIT_SCHEMA_SIGNATURES_BEGIN
+\i .github/audit/schema-signature-manifest.sql
+\echo AUDIT_SCHEMA_SIGNATURES_END
+
 do $audit$
 begin
   if exists (
