@@ -188,7 +188,9 @@ jobs:
       - name: Export local hashed schema signatures
         run: |
           psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -f .github/audit/schema-signature-manifest.sql > local-schema-signatures.txt
+          psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -f .github/audit/function-component-manifest.sql > local-function-components.txt
           test -s local-schema-signatures.txt
+          test -s local-function-components.txt
 
       - name: Export production hashed schema signatures read-only
         env:
@@ -262,6 +264,7 @@ jobs:
           name: schema-signatures
           path: |
             local-schema-signatures.txt
+            local-function-components.txt
             production-schema-signatures.txt
             schema-diff.txt
           if-no-files-found: error
