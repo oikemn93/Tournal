@@ -6,10 +6,8 @@ drop view if exists public.invoices_app;
 drop view if exists public.products_app;
 drop view if exists public.stock_entries_app;
 
--- audit_log.id is GENERATED ALWAYS AS IDENTITY in production, not a synthetic serial.
-alter table public.audit_log alter column id drop default;
-drop sequence if exists public.audit_log_id_seq;
-alter table public.audit_log alter column id add generated always as identity;
+-- audit_log.id is already an identity in the replay; production uses GENERATED ALWAYS.
+alter table public.audit_log alter column id set generated always;
 
 alter table public.caisse_sessions
   alter column fond_fermeture type numeric(12,2),
