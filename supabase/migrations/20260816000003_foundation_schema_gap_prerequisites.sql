@@ -1,5 +1,6 @@
 -- Audit-only reconstruction of the structural state established by
--- production migration 20260813025950 (tournal_additive_relational_schema).
+-- production migration 20260813025950 (tournal_additive_relational_schema)
+-- plus structural columns that predate the retained migration journal.
 -- No production data or historical secrets are included.
 
 alter table public.platform_users
@@ -43,6 +44,7 @@ alter table public.products
   add column if not exists sell_unit text,
   add column if not exists sell_qty numeric(12,3),
   add column if not exists barcode text,
+  add column if not exists supplier_name text,
   add column if not exists created_at timestamptz not null default now(),
   add column if not exists updated_at timestamptz not null default now();
 create unique index if not exists products_boutique_id_id_audit_uq on public.products(boutique_id,id);
