@@ -1,15 +1,45 @@
 import fs from 'node:fs';
-const p='src/app/screens/ClientsView.tsx';
-let s=fs.readFileSync(p,'utf8');
-s=s.replace('cancelPendingInvoice, confirmClientDelivery, createClient,', 'cancelPendingInvoice, createClient,');
-s=s.replace('  const [confirmingDeliveryId, setConfirmingDeliveryId] = useState<string|null>(null);\n','');
-const start=s.indexOf('    async function confirmDelivery(invoice: Invoice) {');
-const end=s.indexOf('    async function applyAdvanceToInvoice(invoice: Invoice) {',start);
-if(start<0||end<0) throw new Error('confirmDelivery block not found');
-s=s.slice(0,start)+s.slice(end);
-s=s.replace('{pendingDeliveries.length>0&&<div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-black text-amber-900"><CalendarClock size={13} className="mr-1 inline"/> {pendingDeliveries.length} livraison{pendingDeliveries.length>1?"s":""} à confirmer · stock non déduit</div>}','');
-s=s.replace('              const deliveryPending = !isReturn && inv.origin==="client_profile" && inv.status!=="annulée" && !inv.stockDeductedAt;\n','');
-s=s.replace('                  {deliveryPending&&<p className="ml-1 mt-1 inline-flex rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-black text-amber-800">📦 Livraison à confirmer</p>}\n','');
-s=s.replace(/\{deliveryPending&&<button[^}]*confirmDelivery\(inv\)[\s\S]*?<\/button>\}/g,'');
-fs.writeFileSync(p,s);
-// trigger lifecycle alignment
+
+function replaceRequired(source, search, replacement, label) {
+  if (!source.includes(search)) throw new Error(`pattern not found: ${label}`);
+  return source.replace(search, replacement);
+}
+
+const clientsPath='src/app/screens/ClientsView.tsx';
+let clients=fs.readFileSync(clientsPath,'utf8');
+clients=clients.replace('    const pendingDeliveries = ventes.filter(i=>i.origin==="client_profile"&&i.status!=="annulée"&&!i.stockDeductedAt);\n','');
+fs.writeFileSync(clientsPath,clients);
+
+const posPath='src/app/screens/POSView.tsx';
+let pos=fs.readFileSync(posPath,'utf8');
+pos=replaceRequired(
+  pos,
+  'import type { Boutique, CartItem, Invoice, Product, PlatformUser, PaymentMethod, StockEntry } from "../types";',
+  'import type { Boutique, CartItem, Invoice, Product, PlatformUser, PaymentMethod } from "../types";',
+  'remove unused StockEntry import',
+);
+pos=replaceRequired(
+  pos,
+  '  // Client workspace can reopen an unpaid order for editing. The existing\n  // updatePendingInvoice path preserves the invoice number and only rewrites\n  // the order lines/total; no stock movement has happened before payment.\n',
+  '  // Client workspace can reopen an unpaid order for editing. Client orders\n  // consume stock independently from payment; the backend atomically releases\n  // the old lines and recommits the edited lines before the transaction ends.\n',
+  'client order edit comment',
+);
+pos=replaceRequired(
+  pos,
+  '          date:today(), dateRaw:new Date().toISOString(), dueDate:saved.due_date ?? undefined, status:"en attente", type:"vente",\n          operatorId:currentUser.id, operatorNom:currentUser.nom, operatorColor:currentUser.color, origin:orderOrigin,\n        };',
+  '          date:today(), dateRaw:new Date().toISOString(), dueDate:saved.due_date ?? undefined, status:"en attente", type:"vente",\n          operatorId:currentUser.id, operatorNom:currentUser.nom, operatorColor:currentUser.color, origin:orderOrigin,\n          stockDeductedAt:orderOrigin === "client_profile" ? new Date().toISOString() : undefined,\n        };',
+  'unpaid express client stock state',
+);
+pos=replaceRequired(
+  pos,
+  '        payments:paidPayments, origin:orderOrigin,\n      };\n      const saleEntries: StockEntry[] = paid.stock_deducted\n        ? [{ id:Date.now(), productId:line.productId, qty:-line.qty, unit:line.unit, montantDu:0, date:today(), fournisseur:`Vente ${saved.invoice_id}`, invoiceId:saved.invoice_id }]\n        : [];',
+  '        payments:paidPayments, origin:orderOrigin, stockDeductedAt:new Date().toISOString(),\n      };',
+  'paid express stock state',
+);
+pos=replaceRequired(
+  pos,
+  '        status:"en attente", type:"vente", operatorId:editingInvoice?.operatorId ?? currentUser.id, operatorNom:editingInvoice?.operatorNom ?? currentUser.nom, operatorColor:editingInvoice?.operatorColor ?? currentUser.color, origin:editingInvoice?.origin ?? orderOrigin,\n      };',
+  '        status:"en attente", type:"vente", operatorId:editingInvoice?.operatorId ?? currentUser.id, operatorNom:editingInvoice?.operatorNom ?? currentUser.nom, operatorColor:editingInvoice?.operatorColor ?? currentUser.color, origin:editingInvoice?.origin ?? orderOrigin,\n        stockDeductedAt:(editingInvoice?.origin ?? orderOrigin) === "client_profile" ? new Date().toISOString() : undefined,\n      };',
+  'standard client order stock state',
+);
+fs.writeFileSync(posPath,pos);
