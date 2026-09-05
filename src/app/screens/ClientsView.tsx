@@ -305,7 +305,6 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
     const totalFacturé  = totalVentesFacturées-totalRetours;
     const totalEncaissé = ventes.reduce((s,i)=>s+invoicePaidAmount(i),0)-retours.reduce((s,i)=>s+invoicePaidAmount(i),0)-clientCreditRefunds.reduce((s,r)=>s+r.amount,0);
     const totalImpayé   = ventes.reduce((s,i)=>s+invoiceRemainingAmount(i),0);
-    const pendingDeliveries = ventes.filter(i=>i.origin==="client_profile"&&i.status!=="annulée"&&!i.stockDeductedAt);
     const clientAdvances = (boutique.clientAdvances ?? []).filter(advance => advance.clientId === c.id)
       .sort((a,b)=>b.paidAt.localeCompare(a.paidAt));
     const advanceRemaining = (advance: typeof clientAdvances[number]) => Math.max(0, advance.amount - (advance.allocatedAmount ?? 0));
