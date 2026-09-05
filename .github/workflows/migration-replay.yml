@@ -17,6 +17,7 @@ jobs:
       - uses: supabase/setup-cli@v1
         with:
           version: 2.116.0
+
       - name: Prepare relational prerequisite baseline
         shell: bash
         run: |
@@ -29,6 +30,13 @@ jobs:
             exit 2
           fi
           cat >> supabase/migrations/20260816000000_ci_relational_baseline.sql <<'SQL'
+
+          create table if not exists public.auth_settings (
+            boutique_id text primary key references public.boutiques(id) on delete cascade,
+            lock_minutes integer not null default 5,
+            session_minutes integer not null default 480,
+            updated_at timestamptz not null default now()
+          );
 
           create table if not exists public.caisse_sessions (
             id text not null,
@@ -46,6 +54,7 @@ jobs:
             primary key (boutique_id, id)
           );
           SQL
+
       - name: Normalize unsupported legacy policy syntax for audit replay
         shell: bash
         run: |
@@ -55,31 +64,83 @@ jobs:
             printf '%s\n' "$hits"
             find supabase/migrations -type f -name '*.sql' -print0 | xargs -0 sed -i -E 's/CREATE POLICY IF NOT EXISTS/CREATE POLICY/Ig'
           fi
-      - name: Normalize migration versions for schema-only replay
+
+      - name: Reconstruct production ordering for schema replay
         shell: bash
         run: |
           set -euo pipefail
+          manifest='.github/audit/remote-migration-manifest.txt'
+          test -s "$manifest"
+          : > /tmp/migration-order.txt
+
+          while IFS= read -r path; do
+            base="$(basename "$path")"
+            if [ "$base" = '20260816000000_ci_relational_baseline.sql' ]; then
+              key='20260816000000'
+              printf '%s|%s\n' "$key" "$path" >> /tmp/migration-order.txt
+              continue
+            fi
+
+            prefix="${base%%_*}"
+            logical="${base#*_}"
+            logical="${logical%.sql}"
+            key="$(awk -F'|' -v n="$logical" '$2==n {print $1; exit}' "$manifest")"
+
+            if [ -z "$key" ]; then
+              case "$logical" in
+                fix_user_display_name_sync) key='20260819215910' ;;
+                global_web_notifications) key='20260820072540' ;;
+                security_hardening_snapshot) key='20260820235950' ;;
+                return_v2_integrity_and_credit_notes) key='20260829144145' ;;
+                return_v2_net_due_and_payment_guards) key='20260829144755' ;;
+                return_v2_fifo_margin_and_history) key='20260829144930' ;;
+                transfer_receiving_v2) key='20260829175250' ;;
+                transfer_directory_notifications_multi_conditioning) key='20260829183513' ;;
+                enforce_counter_full_payment_client_immediate_stock) key='20260902205654' ;;
+                correct_stock_commit_timing) key='20260902210321' ;;
+                *)
+                  if [[ "$prefix" =~ ^[0-9]{14}$ ]]; then
+                    key="$prefix"
+                  elif [[ "$prefix" =~ ^[0-9]{8}$ ]]; then
+                    key="${prefix}235959"
+                  else
+                    echo "Unsupported migration filename: $base" >&2
+                    exit 3
+                  fi
+                  ;;
+              esac
+            fi
+            printf '%s|%s\n' "$key" "$path" >> /tmp/migration-order.txt
+          done < <(find supabase/migrations -maxdepth 1 -type f -name '*.sql' | sort)
+
+          echo 'Resolved migration order:'
+          sort -t'|' -k1,1 -k2,2 /tmp/migration-order.txt
+
           mkdir -p /tmp/tournal-migrations
           i=0
-          while IFS= read -r path; do
+          while IFS='|' read -r source_key path; do
             i=$((i + 1))
             base="$(basename "$path")"
             logical="${base#*_}"
             version="$(printf '20000101%06d' "$i")"
             cp "$path" "/tmp/tournal-migrations/${version}_${logical}"
-            printf '%s -> %s_%s\n' "$base" "$version" "$logical"
-          done < <(find supabase/migrations -maxdepth 1 -type f -name '*.sql' | sort)
+          done < <(sort -t'|' -k1,1 -k2,2 /tmp/migration-order.txt)
+
           rm -f supabase/migrations/*.sql
           cp /tmp/tournal-migrations/*.sql supabase/migrations/
           versions="$(find supabase/migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | cut -d_ -f1)"
           test "$(printf '%s\n' "$versions" | sort | uniq -d | wc -l)" -eq 0
+
       - name: Start local Supabase
         run: supabase start -x studio,imgproxy,edge-runtime,logflare,vector
+
       - name: Replay complete Git migration history
         run: supabase db reset --local --no-seed --debug
+
       - name: Count applied migrations
         run: |
           psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -Atc "select count(*) from supabase_migrations.schema_migrations;"
+
       - name: Stop local Supabase
         if: always()
         run: supabase stop --no-backup
