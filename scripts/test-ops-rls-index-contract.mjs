@@ -1,6 +1,6 @@
 import fs from "node:fs";
 
-const migrationPath = "supabase/migrations/20260905104156_optimize_ops_rls_and_foreign_keys.sql";
+const migrationPath = "supabase/migrations/20260905175840_optimize_ops_rls_and_foreign_keys.sql";
 const sql = fs.readFileSync(migrationPath, "utf8");
 
 const indexes = {
