@@ -113,9 +113,6 @@ jobs:
             logical="${base#*_}"
             logical="${logical%.sql}"
 
-            # One-time production data reconciliation. It restores nine real
-            # legacy stock movements and a real product, so replaying it on an
-            # empty canonical database would manufacture production history.
             case "$logical" in
               reconcile_legacy_stock)
                 echo "Skipping production-data migration during clean schema replay: $base"
@@ -188,16 +185,76 @@ jobs:
         run: |
           psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -Atc "select count(*) from supabase_migrations.schema_migrations;"
 
-      - name: Export hashed schema signatures
+      - name: Export local hashed schema signatures
         run: |
-          psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -f .github/audit/schema-signature-manifest.sql > schema-signatures.txt
-          test -s schema-signatures.txt
+          psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -f .github/audit/schema-signature-manifest.sql > local-schema-signatures.txt
+          test -s local-schema-signatures.txt
 
-      - name: Upload hashed schema signatures
+      - name: Export production hashed schema signatures read-only
+        env:
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGOPTIONS: -c default_transaction_read_only=on
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${PGPASSWORD:-}" || { echo 'SUPABASE_DB_PASSWORD is not configured'; exit 4; }
+          psql "host=aws-0-eu-central-1.pooler.supabase.com port=5432 dbname=postgres user=postgres.cnxtylngddwmhugxkzju sslmode=require connect_timeout=10" \
+            -v ON_ERROR_STOP=1 -f .github/audit/schema-signature-manifest.sql > production-schema-signatures.txt
+          test -s production-schema-signatures.txt
+
+      - name: Build exact hashed schema diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          sig = re.compile(r'^[0-9a-f]{32}$')
+
+          def load(path):
+              out = {}
+              for raw in Path(path).read_text().splitlines():
+                  parts = raw.split('|')
+                  if len(parts) != 3 or not sig.fullmatch(parts[2]):
+                      continue
+                  out[(parts[0], parts[1])] = parts[2]
+              return out
+
+          local = load('local-schema-signatures.txt')
+          prod = load('production-schema-signatures.txt')
+          if not local or not prod:
+              raise SystemExit('signature manifest unexpectedly empty')
+
+          rows = []
+          for key in sorted(set(local) | set(prod)):
+              lh = local.get(key)
+              ph = prod.get(key)
+              category, identity = key
+              if lh is None:
+                  rows.append(f'prod_only|{category}|{identity}|{ph}|')
+              elif ph is None:
+                  rows.append(f'local_only|{category}|{identity}||{lh}')
+              elif lh != ph:
+                  rows.append(f'modified|{category}|{identity}|{ph}|{lh}')
+
+          Path('schema-diff.txt').write_text('\n'.join(rows) + ('\n' if rows else ''))
+          print(f'local_objects={len(local)} production_objects={len(prod)} diff_rows={len(rows)}')
+          for category in sorted({k[0] for k in set(local) | set(prod)}):
+              p = sum(1 for k in prod if k[0] == category)
+              l = sum(1 for k in local if k[0] == category)
+              d = sum(1 for r in rows if r.split('|', 2)[1] == category)
+              print(f'{category}: local={l} prod={p} diff={d}')
+          PY
+
+      - name: Upload hashed schema diagnostics
         uses: actions/upload-artifact@v4
         with:
           name: schema-signatures
-          path: schema-signatures.txt
+          path: |
+            local-schema-signatures.txt
+            production-schema-signatures.txt
+            schema-diff.txt
           if-no-files-found: error
           retention-days: 1
 
