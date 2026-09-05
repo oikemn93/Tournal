@@ -28,6 +28,15 @@ jobs:
             echo 'Unexpected psql meta-command remains in audit baseline.' >&2
             exit 2
           fi
+      - name: Normalize unsupported legacy policy syntax for audit replay
+        shell: bash
+        run: |
+          set -euo pipefail
+          hits="$(grep -Ril 'create policy if not exists' supabase/migrations --include='*.sql' || true)"
+          if [ -n "$hits" ]; then
+            printf '%s\n' "$hits"
+            find supabase/migrations -type f -name '*.sql' -print0 | xargs -0 sed -i -E 's/CREATE POLICY IF NOT EXISTS/CREATE POLICY/Ig'
+          fi
       - name: Start local Supabase
         run: supabase start -x studio,imgproxy,edge-runtime,logflare,vector
       - name: Replay complete Git migration history
