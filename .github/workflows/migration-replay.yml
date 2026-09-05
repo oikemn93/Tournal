@@ -93,6 +93,18 @@ jobs:
             prefix="${base%%_*}"
             logical="${base#*_}"
             logical="${logical%.sql}"
+
+            # One-time production data reconciliation. It restores nine real
+            # legacy stock movements and a real product, so replaying it on an
+            # empty canonical database would manufacture production history.
+            # The schema it relies on is tested separately by later migrations.
+            case "$logical" in
+              reconcile_legacy_stock)
+                echo "Skipping production-data migration during clean schema replay: $base"
+                continue
+                ;;
+            esac
+
             if [[ "$prefix" =~ ^[0-9]{14}$ ]]; then
               target="$prefix"
             elif [[ "$prefix" =~ ^[0-9]{8}$ ]]; then
