@@ -188,6 +188,19 @@ jobs:
         run: |
           psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -Atc "select count(*) from supabase_migrations.schema_migrations;"
 
+      - name: Export hashed schema signatures
+        run: |
+          psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -f .github/audit/schema-signature-manifest.sql > schema-signatures.txt
+          test -s schema-signatures.txt
+
+      - name: Upload hashed schema signatures
+        uses: actions/upload-artifact@v4
+        with:
+          name: schema-signatures
+          path: schema-signatures.txt
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Compare production schema fingerprint
         run: |
           psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -f .github/audit/schema-fingerprint.sql
