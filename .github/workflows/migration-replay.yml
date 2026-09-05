@@ -1,0 +1,29 @@
+name: Full migration replay
+
+on:
+  push:
+    branches: [audit/migration-inventory-20260905]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.116.0
+      - name: Start local Supabase
+        run: supabase start -x studio,imgproxy,edge-runtime,logflare,vector
+      - name: Replay complete Git migration history
+        run: supabase db reset --local --no-seed --debug
+      - name: Count applied migrations
+        run: |
+          psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -Atc "select count(*) from supabase_migrations.schema_migrations;"
+      - name: Stop local Supabase
+        if: always()
+        run: supabase stop --no-backup
