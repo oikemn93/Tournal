@@ -31,6 +31,8 @@ jobs:
           fi
           cat >> supabase/migrations/20260816000000_ci_relational_baseline.sql <<'SQL'
 
+          create extension if not exists pg_cron with schema pg_catalog;
+
           create table if not exists public.auth_settings (
             boutique_id text primary key references public.boutiques(id) on delete cascade,
             lock_minutes integer not null default 5,
@@ -53,6 +55,14 @@ jobs:
             updated_at timestamptz not null default now(),
             primary key (boutique_id, id)
           );
+
+          do $$
+          begin
+            if not exists (select 1 from cron.job where jobname='cleanup-temporary-invoice-pdfs') then
+              perform cron.schedule('cleanup-temporary-invoice-pdfs','0 3 * * *','select 1');
+            end if;
+          end;
+          $$;
           SQL
 
       - name: Normalize unsupported legacy policy syntax for audit replay
@@ -76,15 +86,29 @@ jobs:
           while IFS= read -r path; do
             base="$(basename "$path")"
             if [ "$base" = '20260816000000_ci_relational_baseline.sql' ]; then
-              key='20260816000000'
-              printf '%s|%s\n' "$key" "$path" >> /tmp/migration-order.txt
+              printf '%s|%s\n' '20260816000000' "$path" >> /tmp/migration-order.txt
               continue
             fi
 
             prefix="${base%%_*}"
             logical="${base#*_}"
             logical="${logical%.sql}"
-            key="$(awk -F'|' -v n="$logical" '$2==n {print $1; exit}' "$manifest")"
+            if [[ "$prefix" =~ ^[0-9]{14}$ ]]; then
+              target="$prefix"
+            elif [[ "$prefix" =~ ^[0-9]{8}$ ]]; then
+              target="${prefix}120000"
+            else
+              echo "Unsupported migration filename: $base" >&2
+              exit 3
+            fi
+
+            key="$(awk -F'|' -v n="$logical" -v t="$target" '
+              $2==n {
+                d=$1-t; if (d<0) d=-d;
+                if (!found || d<best) {best=d; version=$1; found=1}
+              }
+              END {if (found) print version}
+            ' "$manifest")"
 
             if [ -z "$key" ]; then
               case "$logical" in
@@ -99,14 +123,7 @@ jobs:
                 enforce_counter_full_payment_client_immediate_stock) key='20260902205654' ;;
                 correct_stock_commit_timing) key='20260902210321' ;;
                 *)
-                  if [[ "$prefix" =~ ^[0-9]{14}$ ]]; then
-                    key="$prefix"
-                  elif [[ "$prefix" =~ ^[0-9]{8}$ ]]; then
-                    key="${prefix}235959"
-                  else
-                    echo "Unsupported migration filename: $base" >&2
-                    exit 3
-                  fi
+                  if [[ "$prefix" =~ ^[0-9]{14}$ ]]; then key="$prefix"; else key="${prefix}235959"; fi
                   ;;
               esac
             fi
