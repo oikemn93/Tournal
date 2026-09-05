@@ -46,7 +46,31 @@ policies as (
 functions as (
   select 'functions'::text,
          n.nspname||'.'||p.proname||'('||pg_get_function_identity_arguments(p.oid)||')',
-         concat_ws('|',n.nspname||'.'||p.proname||'('||pg_get_function_identity_arguments(p.oid)||')',p.prokind::text,p.prosecdef::text,p.provolatile::text,p.proparallel::text,p.proleakproof::text,coalesce(array_to_string(p.proconfig,','),''),coalesce(p.proacl::text,''),pg_get_functiondef(p.oid))
+         concat_ws('|',
+           n.nspname||'.'||p.proname||'('||pg_get_function_identity_arguments(p.oid)||')',
+           p.prokind::text,
+           p.prosecdef::text,
+           p.provolatile::text,
+           p.proparallel::text,
+           p.proleakproof::text,
+           coalesce(array_to_string(p.proconfig,','),''),
+           coalesce((
+             select string_agg(
+                      concat_ws(':',
+                        case when a.grantee=0 then 'PUBLIC' else gr.rolname end,
+                        a.privilege_type,
+                        a.is_grantable::text,
+                        grantor.rolname),
+                      ',' order by
+                        case when a.grantee=0 then 'PUBLIC' else gr.rolname end,
+                        a.privilege_type,
+                        a.is_grantable::text,
+                        grantor.rolname)
+             from aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a
+             left join pg_roles gr on gr.oid=a.grantee
+             left join pg_roles grantor on grantor.oid=a.grantor
+           ),''),
+           pg_get_functiondef(p.oid))
   from pg_proc p join pg_namespace n on n.oid=p.pronamespace
   where n.nspname in ('public','private') and p.prokind in ('f','p')
 ),
