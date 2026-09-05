@@ -3,6 +3,9 @@
 -- Audit-only structural fingerprint. No table data is read.
 -- The expected values were computed read-only from production on 2026-09-05
 -- with the exact same canonicalization below.
+-- Column physical ordinal position (attnum) is intentionally excluded: the
+-- synthetic replay baseline cannot preserve historical storage order, while
+-- name/type/nullability/default/identity/generated semantics remain strict.
 create temp table audit_expected_fingerprint(
   category text primary key,
   object_count bigint not null,
@@ -10,7 +13,7 @@ create temp table audit_expected_fingerprint(
 ) on commit preserve rows;
 
 insert into audit_expected_fingerprint(category, object_count, md5) values
-  ('columns',     639, '7c1a63738b3f3c290cacabbbc42cac10'),
+  ('columns',     639, '1f4fc9b2f7b25f05bddb6a03fff155e2'),
   ('constraints', 255, 'e90f367fcc6dd044a41d7f858b9f9ec9'),
   ('functions',    191, '4a672ba8dc981bb70182caaaea989a59'),
   ('indexes',      191, 'b244f3133889e6b1007d55817f10bc9e'),
@@ -27,7 +30,7 @@ relations as (
   where n.nspname in ('public','private') and c.relkind in ('r','p','v','m','S')
 ),
 columns as (
-  select concat_ws('|',n.nspname||'.'||c.relname,a.attnum::text,a.attname,pg_catalog.format_type(a.atttypid,a.atttypmod),a.attnotnull::text,coalesce(pg_get_expr(ad.adbin,ad.adrelid,true),''),a.attidentity::text,a.attgenerated::text) as x
+  select concat_ws('|',n.nspname||'.'||c.relname,a.attname,pg_catalog.format_type(a.atttypid,a.atttypmod),a.attnotnull::text,coalesce(pg_get_expr(ad.adbin,ad.adrelid,true),''),a.attidentity::text,a.attgenerated::text) as x
   from pg_attribute a join pg_class c on c.oid=a.attrelid join pg_namespace n on n.oid=c.relnamespace
   left join pg_attrdef ad on ad.adrelid=a.attrelid and ad.adnum=a.attnum
   where n.nspname in ('public','private') and c.relkind in ('r','p','v','m') and a.attnum>0 and not a.attisdropped
