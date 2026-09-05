@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Search, Plus, Minus, ChevronRight, ShoppingBag, Trash2, CheckCircle, AlertCircle, Zap, ClipboardList, Printer, Settings, Pencil } from "lucide-react";
-import type { Boutique, CartItem, Invoice, Product, PlatformUser, PaymentMethod, StockEntry } from "../types";
+import type { Boutique, CartItem, Invoice, Product, PlatformUser, PaymentMethod } from "../types";
 import { SEM, inputCls, searchInputCls, PAYMENT_METHODS, PM_ICON } from "../constants";
 import { fmt, today, imgSrc } from "../utils/formatting";
 import { productQty, lineTotal, lineDispQty, lineDispUnit } from "../utils/inventory";
@@ -103,9 +103,9 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
     onInitialClientPrepared?.();
   }, [initialClientId, boutique.clients, onInitialClientPrepared]);
 
-  // Client workspace can reopen an unpaid order for editing. The existing
-  // updatePendingInvoice path preserves the invoice number and only rewrites
-  // the order lines/total; no stock movement has happened before payment.
+  // Client workspace can reopen an unpaid order for editing. Client orders
+  // consume stock independently from payment; the backend atomically releases
+  // the old lines and recommits the edited lines before the transaction ends.
   useEffect(() => {
     if (!initialEditingInvoice) return;
     if (initialEditingInvoice.status !== "en attente" || initialEditingInvoice.acompte > 0) return;
@@ -237,6 +237,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
           id:saved.invoice_id, clientId:saved.client_id ?? expressClient?.id, client:expressClient?.nom ?? "Client comptoir", clientTel:expressClient?.tel, lines:[line], montant:saved.total, acompte:0,
           date:today(), dateRaw:new Date().toISOString(), dueDate:saved.due_date ?? undefined, status:"en attente", type:"vente",
           operatorId:currentUser.id, operatorNom:currentUser.nom, operatorColor:currentUser.color, origin:orderOrigin,
+          stockDeductedAt:orderOrigin === "client_profile" ? new Date().toISOString() : undefined,
         };
         onUpdate({ invoices:[...invoices, newInv] });
         logAction("Commande express", `${newInv.id} · ${expressModal.nom} · ${fmt(saved.total)} · en attente`, "🛒");
@@ -273,11 +274,8 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
         id:saved.invoice_id, clientId:saved.client_id ?? expressClient?.id, client:expressClient?.nom ?? "Client comptoir", clientTel:expressClient?.tel, lines:[line], montant:saved.total, acompte:paid.acompte,
         date:today(), dateRaw:new Date().toISOString(), dueDate:saved.due_date ?? undefined, status:"payé", type:"vente",
         operatorId:currentUser.id, operatorNom:currentUser.nom, operatorColor:currentUser.color, paymentMethod:advanceAmount >= saved.total ? "Avoir client" : expMethod,
-        payments:paidPayments, origin:orderOrigin,
+        payments:paidPayments, origin:orderOrigin, stockDeductedAt:new Date().toISOString(),
       };
-      const saleEntries: StockEntry[] = paid.stock_deducted
-        ? [{ id:Date.now(), productId:line.productId, qty:-line.qty, unit:line.unit, montantDu:0, date:today(), fournisseur:`Vente ${saved.invoice_id}`, invoiceId:saved.invoice_id }]
-        : [];
       const allocatedByAdvance = new Map<number,number>();
       if ("advance_allocations" in paid) {
         paid.advance_allocations.forEach(allocation => allocatedByAdvance.set(
@@ -458,6 +456,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
         id:saved.invoice_id, clientId:saved.client_id ?? selectedClientId, client, clientTel:clientTel.trim() || undefined, lines:orderLines,
         montant:saved.total, acompte:0, date:today(), dateRaw:new Date().toISOString(), dueDate:saved.due_date ?? undefined,
         status:"en attente", type:"vente", operatorId:editingInvoice?.operatorId ?? currentUser.id, operatorNom:editingInvoice?.operatorNom ?? currentUser.nom, operatorColor:editingInvoice?.operatorColor ?? currentUser.color, origin:editingInvoice?.origin ?? orderOrigin,
+        stockDeductedAt:(editingInvoice?.origin ?? orderOrigin) === "client_profile" ? new Date().toISOString() : undefined,
       };
       onUpdate({ invoices:editingInvoice ? invoices.map(invoice => invoice.id === editingInvoice.id ? newInv : invoice) : [...invoices, newInv] });
       if (!editingInvoice) logAction("Commande PDV", `${newInv.id} · ${client} · ${fmt(saved.total)}`, "🛒");
