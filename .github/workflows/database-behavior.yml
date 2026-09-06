@@ -35,9 +35,13 @@ jobs:
           psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f .ci-historical-migrations/20260904183500_consolidate_disbursement_guards.sql
           psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f .ci-historical-migrations/20260904184500_make_read_rpcs_session_independent.sql
           psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f .ci-historical-migrations/20260904184600_make_inventory_reads_session_independent.sql
+          psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f .github/audit/replay-migrations/20260906181500_stock_integrity_guardrails.sql
 
       - name: Run behavioral database matrix
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f scripts/test-db-behavior.sql
+
+      - name: Run stock integrity matrix
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f scripts/test-stock-integrity-db.sql
 
       - name: Verify deterministic return lock migration
         run: |
