@@ -89,6 +89,9 @@ jobs:
       - name: Invoice summary hydration contract
         run: node scripts/test-invoice-summary-contract.mjs
 
+      - name: Supplier ledger consistency
+        run: node scripts/test-supplier-ledger-contract.mjs
+
       - name: Numeric keypads
         run: node scripts/test-numeric-keypads.mjs
 
