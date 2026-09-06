@@ -1,0 +1,2 @@
+-- AUDIT ONLY: superseded by raw pg_get_functiondef restorations in 20260906000180..00182.
+-- Intentionally no SQL: the previous nested dynamic wrapper was not replay-safe.

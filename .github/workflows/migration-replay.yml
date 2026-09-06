@@ -1,0 +1,306 @@
+name: Canonical database replay
+
+on:
+  push:
+    branches: [chore/canonical-database-replay]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.116.0
+
+      - name: Verify deployable migration tree is unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main --depth=1
+          changed="$(git diff --name-only origin/main...HEAD -- supabase/migrations || true)"
+          if [ -n "$changed" ]; then
+            echo 'This PR must not alter deployable Supabase migrations:' >&2
+            printf '%s\n' "$changed" >&2
+            exit 1
+          fi
+          echo 'deployable_supabase_migrations_unchanged'
+
+      - name: Materialize audit-only replay inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s .github/audit/replay-config.toml
+          test -d .github/audit/replay-migrations
+          cp .github/audit/replay-config.toml supabase/config.toml
+          cp .github/audit/replay-migrations/*.sql supabase/migrations/
+          echo "audit_replay_inputs=$(find .github/audit/replay-migrations -maxdepth 1 -type f -name '*.sql' | wc -l)"
+
+      - name: Prepare relational prerequisite baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          first_line="$(head -n 1 scripts/ci-db-baseline.sql)"
+          test "$first_line" = '\set ON_ERROR_STOP on'
+          tail -n +2 scripts/ci-db-baseline.sql > supabase/migrations/20260816000000_ci_relational_baseline.sql
+          if grep -n '^\\' supabase/migrations/20260816000000_ci_relational_baseline.sql; then
+            echo 'Unexpected psql meta-command remains in audit baseline.' >&2
+            exit 2
+          fi
+          cat >> supabase/migrations/20260816000000_ci_relational_baseline.sql <<'SQL'
+
+          create extension if not exists pg_cron with schema pg_catalog;
+
+          create table if not exists public.auth_settings (
+            boutique_id text primary key references public.boutiques(id) on delete cascade,
+            lock_minutes integer not null default 5,
+            session_minutes integer not null default 480,
+            updated_at timestamptz not null default now()
+          );
+
+          create table if not exists public.caisse_sessions (
+            id text not null,
+            boutique_id text not null references public.boutiques(id) on delete cascade,
+            opened_at timestamptz not null default now(),
+            closed_at timestamptz,
+            fond_ouverture numeric not null default 0,
+            fond_fermeture numeric,
+            total_ventes numeric,
+            total_charges numeric,
+            operator_id uuid references public.platform_users(id) on delete set null,
+            note text,
+            created_at timestamptz not null default now(),
+            updated_at timestamptz not null default now(),
+            primary key (boutique_id, id)
+          );
+
+          do $$
+          begin
+            if not exists (select 1 from cron.job where jobname='cleanup-temporary-invoice-pdfs') then
+              perform cron.schedule('cleanup-temporary-invoice-pdfs','0 3 * * *','select 1');
+            end if;
+          end;
+          $$;
+          SQL
+
+      - name: Normalize legacy syntax and omit production-only data repairs
+        shell: bash
+        run: |
+          set -euo pipefail
+          hits="$(grep -Ril 'create policy if not exists' supabase/migrations --include='*.sql' || true)"
+          if [ -n "$hits" ]; then
+            printf '%s\n' "$hits"
+            find supabase/migrations -type f -name '*.sql' -print0 | xargs -0 sed -i -E 's/CREATE POLICY IF NOT EXISTS/CREATE POLICY/Ig'
+          fi
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('supabase/migrations/20260827200739_prevent_duplicate_sales_and_repair_awa.sql')
+          text = path.read_text()
+          marker = '-- Confirmed data repair for Awa Diop.'
+          if marker not in text:
+              raise SystemExit('Awa data-repair marker not found; refuse to rewrite unknown migration')
+          start = text.index(marker)
+          commit = text.rfind('commit;')
+          if commit <= start:
+              raise SystemExit('Awa migration final commit not found after data-repair block')
+          path.write_text(
+              text[:start]
+              + '-- Production-only Awa Diop repair omitted from clean schema replay.\n'
+              + text[commit:]
+          )
+          PY
+
+      - name: Reconstruct production ordering for schema replay
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest='.github/audit/remote-migration-manifest.txt'
+          test -s "$manifest"
+          : > /tmp/migration-order.txt
+
+          while IFS= read -r path; do
+            base="$(basename "$path")"
+            if [ "$base" = '20260816000000_ci_relational_baseline.sql' ]; then
+              printf '%s|%s\n' '20260816000000' "$path" >> /tmp/migration-order.txt
+              continue
+            fi
+
+            prefix="${base%%_*}"
+            logical="${base#*_}"
+            logical="${logical%.sql}"
+
+            case "$logical" in
+              reconcile_legacy_stock)
+                echo "Skipping production-data migration during clean schema replay: $base"
+                continue
+                ;;
+            esac
+
+            if [[ "$prefix" =~ ^[0-9]{14}$ ]]; then
+              target="$prefix"
+            elif [[ "$prefix" =~ ^[0-9]{8}$ ]]; then
+              target="${prefix}120000"
+            else
+              echo "Unsupported migration filename: $base" >&2
+              exit 3
+            fi
+
+            key="$(awk -F'|' -v n="$logical" -v t="$target" '
+              $2==n {
+                d=$1-t; if (d<0) d=-d;
+                if (!found || d<best) {best=d; version=$1; found=1}
+              }
+              END {if (found) print version}
+            ' "$manifest")"
+
+            if [ -z "$key" ]; then
+              case "$logical" in
+                fix_user_display_name_sync) key='20260819215910' ;;
+                global_web_notifications) key='20260820072540' ;;
+                security_hardening_snapshot) key='20260820235950' ;;
+                return_v2_integrity_and_credit_notes) key='20260829144145' ;;
+                return_v2_net_due_and_payment_guards) key='20260829144755' ;;
+                return_v2_fifo_margin_and_history) key='20260829144930' ;;
+                transfer_receiving_v2) key='20260829175250' ;;
+                transfer_directory_notifications_multi_conditioning) key='20260829183513' ;;
+                enforce_counter_full_payment_client_immediate_stock) key='20260902205654' ;;
+                correct_stock_commit_timing) key='20260902210321' ;;
+                *)
+                  if [[ "$prefix" =~ ^[0-9]{14}$ ]]; then key="$prefix"; else key="${prefix}235959"; fi
+                  ;;
+              esac
+            fi
+            printf '%s|%s\n' "$key" "$path" >> /tmp/migration-order.txt
+          done < <(find supabase/migrations -maxdepth 1 -type f -name '*.sql' | sort)
+
+          echo 'Resolved migration order:'
+          sort -t'|' -k1,1 -k2,2 /tmp/migration-order.txt
+
+          mkdir -p /tmp/tournal-migrations
+          i=0
+          while IFS='|' read -r source_key path; do
+            i=$((i + 1))
+            base="$(basename "$path")"
+            logical="${base#*_}"
+            version="$(printf '20000101%06d' "$i")"
+            cp "$path" "/tmp/tournal-migrations/${version}_${logical}"
+          done < <(sort -t'|' -k1,1 -k2,2 /tmp/migration-order.txt)
+
+          rm -f supabase/migrations/*.sql
+          cp /tmp/tournal-migrations/*.sql supabase/migrations/
+          versions="$(find supabase/migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | cut -d_ -f1)"
+          test "$(printf '%s\n' "$versions" | sort | uniq -d | wc -l)" -eq 0
+
+      - name: Start local Supabase
+        run: supabase start -x studio,imgproxy,edge-runtime,logflare,vector
+
+      - name: Replay complete Git migration history
+        run: supabase db reset --local --no-seed --debug
+
+      - name: Count applied migrations
+        run: |
+          psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -Atc "select count(*) from supabase_migrations.schema_migrations;"
+
+      - name: Export local hashed schema signatures
+        run: |
+          psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -f .github/audit/schema-signature-manifest.sql > local-schema-signatures.txt
+          psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -f .github/audit/function-component-manifest.sql > local-function-components.txt
+          test -s local-schema-signatures.txt
+          test -s local-function-components.txt
+
+      - name: Export production hashed schema signatures read-only
+        env:
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGOPTIONS: -c default_transaction_read_only=on
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${PGPASSWORD:-}" ]; then
+            echo 'SUPABASE_DB_PASSWORD is not configured; skipping direct production signature export.'
+            : > production-schema-signatures.txt
+            exit 0
+          fi
+          psql "host=aws-0-eu-central-1.pooler.supabase.com port=5432 dbname=postgres user=postgres.cnxtylngddwmhugxkzju sslmode=require connect_timeout=10" \
+            -v ON_ERROR_STOP=1 -f .github/audit/schema-signature-manifest.sql > production-schema-signatures.txt
+          test -s production-schema-signatures.txt
+
+      - name: Build exact hashed schema diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -s production-schema-signatures.txt ]; then
+            echo 'Direct production signature file unavailable; connector-based production diff remains authoritative.'
+            : > schema-diff.txt
+            exit 0
+          fi
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          sig = re.compile(r'^[0-9a-f]{32}$')
+
+          def load(path):
+              out = {}
+              for raw in Path(path).read_text().splitlines():
+                  parts = raw.split('|')
+                  if len(parts) != 3 or not sig.fullmatch(parts[2]):
+                      continue
+                  out[(parts[0], parts[1])] = parts[2]
+              return out
+
+          local = load('local-schema-signatures.txt')
+          prod = load('production-schema-signatures.txt')
+          if not local or not prod:
+              raise SystemExit('signature manifest unexpectedly empty')
+
+          rows = []
+          for key in sorted(set(local) | set(prod)):
+              lh = local.get(key)
+              ph = prod.get(key)
+              category, identity = key
+              if lh is None:
+                  rows.append(f'prod_only|{category}|{identity}|{ph}|')
+              elif ph is None:
+                  rows.append(f'local_only|{category}|{identity}||{lh}')
+              elif lh != ph:
+                  rows.append(f'modified|{category}|{identity}|{ph}|{lh}')
+
+          Path('schema-diff.txt').write_text('\n'.join(rows) + ('\n' if rows else ''))
+          print(f'local_objects={len(local)} production_objects={len(prod)} diff_rows={len(rows)}')
+          for category in sorted({k[0] for k in set(local) | set(prod)}):
+              p = sum(1 for k in prod if k[0] == category)
+              l = sum(1 for k in local if k[0] == category)
+              d = sum(1 for r in rows if r.split('|', 2)[1] == category)
+              print(f'{category}: local={l} prod={p} diff={d}')
+          PY
+
+      - name: Upload hashed schema diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: schema-signatures
+          path: |
+            local-schema-signatures.txt
+            local-function-components.txt
+            production-schema-signatures.txt
+            schema-diff.txt
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Compare production schema fingerprint and run business smoke
+        run: |
+          psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -f .github/audit/schema-fingerprint.sql
+
+      - name: Stop local Supabase
+        if: always()
+        run: supabase stop --no-backup
