@@ -1,0 +1,35 @@
+name: Apply invoice summary patch
+
+on:
+  push:
+    branches: [perf/bulk-invoice-line-aggregation]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: perf/bulk-invoice-line-aggregation
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply deterministic patch
+        run: node .github/scripts/apply-invoice-summary-patch.mjs
+      - name: Validate patch syntax
+        run: |
+          git diff --check
+          node scripts/test-performance-read-contract.mjs
+      - name: Commit patched sources
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'perf: split invoice summaries from line hydration'
+          git push origin HEAD:perf/bulk-invoice-line-aggregation
