@@ -18,8 +18,8 @@ create temp table audit_expected_fingerprint(
 insert into audit_expected_fingerprint(category, object_count, md5) values
   ('columns',     639, '1f4fc9b2f7b25f05bddb6a03fff155e2'),
   ('constraints', 255, 'e90f367fcc6dd044a41d7f858b9f9ec9'),
-  ('functions',    204, '652ce537c1ef284e99134a3e5b686955'),
-  ('indexes',      192, 'fced787fcb2de669f9753271be7d5134'),
+  ('functions',    204, '8577813b33245234d0956f8db969f65f'),
+  ('indexes',      193, '40da4fb6fd61d7158e4803fc3323f732'),
   ('policies',      88, '2e88704fe8bd522a1b4edaf602697a64'),
   ('relations',     77, 'fe47306893a1d143b92e1e3b9f6aa9a2'),
   ('triggers',      86, '70b805e2d01f8efc8598b96070dc30da'),
@@ -136,3 +136,4 @@ $audit$;
 \echo schema_fingerprint_matches_production
 -- The business smoke is deliberately included only after the fingerprint gate.
 \ir ../../scripts/test-business-smoke.sql
+\ir ../../scripts/test-supplier-ledger-db.sql
