@@ -31,7 +31,7 @@ if (!api.includes('dataRpc<any>("read_recent_sale_metrics"')) throw new Error('b
 if (!api.includes('dataRpc<any[]>("read_invoice_lines"')) throw new Error('targeted invoice hydration RPC missing');
 if (!api.includes('lineCount:Number(i.line_count ?? (i.invoice_lines ?? []).length)')) throw new Error('invoice summary lineCount mapping missing');
 if (!types.includes('lineCount?: number') || !types.includes('salePriceHints?: SalePriceHint[]') || !types.includes('productSaleCounts?: Record<number, number>')) throw new Error('summary metadata types missing');
-if (!factures.includes('async function hydrateInvoice(inv: Invoice)') || !factures.includes('await loadInvoiceLines(boutique.id, inv.id)')) throw new Error('Factures hydration cache missing');
+if (!factures.includes('async function hydrateInvoice(inv: Invoice)') || !/await\s+loadInvoiceLines\(boutique\.id,\s*inv\.id\)/.test(factures)) throw new Error('Factures hydration cache missing');
 if (!factures.includes('void openInvoicePayment(inv)') || !factures.includes('void openInvoiceShare(inv)')) throw new Error('Factures direct line-dependent actions must hydrate first');
 if (!pos.includes('boutique.productSaleCounts?.[p.id]')) throw new Error('POS bestseller compact metric missing');
 if (!sales.includes('hints: SalePriceHint[] = []') || !sales.includes('hint.invoiceDate > best.at')) throw new Error('last-sale price hint fallback missing');
