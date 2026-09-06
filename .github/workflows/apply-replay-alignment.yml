@@ -1,0 +1,31 @@
+name: Apply canonical replay alignment
+
+on:
+  push:
+    branches:
+      - perf/bounded-rls-read-paths
+
+permissions:
+  contents: write
+
+jobs:
+  align:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Align production migrations with audit replay
+        run: node scripts/apply-replay-alignment.mjs
+      - name: Commit replay alignment
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "chore: record bounded reads in canonical replay"
+          git push
