@@ -212,6 +212,13 @@ jobs:
         run: |
           psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -Atc "select count(*) from supabase_migrations.schema_migrations;"
 
+      - name: Run stock integrity matrix on production-equivalent schema
+        run: |
+          psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f scripts/test-stock-integrity-db.sql
+          psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f scripts/test-inventory-race-db.sql
+          psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f scripts/test-commercial-transfer-stock-db.sql
+          psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f scripts/test-dashboard-fifo-db.sql
+
       - name: Export local hashed schema signatures
         run: |
           psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -f .github/audit/schema-signature-manifest.sql > local-schema-signatures.txt
