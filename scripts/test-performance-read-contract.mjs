@@ -1,5 +1,7 @@
 import fs from 'node:fs';
 
+// Canonical replay sources mirror the production-applied migrations without
+// reopening the repository's frozen deployable Supabase migration tree.
 const scopeSql = fs.readFileSync('supabase/migrations/20260904174500_optimize_read_permission_scopes.sql','utf8');
 const boundedSql = fs.readFileSync('.github/audit/replay-migrations/20260906121208_bounded_rls_read_paths.sql','utf8');
 const payloadSql = fs.readFileSync('.github/audit/replay-migrations/20260906121437_bounded_read_json_payloads.sql','utf8');
