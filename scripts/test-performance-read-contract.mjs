@@ -52,7 +52,7 @@ if (!boundedSql.includes('revoke all on function private.auth_can_read_boutique(
   throw new Error('targeted authorization helper must not be directly executable by API roles');
 }
 
-for (const rpc of ['read_bounded_stock_entries','read_bounded_invoices','read_bounded_invoice_payments']) {
+for (const rpc of ['read_bounded_stock_entries','read_bounded_invoice_summaries','read_bounded_invoice_payments']) {
   if (!api.includes(`dataRpc<any[]>("${rpc}"`)) throw new Error(`bootstrap does not use ${rpc}`);
 }
 if (api.includes('stock_entries_app?select=*') && api.includes('stockWindow')) throw new Error('bootstrap regressed to barrier stock view');

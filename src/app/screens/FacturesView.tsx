@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Search, Plus, Send, FileText, Eye, Mail, MessageCircle, Smartphone, Phone, Wallet, CreditCard, RotateCcw, ShoppingCart, Receipt, AlertCircle, Trash2, CheckCircle, Minus, Store, X, ChevronLeft, ChevronRight, CalendarDays, PlusCircle } from "lucide-react";
 import type { Boutique, Invoice, InvoiceStatus, InvoiceLine, StockEntry, PaymentMethod, Client, PlatformUser, CaisseSession, PaymentEntry } from "../types";
 import { SEM, inputCls, searchInputCls, PAYMENT_METHODS, PM_ICON, PM_COLOR, PLACEHOLDER_IMGS } from "../constants";
-import { createSale, recordPayment, recordMultiPayment, returnSale, openCaisseSession, closeCaisseSession, createInvoiceShare, loadBoutiqueHistoryRange } from "../../lib/api";
+import { createSale, recordPayment, recordMultiPayment, returnSale, openCaisseSession, closeCaisseSession, createInvoiceShare, loadBoutiqueHistoryRange, loadInvoiceLines } from "../../lib/api";
 import { fmt, today, imgSrc } from "../utils/formatting";
 import { invBadge, lineTotal, lineDispQty, lineDispUnit, genInvoiceId, productQty, getSiblings, invoiceMargin, lineUnitCost } from "../utils/inventory";
 import { buildReceiptHtml, openInvoicePDF, buildInvoiceMessage, generateInvoicePDFBlob, agentPrint, printReceipt, printCaisseReport } from "../utils/invoice";
@@ -248,6 +248,22 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
   const [acompte,setAcompte]=useState("");
   const [initialPaymentMethod,setInitialPaymentMethod] = useState<PaymentMethod>("Espèces");
   const [status,setStatus] = useState<InvoiceStatus>("en attente");
+  const invoiceLineCache = React.useRef(new Map<string, InvoiceLine[]>());
+
+  async function hydrateInvoice(inv: Invoice): Promise<Invoice> {
+    const expected=inv.lineCount ?? inv.lines?.length ?? 0;
+    const current=inv.lines ?? [];
+    if (current.length >= expected) return inv;
+    let hydrated=invoiceLineCache.current.get(inv.id);
+    if (!hydrated) { hydrated=await loadInvoiceLines(boutique.id,inv.id); invoiceLineCache.current.set(inv.id,hydrated); }
+    return { ...inv, lines:hydrated, lineCount:hydrated.length };
+  }
+  async function openInvoiceDetail(inv: Invoice) { try { setDetailInv(await hydrateInvoice(inv)); } catch(error) { alert(error instanceof Error ? error.message : "Détail de facture indisponible"); } }
+  async function openInvoicePayment(inv: Invoice) {
+    try { const hydrated=await hydrateInvoice(inv); setEncaissInv(hydrated); setEncaissSplit([{method:"Espèces",amount:invoiceRemainingAmount(hydrated)}]); }
+    catch(error) { alert(error instanceof Error ? error.message : "Facture indisponible pour encaissement"); }
+  }
+  async function openInvoiceShare(inv: Invoice) { try { setShareInv(await hydrateInvoice(inv)); } catch(error) { alert(error instanceof Error ? error.message : "Facture indisponible pour partage"); } }
   // Line form
   const [lPid,setLPid]=useState<number>(products[0]?.id??0);
   const [lQty,setLQty]=useState("");
@@ -412,7 +428,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
   useEffect(() => {
     if (initialInvoiceId) {
       const invoice = invoices.find(item => item.id === initialInvoiceId);
-      if (invoice) setDetailInv(invoice);
+      if (invoice) void openInvoiceDetail(invoice);
       return;
     }
     if (initialClientId != null) {
@@ -428,7 +444,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
           setLPid(firstProduct.id);
           setLSellUnit(unit);
           setLQty("");
-          const last = getLastSalePrice(firstProduct.id, invoices, unit);
+          const last = getLastSalePrice(firstProduct.id, invoices, unit,boutique.salePriceHints);
           setLPrix(last != null ? String(last) : "");
         }
         setModal(true);
@@ -878,7 +894,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
           const canCollectThisInvoice = canCollectPayment && !isReturn && !isCancelled && invoiceRemainingAmount(inv) > 0;
           return (
             <div key={inv.id} className="bg-card rounded-2xl p-4 border border-border" style={isReturn?{borderColor:"#ef444433"}:{}}>
-              <div className="w-full text-left cursor-pointer" onClick={()=>{ if (canCollectThisInvoice) { setEncaissInv(inv); setEncaissSplit([{ method:"Espèces", amount:invoiceRemainingAmount(inv) }]); } else { setDetailInv(inv); } }}>
+              <div className="w-full text-left cursor-pointer" onClick={()=>{ void (canCollectThisInvoice ? openInvoicePayment(inv) : openInvoiceDetail(inv)); }}>
                 <div className="flex items-start justify-between">
                   <div>
                     <div className="flex items-center gap-2">
@@ -886,16 +902,16 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
                       {isReturn && <span className="text-xs px-1.5 py-0.5 rounded font-bold flex items-center gap-1" style={{ background:SEM.danger.bg, color:SEM.danger.text }}><RotateCcw size={9}/> Avoir de retour</span>}
                     </div>
                     <p className="text-xs text-muted-foreground mt-0.5">{inv.id} · {formatPreciseDateTime(inv.dateRaw)} · {inv.type}</p>
-                    {inv.lines&&inv.lines.length>0&&<p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1"><ShoppingCart size={10}/> {inv.lines.length} produit{inv.lines.length>1?"s":""}</p>}
+                    {(inv.lineCount ?? inv.lines?.length ?? 0)>0&&<p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1"><ShoppingCart size={10}/> {inv.lineCount ?? inv.lines?.length ?? 0} produit{(inv.lineCount ?? inv.lines?.length ?? 0)>1?"s":""}</p>}
                   </div>
                   <div className="flex items-center gap-2 ml-3">
                     <div className="text-right"><p className="text-base font-black" style={{ fontFamily:"'Nunito', sans-serif" }}>{fmt(inv.montant)}</p><span className="text-xs px-2 py-0.5 rounded-full font-bold capitalize inline-block mt-0.5" style={{ background:bc,color:tc }}>{effectiveStatus(inv)}</span></div>
                     {canCollectThisInvoice && (
-                      <button onClick={e=>{e.stopPropagation();setEncaissInv(inv);setEncaissSplit([{ method:"Espèces", amount:invoiceRemainingAmount(inv) }]);}} className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background:SEM.success.bg }} title="Encaisser">
+                      <button onClick={e=>{e.stopPropagation();void openInvoicePayment(inv);}} className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background:SEM.success.bg }} title="Encaisser">
                         <Wallet size={15} style={{ color:SEM.success.text }}/>
                       </button>
                     )}
-                    <button onClick={e=>{e.stopPropagation();setShareInv(inv);}} className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background:SEM.neutral.bg }}>
+                    <button onClick={e=>{e.stopPropagation();void openInvoiceShare(inv);}} className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background:SEM.neutral.bg }}>
                       <Send size={15} style={{ color:SEM.neutral.accent }}/>
                     </button>
                   </div>
@@ -1055,7 +1071,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
         )}
       </Modal>}
 
-      <button onClick={()=>{ setLines([]); setAcompte(""); setInitialPaymentMethod("Espèces"); const first=products[0]; if(first){ const unit=getDefaultSaleUnit(first,boutique); setLPid(first.id); setLSellUnit(unit); setLQty(""); const last=getLastSalePrice(first.id,invoices,unit); setLPrix(last!=null?String(last):""); } setModal(true); }} className="fixed bottom-20 right-4 w-14 h-14 rounded-full shadow-2xl flex items-center justify-center z-20 active:scale-95" style={{ background:"#a855f7", boxShadow:"0 0 24px #a855f760" }}>
+      <button onClick={()=>{ setLines([]); setAcompte(""); setInitialPaymentMethod("Espèces"); const first=products[0]; if(first){ const unit=getDefaultSaleUnit(first,boutique); setLPid(first.id); setLSellUnit(unit); setLQty(""); const last=getLastSalePrice(first.id,invoices,unit,boutique.salePriceHints); setLPrix(last!=null?String(last):""); } setModal(true); }} className="fixed bottom-20 right-4 w-14 h-14 rounded-full shadow-2xl flex items-center justify-center z-20 active:scale-95" style={{ background:"#a855f7", boxShadow:"0 0 24px #a855f760" }}>
         <Plus size={28} color="white" strokeWidth={2.5}/>
       </button>
 
@@ -1081,7 +1097,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
             </div>
           ))}</div>}
           <div className="bg-muted rounded-2xl p-3 space-y-3">
-            <select value={lPid} onChange={e=>{ const newPid=Number(e.target.value); const prod=products.find(p=>p.id===newPid); setLPid(newPid); setLQty(""); if(prod){ const unit=getDefaultSaleUnit(prod,boutique); setLSellUnit(unit); const last=getLastSalePrice(prod.id,invoices,unit); setLPrix(last!=null?String(last):""); } else { setLSellUnit(""); setLPrix(""); } }} className="w-full bg-card border border-border rounded-xl px-3 py-2.5 text-sm focus:outline-none" style={{ appearance:"none" }}>
+            <select value={lPid} onChange={e=>{ const newPid=Number(e.target.value); const prod=products.find(p=>p.id===newPid); setLPid(newPid); setLQty(""); if(prod){ const unit=getDefaultSaleUnit(prod,boutique); setLSellUnit(unit); const last=getLastSalePrice(prod.id,invoices,unit,boutique.salePriceHints); setLPrix(last!=null?String(last):""); } else { setLSellUnit(""); setLPrix(""); } }} className="w-full bg-card border border-border rounded-xl px-3 py-2.5 text-sm focus:outline-none" style={{ appearance:"none" }}>
               {products.map(p=><option key={p.id} value={p.id}>{p.nom} (stock: {productQty(p.id,entries)} {p.unit})</option>)}
             </select>
             {getInvSellOptions(lPid).length>1&&(()=>{
@@ -1089,7 +1105,7 @@ export function FacturesView({ boutique, allBoutiques, platformUsers, currentUse
               const effUnit=lSellUnit||invDefaultUnit(lPid);
               return(<div className="flex gap-2 flex-wrap">{getInvSellOptions(lPid).map(u=>{
                 const lbl=prod ? getSaleUnitLabel(prod,boutique,u) : u;
-                return(<button key={u} onClick={()=>{ setLSellUnit(u); setLQty(""); const last=getLastSalePrice(lPid,invoices,u); setLPrix(last!=null?String(last):""); }} className="flex-1 py-2 rounded-xl text-xs font-bold whitespace-nowrap"
+                return(<button key={u} onClick={()=>{ setLSellUnit(u); setLQty(""); const last=getLastSalePrice(lPid,invoices,u,boutique.salePriceHints); setLPrix(last!=null?String(last):""); }} className="flex-1 py-2 rounded-xl text-xs font-bold whitespace-nowrap"
                   style={{ background:effUnit===u?"#1f2937":"#EEE9D8", color:effUnit===u?"#fff":"#374151" }}>{lbl}</button>);
               })}</div>);
             })()}

@@ -27,6 +27,7 @@ export type Charge = {
 };
 
 export type InvoiceLine = { id?: number; sourceInvoiceLineId?: number; productId: number; nom: string; qty: number; unit: string; prixUnit: number; sellUnit?: string; sellQty?: number; prixAchat?: number };
+export type SalePriceHint = { productId: number; sellUnit: string; prixUnit: number; invoiceDate: string };
 
 export type InvoicePayment = {
   id: number;
@@ -93,7 +94,7 @@ export type Invoice    = {
   id: string; clientId?: number; client: string; clientTel?: string; clientType?: ClientType;
   clientEmailSnapshot?: string; clientAdresseSnapshot?: string; clientVilleSnapshot?: string; clientTypeSnapshot?: ClientType;
   boutiqueNomSnapshot?: string; boutiqueVilleSnapshot?: string; boutiqueAdresseSnapshot?: string; boutiqueTelSnapshot?: string; boutiqueEmailSnapshot?: string; boutiqueLogoSnapshot?: string;
-  lines?: InvoiceLine[]; payments?: InvoicePayment[];
+  lines?: InvoiceLine[]; lineCount?: number; payments?: InvoicePayment[];
   montant: number; acompte: number; date: string; dateRaw?: string;
   dueDate?: string;
   status: InvoiceStatus; type: string; returnOfInvoiceId?: string; creditNoteNumber?: number;
@@ -144,6 +145,8 @@ export type Boutique = {
   clientCreditRefunds?: ClientCreditRefund[];
   productParams?: ProductParam[];
   categories?: Category[];
+  salePriceHints?: SalePriceHint[];
+  productSaleCounts?: Record<number, number>;
   pendingTransfers?: PendingTransfer[];
   transfers?: Transfer[];
   inventaires?: InventaireSession[];
