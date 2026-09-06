@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 
 const scopeSql = fs.readFileSync('supabase/migrations/20260904174500_optimize_read_permission_scopes.sql','utf8');
-const boundedSql = fs.readFileSync('supabase/migrations/20260906121208_bounded_rls_read_paths.sql','utf8');
-const payloadSql = fs.readFileSync('supabase/migrations/20260906121437_bounded_read_json_payloads.sql','utf8');
+const boundedSql = fs.readFileSync('.github/audit/replay-migrations/20260906121208_bounded_rls_read_paths.sql','utf8');
+const payloadSql = fs.readFileSync('.github/audit/replay-migrations/20260906121437_bounded_read_json_payloads.sql','utf8');
 const app = fs.readFileSync('src/app/App.tsx','utf8');
 const api = fs.readFileSync('src/lib/api.ts','utf8');
 
