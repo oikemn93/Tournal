@@ -28,6 +28,10 @@ jobs:
           git diff --check
           node scripts/test-performance-read-contract.mjs
           node scripts/test-invoice-summary-contract.mjs
+      - name: Restore workflow files for token permissions
+        run: |
+          git checkout HEAD -- .github/workflows/ci.yml
+          git checkout HEAD -- .github/workflows/apply-invoice-summary-patch.yml
       - name: Commit patched sources
         run: |
           git config user.name 'github-actions[bot]'
