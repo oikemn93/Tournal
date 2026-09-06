@@ -189,3 +189,4 @@
 20260906133509|invoice_summary_and_targeted_lines
 20260906133711|retain_registered_invoice_lines_in_summary
 20260906134120|recent_sale_metrics
+20260906140155|prevent_document_id_lpad_truncation
