@@ -9816,14 +9816,25 @@ export default function App() {
       backendOk={backendOk}
       saveState={saveState}/>
   );
-  if (screen==="boutique-select"&&currentUser) return (
-    <BoutiqueSelectScreen
-      user={currentUser} boutiques={boutiques} assignments={currentUser.assignments}
-      groupes={groupes} allUsers={platformUsers}
-      onSelect={handleSelectBoutique} onLogout={handleLogout}
-      onBack={activeBoutiqueId ? ()=>setScreen("app") : undefined}
-    />
-  );
+  if (screen==="boutique-select"&&currentUser) {
+    // SuperAdmin access is global and must not depend on per-boutique assignments.
+    // These synthetic assignments exist only in the picker; nothing is persisted.
+    const pickerAssignments: BoutiqueAssignment[] = currentUser.isSuperAdmin
+      ? boutiques.map(b=>({
+          boutiqueId:b.id, role:"Propriétaire",
+          droits:{ dashboard:true, stock:true, fournisseurs:true, clients:true, factures:true, remboursement:true, charges:true, compta:true, vente:true, inventaire:true, marges:true, encaissement_vente:true, annulation_commande:true, decaissement:true, transferts:true },
+        }))
+      : currentUser.assignments;
+    return (
+      <BoutiqueSelectScreen
+        user={currentUser} boutiques={boutiques} assignments={pickerAssignments}
+        groupes={groupes} allUsers={platformUsers}
+        onSelect={currentUser.isSuperAdmin ? (selectedBoutique)=>handleEnterBoutiqueAsAdmin(selectedBoutique) : handleSelectBoutique}
+        onLogout={handleLogout}
+        onBack={activeBoutiqueId ? ()=>setScreen("app") : undefined}
+      />
+    );
+  }
   if (!boutique||!currentUser||!activeAssign) {
     const missing=[!boutique?"boutique":"",!currentUser?"utilisateur":"",!activeAssign?"affectation":""].filter(Boolean).join(", " );
     return <div className="min-h-screen flex items-center justify-center px-5 bg-background text-foreground"><div className="w-full max-w-md rounded-3xl border bg-card p-6 shadow-sm"><div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-700 flex items-center justify-center mb-4"><AlertTriangle size={22}/></div><h1 className="text-xl font-black">État boutique incomplet</h1><p className="text-sm text-muted-foreground mt-2">Tournal a empêché l’écran blanc. Élément manquant : {missing||"inconnu"}.</p><button type="button" onClick={()=>{activeBoutiqueIdRef.current=null;setActiveBoutiqueId(null);setActiveAssign(null);if(currentUser)saveSession(currentUser.id,null,null);setScreen("superadmin");}} className="mt-4 w-full rounded-2xl bg-slate-950 py-3 text-sm font-black text-white">Retour à Tournal Ops</button></div></div>;
