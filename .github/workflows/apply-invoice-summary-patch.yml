@@ -1,8 +1,9 @@
-name: Apply invoice summary patch
+name: Apply invoice summary patch v2
 
 on:
   push:
-    branches: [perf/bulk-invoice-line-aggregation]
+    branches:
+      - perf/bulk-invoice-line-aggregation
   workflow_dispatch:
 
 permissions:
@@ -20,44 +21,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Align deterministic source anchors
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          path=Path('.github/scripts/apply-invoice-summary-patch.mjs')
-          text=path.read_text()
-          old="""  text = replaceCount(text,
-    'getLastSalePrice(lPid, invoices, effectiveUnit)',
-    'getLastSalePrice(lPid, invoices, effectiveUnit, boutique.salePriceHints)',
-    1,
-    'Factures line last price');
-"""
-          new="""  text = replaceCount(text,
-    'getLastSalePrice(first.id,invoices,unit)',
-    'getLastSalePrice(first.id,invoices,unit,boutique.salePriceHints)',
-    1,
-    'Factures floating button last price');
-  text = replaceCount(text,
-    'getLastSalePrice(prod.id,invoices,unit)',
-    'getLastSalePrice(prod.id,invoices,unit,boutique.salePriceHints)',
-    1,
-    'Factures product last price');
-  text = replaceCount(text,
-    'getLastSalePrice(lPid,invoices,u)',
-    'getLastSalePrice(lPid,invoices,u,boutique.salePriceHints)',
-    1,
-    'Factures unit last price');
-"""
-          if text.count(old) != 1:
-              raise SystemExit('price anchor repair target not unique')
-          path.write_text(text.replace(old,new))
-          PY
-      - name: Apply deterministic patch
-        run: node .github/scripts/apply-invoice-summary-patch.mjs
-      - name: Validate patch syntax
+      - name: Apply deterministic patch v2
+        run: node .github/scripts/apply-invoice-summary-patch-v2.mjs
+      - name: Validate focused contracts
         run: |
           git diff --check
           node scripts/test-performance-read-contract.mjs
+          node scripts/test-invoice-summary-contract.mjs
       - name: Commit patched sources
         run: |
           git config user.name 'github-actions[bot]'
