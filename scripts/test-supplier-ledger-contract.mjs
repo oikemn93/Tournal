@@ -12,8 +12,9 @@ need(!balanceFn.includes('c.source === "transfer"'),'supplierBalance must not mi
 need(api.includes('params.idempotencyKey ?? crypto.randomUUID()'),'supplier payment must accept a stable retry key');
 need(suppliers.includes('idempotencyKey:requestKey'),'supplier screen must reuse payment retry key');
 need(suppliers.includes('ACHATS · 30 JOURS'),'supplier metrics must state the loaded time window');
+need(suppliers.includes('À régulariser'),'receipt without payable must never be displayed as paid');
 need(!suppliers.includes('period==="365"'),'supplier screen must not claim unloaded 12-month history');
-need(stock.includes('Number(dMontant)>0?"pending":"paid"'),'zero-value receipt optimistic state must be paid');
+need(stock.includes('status:Number(dMontant)>0 ? "pending" as const : "paid" as const') && stock.includes('status:Number(nMontant)>0 ? "pending" as const : "paid" as const'),'zero-value receipt optimistic state must be paid');
 need(migration.includes("and c.source = 'supplier_receipt'"),'server supplier balance/payment must use payable ledger');
 need(!migration.includes('v_stock_due'),'legacy stock-derived supplier debt must be gone');
 need(migration.includes("c.source not in ('supplier_receipt','transfer')"),'dashboard must exclude payable documents from cash charges');
