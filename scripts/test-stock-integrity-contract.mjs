@@ -22,14 +22,16 @@ assert.ok(dashboardSql.includes('private.fifo_stock_value('), 'dashboard stock v
 assert.ok(!dashboardSql.includes('greatest(p.stock,0)*coalesce(p.prix_achat,0)'), 'dashboard must not value stock from mutable purchase price');
 
 // Deferred history must never alter the current quantity established by the
-// bounded snapshot. This was a real production regression: MEULFEU was 803 in
-// products/ledger but became 551 in the UI because an older net -252 window was
-// added after its synthetic bootstrap had already absorbed that history.
+// bounded snapshot. The first production bug made MEULFEU 803 -> 551 by adding
+// an older net -252 window twice. The first attempted fix rebuilt the bootstrap
+// correctly but then productQty applied another time-window filter, producing
+// the exact opposite overcorrection: 803 -> 1055. The invariant is simply that
+// the reconciled merged rows sum to the authoritative live quantity.
 assert.ok(app.includes('mergeStockEntriesPreservingCurrentQty'), 'deferred stock history needs a stock-aware merge');
 assert.ok(app.includes('currentTotal - (actualTotalByProduct.get(productId) ?? 0)'), 'deferred merge must rebuild reconciliation quantity');
 assert.ok(!app.includes('entries: byIdPreferCurrent(current.entries, older.entries)'), 'stock entries must not use the generic deferred merge');
-assert.ok(inventory.includes('const bootstrapRows = rows.filter(e => e.movementType === "bootstrap")'), 'productQty must anchor on bounded bootstrap');
-assert.ok(inventory.includes('entryAt >= anchorAt'), 'productQty must ignore deferred movements already represented by bootstrap');
+assert.ok(inventory.includes('return entries.filter(entry => entry.productId === pid).reduce((sum, entry) => sum + entry.qty, 0);'), 'productQty must sum the reconciled stock rows exactly once');
+assert.ok(!inventory.includes('entryAt >= anchorAt'), 'productQty must not apply a second bootstrap time-window filter');
 assert.ok(pos.includes('return productQty(p.id, entries);'), 'POS stock must use the canonical client quantity helper');
 
 const current = [
@@ -42,8 +44,13 @@ const naiveMerged = authoritative + older.reduce((sum, row) => sum + row.qty, 0)
 const actualMerged = [...older, ...current.filter(row => row.movementType !== 'bootstrap')];
 const actualTotal = actualMerged.reduce((sum, row) => sum + row.qty, 0);
 const rebuiltBootstrap = authoritative - actualTotal;
+const reconciledMerged = [{ id: -1, productId: 1, qty: rebuiltBootstrap, movementType: 'bootstrap' }, ...actualMerged];
+const correctedQty = reconciledMerged.reduce((sum, row) => sum + row.qty, 0);
+const wrongAnchoredQty = rebuiltBootstrap + current.filter(row => row.movementType !== 'bootstrap').reduce((sum, row) => sum + row.qty, 0);
+
 assert.equal(authoritative, 803);
-assert.equal(naiveMerged, 551, 'fixture must reproduce the old production UI bug');
-assert.equal(rebuiltBootstrap + actualTotal, 803, 'deferred history must preserve current stock');
+assert.equal(naiveMerged, 551, 'fixture must reproduce the original production UI bug');
+assert.equal(wrongAnchoredQty, 1055, 'fixture must reproduce the deployed overcorrection');
+assert.equal(correctedQty, 803, 'deferred history must preserve current stock exactly');
 
 console.log('Stock integrity contract OK');
