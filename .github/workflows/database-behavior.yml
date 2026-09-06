@@ -35,6 +35,11 @@ jobs:
           psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f .ci-historical-migrations/20260904183500_consolidate_disbursement_guards.sql
           psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f .ci-historical-migrations/20260904184500_make_read_rpcs_session_independent.sql
           psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f .ci-historical-migrations/20260904184600_make_inventory_reads_session_independent.sql
+          # The compact behavior baseline predates transfer payment history, but
+          # the production dashboard schema already contains this table. Mirror
+          # only the columns needed by the current dashboard before applying its
+          # candidate definition; the canonical replay still validates the full schema.
+          psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -c "create table if not exists public.transfer_charge_payments (id bigint primary key, boutique_id text not null, transfer_id uuid not null, charge_id bigint not null, amount numeric not null check (amount > 0), payment_method text not null, paid_at timestamptz not null default now(), operator_id uuid, operator_name text not null, idempotency_key uuid not null, unique (boutique_id, idempotency_key));"
           psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f .github/audit/replay-migrations/20260906181500_stock_integrity_guardrails.sql
           psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f .github/audit/replay-migrations/20260906191745_inventory_race_same_transaction_guard.sql
           psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f .github/audit/replay-migrations/20260906192500_dashboard_fifo_stock_value.sql
