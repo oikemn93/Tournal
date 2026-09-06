@@ -146,7 +146,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
   const allPosCats = Array.from(new Set(products.map(p => p.categorie).filter(Boolean) as string[]));
 
   function getStock(p: Product) {
-    return entries.filter(e => e.productId === p.id).reduce((s, e) => s + e.qty, 0);
+    return productQty(p.id, entries);
   }
 
   function getSalesCount(p: Product) {

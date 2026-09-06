@@ -130,10 +130,38 @@ function mergeOlderBootstrapHistory(current: Boutique, older: Boutique): Boutiqu
     for (const row of currentRows) merged.set(String(row.id), row);
     return [...merged.values()];
   };
+  // The bounded snapshot already reconciles recent movements to live stock.
+  // Deferred history is for history only: adding it must never change the
+  // authoritative quantity that was visible before the merge.
+  const mergeStockEntriesPreservingCurrentQty = (currentRows: StockEntry[] = [], olderRows: StockEntry[] = []) => {
+    const actualById = new Map<string, StockEntry>();
+    for (const row of olderRows) if (row.movementType !== "bootstrap") actualById.set(String(row.id), row);
+    for (const row of currentRows) if (row.movementType !== "bootstrap") actualById.set(String(row.id), row);
+    const actualRows = [...actualById.values()];
+
+    const currentTotalByProduct = new Map<number, number>();
+    for (const row of currentRows) currentTotalByProduct.set(row.productId, (currentTotalByProduct.get(row.productId) ?? 0) + row.qty);
+    const actualTotalByProduct = new Map<number, number>();
+    for (const row of actualRows) actualTotalByProduct.set(row.productId, (actualTotalByProduct.get(row.productId) ?? 0) + row.qty);
+    const bootstrapByProduct = new Map<number, StockEntry>();
+    for (const row of currentRows) if (row.movementType === "bootstrap") bootstrapByProduct.set(row.productId, row);
+
+    const reconciliations: StockEntry[] = [];
+    for (const [productId, currentTotal] of currentTotalByProduct) {
+      const qty = currentTotal - (actualTotalByProduct.get(productId) ?? 0);
+      if (Math.abs(qty) <= 0.000001) continue;
+      const template = bootstrapByProduct.get(productId);
+      reconciliations.push(template ? { ...template, qty } : {
+        id: -(9_000_000_000_000 + productId), productId, qty,
+        unit: "unité", montantDu: 0, date: "", fournisseur: "", movementType: "bootstrap",
+      });
+    }
+    return [...reconciliations, ...actualRows];
+  };
   return {
     ...current,
     invoices: byIdPreferCurrent(current.invoices, older.invoices).sort((a,b)=>String(b.dateRaw ?? '').localeCompare(String(a.dateRaw ?? ''))),
-    entries: byIdPreferCurrent(current.entries, older.entries).sort((a:any,b:any)=>String(b.recordedAt ?? b.date ?? '').localeCompare(String(a.recordedAt ?? a.date ?? ''))),
+    entries: mergeStockEntriesPreservingCurrentQty(current.entries, older.entries).sort((a:any,b:any)=>String(b.recordedAt ?? b.date ?? '').localeCompare(String(a.recordedAt ?? a.date ?? ''))),
   };
 }
 
