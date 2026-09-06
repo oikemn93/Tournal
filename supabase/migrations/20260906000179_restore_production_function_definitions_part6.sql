@@ -1,10 +1,245 @@
--- AUDIT ONLY: restore exact current production pg_get_functiondef for residual mismatches.
--- Payload contains 7 CREATE OR REPLACE FUNCTION statements inside one local DO block.
--- Source payload MD5 before base64: 16393e45b738c67b67fdcc620b805d61.
--- No production data is read or written by this migration.
+-- AUDIT ONLY: exact current production pg_get_functiondef; schema-only, no data.
 
-do $restore$
+CREATE OR REPLACE FUNCTION public.reset_user_quick_pin(p_user_id uuid)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+declare
+  v_uid uuid := auth.uid();
+  v_is_super boolean := false;
+  v_target_is_owner boolean := false;
+  v_authorized boolean := false;
 begin
-  execute convert_from(decode('ZG8gJGlubmVyJCBiZWdpbgpleGVjdXRlICdDUkVBVEUgT1IgUkVQTEFDRSBGVU5DVElPTiBwdWJsaWMucmVzZXRfdXNlcl9xdWlja19waW4ocF91c2VyX2lkIHV1aWQpCiBSRVRVUk5TIHZvaWQKIExBTkdVQUdFIHBscGdzcWwKIFNFQ1VSSVRZIERFRklORVIKIFNFVCBzZWFyY2hfcGF0aCBUTyAnJycnCkFTICRmdW5jdGlvbiQKZGVjbGFyZQogIHZfdWlkIHV1aWQgOj0gYXV0aC51aWQoKTsKICB2X2lzX3N1cGVyIGJvb2xlYW4gOj0gZmFsc2U7CiAgdl90YXJnZXRfaXNfb3duZXIgYm9vbGVhbiA6PSBmYWxzZTsKICB2X2F1dGhvcml6ZWQgYm9vbGVhbiA6PSBmYWxzZTsKYmVnaW4KICBpZiB2X3VpZCBpcyBudWxsIHRoZW4gcmFpc2UgZXhjZXB0aW9uICcnQ29ubmV4aW9uIHJlcXVpc2UnJzsgZW5kIGlmOwogIGlmIHBfdXNlcl9pZCBpcyBudWxsIHRoZW4gcmFpc2UgZXhjZXB0aW9uICcnVXRpbGlzYXRldXIgcmVxdWlzJyc7IGVuZCBpZjsKCiAgc2VsZWN0IGNvYWxlc2NlKHUuaXNfc3VwZXJfYWRtaW4sZmFsc2UpIGFuZCBub3QgY29hbGVzY2UodS5pc19zdXNwZW5kZWQsZmFsc2UpCiAgICBpbnRvIHZfaXNfc3VwZXIKICBmcm9tIHB1YmxpYy5wbGF0Zm9ybV91c2VycyB1IHdoZXJlIHUuaWQgPSB2X3VpZDsKCiAgc2VsZWN0IGV4aXN0cygKICAgIHNlbGVjdCAxIGZyb20gcHVibGljLmJvdXRpcXVlX2Fzc2lnbm1lbnRzIGEKICAgIHdoZXJlIGEudXNlcl9pZCA9IHBfdXNlcl9pZCBhbmQgYS5yb2xlID0gJydvd25lcicnCiAgKSBpbnRvIHZfdGFyZ2V0X2lzX293bmVyOwoKICBpZiB2X2lzX3N1cGVyIHRoZW4KICAgIHZfYXV0aG9yaXplZCA6PSB0cnVlOwogIGVsc2lmIG5vdCB2X3RhcmdldF9pc19vd25lciB0aGVuCiAgICBzZWxlY3QgZXhpc3RzKAogICAgICBzZWxlY3QgMQogICAgICBmcm9tIHB1YmxpYy5ib3V0aXF1ZV9hc3NpZ25tZW50cyB0YXJnZXRfYQogICAgICBqb2luIHB1YmxpYy5ib3V0aXF1ZV9hc3NpZ25tZW50cyBjYWxsZXJfYQogICAgICAgIG9uIGNhbGxlcl9hLmJvdXRpcXVlX2lkID0gdGFyZ2V0X2EuYm91dGlxdWVfaWQKICAgICAgIGFuZCBjYWxsZXJfYS51c2VyX2lkID0gdl91aWQKICAgICAgIGFuZCBjYWxsZXJfYS5yb2xlID0gJydvd25lcicnCiAgICAgIHdoZXJlIHRhcmdldF9hLnVzZXJfaWQgPSBwX3VzZXJfaWQKICAgICkgaW50byB2X2F1dGhvcml6ZWQ7CiAgZW5kIGlmOwoKICBpZiBub3Qgdl9hdXRob3JpemVkIHRoZW4gcmFpc2UgZXhjZXB0aW9uICcnQWNjw6hzIHJlZnVzw6knJzsgZW5kIGlmOwogIGRlbGV0ZSBmcm9tIHByaXZhdGUudXNlcl9waW5zIHdoZXJlIHVzZXJfaWQgPSBwX3VzZXJfaWQ7CmVuZDsKJGZ1bmN0aW9uJAonOwpleGVjdXRlICdDUkVBVEUgT1IgUkVQTEFDRSBGVU5DVElPTiBwdWJsaWMuc2F2ZV9pbnZlbnRvcnlfY291bnQocF9zZXNzaW9uX2lkIHV1aWQsIHBfcHJvZHVjdF9pZCBiaWdpbnQsIHBfY291bnRlZF9xdHkgbnVtZXJpYywgcF9jb3VudGluZ19kZXRhaWwganNvbmIgREVGQVVMVCAnJ3t9Jyc6Ompzb25iKQogUkVUVVJOUyBqc29uYgogTEFOR1VBR0UgcGxwZ3NxbAogU0VDVVJJVFkgREVGSU5FUgogU0VUIHNlYXJjaF9wYXRoIFRPICcncGdfY2F0YWxvZycnLCAnJ3B1YmxpYycnLCAnJ3ByaXZhdGUnJwpBUyAkZnVuY3Rpb24kCmRlY2xhcmUgdl9ib3V0aXF1ZSB0ZXh0OyB2X3N0YXR1cyB0ZXh0OwpiZWdpbgogIHNlbGVjdCBib3V0aXF1ZV9pZCxzdGF0dXMgaW50byB2X2JvdXRpcXVlLHZfc3RhdHVzIGZyb20gcHVibGljLmludmVudG9yeV9zZXNzaW9ucyB3aGVyZSBpZD1wX3Nlc3Npb25faWQgZm9yIHVwZGF0ZTsKICBpZiBub3QgZm91bmQgdGhlbiByYWlzZSBleGNlcHRpb24gJydpbnZlbnRvcnkgc2Vzc2lvbiBub3QgZm91bmQnJzsgZW5kIGlmOwogIGlmIG5vdCBwcml2YXRlLmF1dGhfaGFzX3Blcm1pc3Npb24odl9ib3V0aXF1ZSwnJ2ludmVudGFpcmUnJykgdGhlbiByYWlzZSBleGNlcHRpb24gJydmb3JiaWRkZW4nJzsgZW5kIGlmOwogIGlmIHZfc3RhdHVzPD4nJ2RyYWZ0JycgdGhlbiByYWlzZSBleGNlcHRpb24gJydpbnZlbnRvcnkgc2Vzc2lvbiBpcyBjbG9zZWQnJzsgZW5kIGlmOwogIGlmIHBfY291bnRlZF9xdHkgaXMgbnVsbCBvciBwX2NvdW50ZWRfcXR5PDAgdGhlbiByYWlzZSBleGNlcHRpb24gJydpbnZhbGlkIGNvdW50ZWQgcXVhbnRpdHknJzsgZW5kIGlmOwoKICB1cGRhdGUgcHVibGljLmludmVudG9yeV9saW5lcwogIHNldCBjb3VudGVkX3F0eT1wX2NvdW50ZWRfcXR5LAogICAgICBjb3VudGluZ19kZXRhaWw9Y29hbGVzY2UocF9jb3VudGluZ19kZXRhaWwsJyd7fScnOjpqc29uYiksCiAgICAgIHVwZGF0ZWRfYXQ9bm93KCkKICB3aGVyZSBzZXNzaW9uX2lkPXBfc2Vzc2lvbl9pZCBhbmQgcHJvZHVjdF9pZD1wX3Byb2R1Y3RfaWQ7CiAgaWYgbm90IGZvdW5kIHRoZW4gcmFpc2UgZXhjZXB0aW9uICcnaW52ZW50b3J5IHByb2R1Y3Qgbm90IGZvdW5kJyc7IGVuZCBpZjsKICB1cGRhdGUgcHVibGljLmludmVudG9yeV9zZXNzaW9ucyBzZXQgdXBkYXRlZF9hdD1ub3coKSB3aGVyZSBpZD1wX3Nlc3Npb25faWQ7CiAgcmV0dXJuIHB1YmxpYy5nZXRfaW52ZW50b3J5X3Nlc3Npb24ocF9zZXNzaW9uX2lkKTsKZW5kOwokZnVuY3Rpb24kCic7CmV4ZWN1dGUgRSdDUkVBVEUgT1IgUkVQTEFDRSBGVU5DVElPTiBwdWJsaWMuc2V0X3F1aWNrX3BpbihwX3BpbiB0ZXh0KQogUkVUVVJOUyB2b2lkCiBMQU5HVUFHRSBwbHBnc3FsCiBTRUNVUklUWSBERUZJTkVSCiBTRVQgc2VhcmNoX3BhdGggVE8gJycnJwpBUyAkZnVuY3Rpb24kCmRlY2xhcmUKICB2X3VpZCB1dWlkIDo9IGF1dGgudWlkKCk7CmJlZ2luCiAgaWYgdl91aWQgaXMgbnVsbCB0aGVuCiAgICByYWlzZSBleGNlcHRpb24gJydDb25uZXhpb24gcmVxdWlzZScnOwogIGVuZCBpZjsKICBpZiBwX3BpbiBpcyBudWxsIG9yIHBfcGluICF+ICcnXlxcZHs2fSQnJyB0aGVuCiAgICByYWlzZSBleGNlcHRpb24gJydMZSBQSU4gZG9pdCBjb250ZW5pciBleGFjdGVtZW50IDYgY2hpZmZyZXMnJzsKICBlbmQgaWY7CiAgaWYgbm90IGV4aXN0cyAoCiAgICBzZWxlY3QgMSBmcm9tIHB1YmxpYy5wbGF0Zm9ybV91c2VycyB1CiAgICB3aGVyZSB1LmlkID0gdl91aWQKICAgICAgYW5kIGNvYWxlc2NlKHUuaXNfc3VzcGVuZGVkLGZhbHNlKSA9IGZhbHNlCiAgICAgIGFuZCBjb2FsZXNjZSh1Lm11c3RfY2hhbmdlX3Bhc3N3b3JkLGZhbHNlKSA9IGZhbHNlCiAgKSB0aGVuCiAgICByYWlzZSBleGNlcHRpb24gJydDb21wdGUgbm9uIHByw6p0IHBvdXIgbGEgY29uZmlndXJhdGlvbiBkdSBQSU4nJzsKICBlbmQgaWY7CgogIGluc2VydCBpbnRvIHByaXZhdGUudXNlcl9waW5zKHVzZXJfaWQscGluX2hhc2gsZmFpbGVkX2F0dGVtcHRzLGxvY2tlZF91bnRpbCx1cGRhdGVkX2F0KQogIHZhbHVlcyAodl91aWQsIGV4dGVuc2lvbnMuY3J5cHQocF9waW4sIGV4dGVuc2lvbnMuZ2VuX3NhbHQoJydiZicnLCAxMikpLCAwLCBudWxsLCBub3coKSkKICBvbiBjb25mbGljdCAodXNlcl9pZCkgZG8gdXBkYXRlCiAgc2V0IHBpbl9oYXNoID0gZXhjbHVkZWQucGluX2hhc2gsCiAgICAgIGZhaWxlZF9hdHRlbXB0cyA9IDAsCiAgICAgIGxvY2tlZF91bnRpbCA9IG51bGwsCiAgICAgIHVwZGF0ZWRfYXQgPSBub3coKTsKZW5kOwokZnVuY3Rpb24kCic7CmV4ZWN1dGUgJ0NSRUFURSBPUiBSRVBMQUNFIEZVTkNUSU9OIHB1YmxpYy5zbmFwc2hvdF9pbnZvaWNlX2lkZW50aXR5KCkKIFJFVFVSTlMgdHJpZ2dlcgogTEFOR1VBR0UgcGxwZ3NxbAogU0VUIHNlYXJjaF9wYXRoIFRPICcncHVibGljJycKQVMgJGZ1bmN0aW9uJApkZWNsYXJlCiAgYyBwdWJsaWMuY2xpZW50cyVyb3d0eXBlOwogIGIgcHVibGljLmJvdXRpcXVlcyVyb3d0eXBlOwogIG9wX25hbWUgdGV4dDsKYmVnaW4KICBpZiBuZXcuY2xpZW50X2lkIGlzIG5vdCBudWxsIHRoZW4KICAgIHNlbGVjdCAqIGludG8gYwogICAgZnJvbSBwdWJsaWMuY2xpZW50cwogICAgd2hlcmUgYm91dGlxdWVfaWQgPSBuZXcuYm91dGlxdWVfaWQgYW5kIGlkID0gbmV3LmNsaWVudF9pZDsKCiAgICBpZiBmb3VuZCB0aGVuCiAgICAgIG5ldy5jbGllbnRfbm9tIDo9IGNvYWxlc2NlKGMubm9tLCBuZXcuY2xpZW50X25vbSk7CiAgICAgIG5ldy5jbGllbnRfdGVsIDo9IGNvYWxlc2NlKGMudGVsLCBuZXcuY2xpZW50X3RlbCk7CiAgICAgIG5ldy5jbGllbnRfZW1haWxfc25hcHNob3QgOj0gYy5lbWFpbDsKICAgICAgbmV3LmNsaWVudF9hZHJlc3NlX3NuYXBzaG90IDo9IGMuYWRyZXNzZTsKICAgICAgbmV3LmNsaWVudF92aWxsZV9zbmFwc2hvdCA6PSBjLnZpbGxlOwogICAgICBuZXcuY2xpZW50X3R5cGVfc25hcHNob3QgOj0gYy50eXBlOwogICAgZW5kIGlmOwogIGVuZCBpZjsKCiAgc2VsZWN0ICogaW50byBiIGZyb20gcHVibGljLmJvdXRpcXVlcyB3aGVyZSBpZCA9IG5ldy5ib3V0aXF1ZV9pZDsKICBpZiBmb3VuZCB0aGVuCiAgICBuZXcuYm91dGlxdWVfbm9tX3NuYXBzaG90IDo9IGIubm9tOwogICAgbmV3LmJvdXRpcXVlX3ZpbGxlX3NuYXBzaG90IDo9IGIudmlsbGU7CiAgICBuZXcuYm91dGlxdWVfYWRyZXNzZV9zbmFwc2hvdCA6PSBiLmFkcmVzc2U7CiAgICBuZXcuYm91dGlxdWVfdGVsX3NuYXBzaG90IDo9IGIudGVsOwogICAgbmV3LmJvdXRpcXVlX2VtYWlsX3NuYXBzaG90IDo9IGIuZW1haWw7CiAgICAtLSBEZWxpYmVyYXRlbHkgZG8gbm90IGR1cGxpY2F0ZSB0aGUgYmFzZTY0IGxvZ28gaW4gZXZlcnkgaW52b2ljZS4KICAgIC0tIFRoZSBQREYgcmVuZGVyZXIgYWxyZWFkeSB1c2VzIHB1YmxpYy5ib3V0aXF1ZXMubG9nb191cmwuCiAgICBuZXcuYm91dGlxdWVfbG9nb19zbmFwc2hvdCA6PSBudWxsOwogIGVuZCBpZjsKCiAgaWYgbmV3Lm9wZXJhdG9yX2lkIGlzIG5vdCBudWxsIHRoZW4KICAgIHNlbGVjdCBub20gaW50byBvcF9uYW1lIGZyb20gcHVibGljLnBsYXRmb3JtX3VzZXJzIHdoZXJlIGlkID0gbmV3Lm9wZXJhdG9yX2lkOwogICAgbmV3Lm9wZXJhdG9yX25vbV9zbmFwc2hvdCA6PSBvcF9uYW1lOwogIGVuZCBpZjsKCiAgcmV0dXJuIG5ldzsKZW5kOwokZnVuY3Rpb24kCic7CmV4ZWN1dGUgJ0NSRUFURSBPUiBSRVBMQUNFIEZVTkNUSU9OIHB1YmxpYy5zdGFydF9pbnZlbnRvcnlfc2Vzc2lvbihwX2JvdXRpcXVlX2lkIHRleHQsIHBfc2NvcGVfdHlwZSB0ZXh0LCBwX3Njb3BlX2lkIHRleHQgREVGQVVMVCBOVUxMOjp0ZXh0LCBwX2FzX29mX2F0IHRpbWVzdGFtcCB3aXRoIHRpbWUgem9uZSBERUZBVUxUIG5vdygpKQogUkVUVVJOUyBqc29uYgogTEFOR1VBR0UgcGxwZ3NxbAogU0VDVVJJVFkgREVGSU5FUgogU0VUIHNlYXJjaF9wYXRoIFRPICcncGdfY2F0YWxvZycnLCAnJ3B1YmxpYycnLCAnJ3ByaXZhdGUnJwpBUyAkZnVuY3Rpb24kCmRlY2xhcmUgdl9pZCB1dWlkOj1nZW5fcmFuZG9tX3V1aWQoKTsgdl9sYWJlbCB0ZXh0OyB2X2NvdW50IGludGVnZXI7IHZfYXNvZiB0aW1lc3RhbXB0ejo9bGVhc3QoY29hbGVzY2UocF9hc19vZl9hdCxub3coKSksbm93KCkpOyBiZWdpbgogaWYgbm90IHByaXZhdGUuYXV0aF9oYXNfcGVybWlzc2lvbihwX2JvdXRpcXVlX2lkLCcnaW52ZW50YWlyZScnKSB0aGVuIHJhaXNlIGV4Y2VwdGlvbiAnJ2ZvcmJpZGRlbicnOyBlbmQgaWY7IGlmIHBfc2NvcGVfdHlwZSBub3QgaW4gKCcnYWxsJycsJydjYXRlZ29yeScnLCcncHJvZHVjdCcnKSB0aGVuIHJhaXNlIGV4Y2VwdGlvbiAnJ2ludmFsaWQgaW52ZW50b3J5IHNjb3BlJyc7IGVuZCBpZjsKIGlmIHBfc2NvcGVfdHlwZT0nJ2FsbCcnIHRoZW4gdl9sYWJlbDo9JydUb3VzIGxlcyBwcm9kdWl0cycnOyBlbHNpZiBwX3Njb3BlX3R5cGU9JydjYXRlZ29yeScnIHRoZW4gc2VsZWN0IG5vbSBpbnRvIHZfbGFiZWwgZnJvbSBwdWJsaWMuY2F0ZWdvcmllcyB3aGVyZSBib3V0aXF1ZV9pZD1wX2JvdXRpcXVlX2lkIGFuZCBpZD1wX3Njb3BlX2lkOyBpZiBub3QgZm91bmQgdGhlbiByYWlzZSBleGNlcHRpb24gJydjYXRlZ29yeSBub3QgZm91bmQnJzsgZW5kIGlmOyBlbHNlIHNlbGVjdCBub20gaW50byB2X2xhYmVsIGZyb20gcHVibGljLnByb2R1Y3RzIHdoZXJlIGJvdXRpcXVlX2lkPXBfYm91dGlxdWVfaWQgYW5kIGlkPXBfc2NvcGVfaWQ6OmJpZ2ludDsgaWYgbm90IGZvdW5kIHRoZW4gcmFpc2UgZXhjZXB0aW9uICcncHJvZHVjdCBub3QgZm91bmQnJzsgZW5kIGlmOyBlbmQgaWY7CiBpbnNlcnQgaW50byBwdWJsaWMuaW52ZW50b3J5X3Nlc3Npb25zKGlkLGJvdXRpcXVlX2lkLHNjb3BlX3R5cGUsc2NvcGVfaWQsc2NvcGVfbGFiZWwsb3BlcmF0b3JfaWQsYXNfb2ZfYXQpIHZhbHVlcyh2X2lkLHBfYm91dGlxdWVfaWQscF9zY29wZV90eXBlLHBfc2NvcGVfaWQsdl9sYWJlbCxhdXRoLnVpZCgpLHZfYXNvZik7CiBpbnNlcnQgaW50byBwdWJsaWMuaW52ZW50b3J5X2xpbmVzKHNlc3Npb25faWQscHJvZHVjdF9pZCxwcm9kdWN0X25hbWUsY2F0ZWdvcnlfbmFtZSx1bml0LHRoZW9yZXRpY2FsX3F0eSxwdXJjaGFzZV9wcmljZSxzYWxlX3ByaWNlLHBpZWNlc19wZXJfbG90LGxlbmd0aF9wZXJfcGllY2UsZmlmb190aGVvcmV0aWNhbF9jb3N0LGZpZm9fdW5pdF9jb3N0KQogc2VsZWN0IHZfaWQscC5pZCxwLm5vbSxjLm5vbSxwLnVuaXQsY29hbGVzY2UoKHNlbGVjdCBzdW0oc2UucXR5KSBmcm9tIHB1YmxpYy5zdG9ja19lbnRyaWVzIHNlIHdoZXJlIHNlLmJvdXRpcXVlX2lkPXBfYm91dGlxdWVfaWQgYW5kIHNlLnByb2R1Y3RfaWQ9cC5pZCBhbmQgc2UuZW50cnlfZGF0ZTw9dl9hc29mKSwwKSxjb2FsZXNjZShwLnByaXhfYWNoYXQsMCksY29hbGVzY2UocC5wcml4X3ZlbnRlLDApLGNvYWxlc2NlKHAucGllY2VzX3Blcl9sb3QsYy5waWVjZXNfcGVyX2xvdCwwKSxjb2FsZXNjZShwLmxlbmd0aF9wZXJfcGllY2UsYy5sZW5ndGhfcGVyX3BpZWNlLDApLHByaXZhdGUuZmlmb19zdG9ja192YWx1ZShwX2JvdXRpcXVlX2lkLHAuaWQsdl9hc29mLG51bGwpLGNhc2Ugd2hlbiBjb2FsZXNjZSgoc2VsZWN0IHN1bShzZS5xdHkpIGZyb20gcHVibGljLnN0b2NrX2VudHJpZXMgc2Ugd2hlcmUgc2UuYm91dGlxdWVfaWQ9cF9ib3V0aXF1ZV9pZCBhbmQgc2UucHJvZHVjdF9pZD1wLmlkIGFuZCBzZS5lbnRyeV9kYXRlPD12X2Fzb2YpLDApPjAgdGhlbiBwcml2YXRlLmZpZm9fc3RvY2tfdmFsdWUocF9ib3V0aXF1ZV9pZCxwLmlkLHZfYXNvZixudWxsKS9jb2FsZXNjZSgoc2VsZWN0IHN1bShzZS5xdHkpIGZyb20gcHVibGljLnN0b2NrX2VudHJpZXMgc2Ugd2hlcmUgc2UuYm91dGlxdWVfaWQ9cF9ib3V0aXF1ZV9pZCBhbmQgc2UucHJvZHVjdF9pZD1wLmlkIGFuZCBzZS5lbnRyeV9kYXRlPD12X2Fzb2YpLDApIGVsc2UgMCBlbmQKIGZyb20gcHVibGljLnByb2R1Y3RzIHAgbGVmdCBqb2luIHB1YmxpYy5jYXRlZ29yaWVzIGMgb24gYy5ib3V0aXF1ZV9pZD1wLmJvdXRpcXVlX2lkIGFuZCBjLmlkPXAuY2F0ZWdvcnlfaWQgd2hlcmUgcC5ib3V0aXF1ZV9pZD1wX2JvdXRpcXVlX2lkIGFuZCAoY29hbGVzY2UocC5hY3RpZix0cnVlKSBvciBjb2FsZXNjZShwLnN0b2NrLDApPD4wKSBhbmQgY2FzZSBwX3Njb3BlX3R5cGUgd2hlbiAnJ2FsbCcnIHRoZW4gdHJ1ZSB3aGVuICcnY2F0ZWdvcnknJyB0aGVuIHAuY2F0ZWdvcnlfaWQ9cF9zY29wZV9pZCB3aGVuICcncHJvZHVjdCcnIHRoZW4gcC5pZD1wX3Njb3BlX2lkOjpiaWdpbnQgZWxzZSBmYWxzZSBlbmQgb3JkZXIgYnkgYy5ub20gbnVsbHMgbGFzdCxwLm5vbTsKIGdldCBkaWFnbm9zdGljcyB2X2NvdW50PXJvd19jb3VudDsgaWYgdl9jb3VudD0wIHRoZW4gcmFpc2UgZXhjZXB0aW9uICcnbm8gcHJvZHVjdCBpbiBpbnZlbnRvcnkgc2NvcGUnJzsgZW5kIGlmOyByZXR1cm4gcHVibGljLmdldF9pbnZlbnRvcnlfc2Vzc2lvbih2X2lkKTsgZW5kICRmdW5jdGlvbiQKJzsKZXhlY3V0ZSAnQ1JFQVRFIE9SIFJFUExBQ0UgRlVOQ1RJT04gcHVibGljLnN5bmNfcHVzaF9zdWJzY3JpcHRpb25fY29udGV4dChwX2VuZHBvaW50IHRleHQpCiBSRVRVUk5TIHZvaWQKIExBTkdVQUdFIHBscGdzcWwKIFNFQ1VSSVRZIERFRklORVIKIFNFVCBzZWFyY2hfcGF0aCBUTyAnJycnCkFTICRmdW5jdGlvbiQKZGVjbGFyZQogIHZfdWlkIHV1aWQ6PWF1dGgudWlkKCk7CiAgdl9zaWQgdXVpZDo9bnVsbGlmKGF1dGguand0KCkgLT4+ICcnc2Vzc2lvbl9pZCcnLCcnJycpOjp1dWlkOwogIHZfYm91dGlxdWUgdGV4dDsKYmVnaW4KICBpZiB2X3VpZCBpcyBudWxsIG9yIHZfc2lkIGlzIG51bGwgdGhlbiByYWlzZSBleGNlcHRpb24gJydDb25uZXhpb24gcmVxdWlzZScnOyBlbmQgaWY7CiAgc2VsZWN0IGMuYm91dGlxdWVfaWQgaW50byB2X2JvdXRpcXVlCiAgZnJvbSBwcml2YXRlLm5vdGlmaWNhdGlvbl9zZXNzaW9uX2NvbnRleHQgYwogIHdoZXJlIGMuc2Vzc2lvbl9pZD12X3NpZCBhbmQgYy51c2VyX2lkPXZfdWlkOwogIGlmIHZfYm91dGlxdWUgaXMgbnVsbCBvciBub3QgcHJpdmF0ZS5hdXRoX2hhc19ib3V0aXF1ZV9hY2Nlc3Modl9ib3V0aXF1ZSkgdGhlbiByYWlzZSBleGNlcHRpb24gJydCb3V0aXF1ZSBhY3RpdmUgcmVxdWlzZScnOyBlbmQgaWY7CiAgdXBkYXRlIHB1YmxpYy5wdXNoX3N1YnNjcmlwdGlvbnMKICBzZXQgYm91dGlxdWVfaWQ9dl9ib3V0aXF1ZSxlbmFibGVkPXRydWUsbGFzdF9zZWVuX2F0PW5vdygpCiAgd2hlcmUgZW5kcG9pbnQ9cF9lbmRwb2ludCBhbmQgdXNlcl9pZD12X3VpZDsKZW5kOwokZnVuY3Rpb24kCic7CmV4ZWN1dGUgRSdDUkVBVEUgT1IgUkVQTEFDRSBGVU5DVElPTiBwdWJsaWMudXBkYXRlX2NsaWVudF9wcm9maWxlKHBfYm91dGlxdWVfaWQgdGV4dCwgcF9jbGllbnRfaWQgYmlnaW50LCBwX25hbWUgdGV4dCwgcF9waG9uZSB0ZXh0IERFRkFVTFQgTlVMTDo6dGV4dCwgcF9lbWFpbCB0ZXh0IERFRkFVTFQgTlVMTDo6dGV4dCwgcF9jaXR5IHRleHQgREVGQVVMVCBOVUxMOjp0ZXh0LCBwX2FkZHJlc3MgdGV4dCBERUZBVUxUIE5VTEw6OnRleHQsIHBfY29udGFjdCB0ZXh0IERFRkFVTFQgTlVMTDo6dGV4dCkKIFJFVFVSTlMganNvbmIKIExBTkdVQUdFIHBscGdzcWwKIFNFQ1VSSVRZIERFRklORVIKIFNFVCBzZWFyY2hfcGF0aCBUTyAnJ3BnX2NhdGFsb2cnJywgJydwdWJsaWMnJywgJydwcml2YXRlJycKQVMgJGZ1bmN0aW9uJApkZWNsYXJlCiAgdl9jbGllbnQgcHVibGljLmNsaWVudHMlcm93dHlwZTsKICB2X3Bob25lIHRleHQgOj0gbnVsbGlmKHRyaW0oY29hbGVzY2UocF9waG9uZSwnJycnKSksICcnJycpOwpiZWdpbgogIGlmIGF1dGgudWlkKCkgaXMgbnVsbCBvciBub3QgcHJpdmF0ZS5hdXRoX2hhc19wZXJtaXNzaW9uKHBfYm91dGlxdWVfaWQsJydjbGllbnRzJycpIHRoZW4KICAgIHJhaXNlIGV4Y2VwdGlvbiAnJ2ZvcmJpZGRlbicnOwogIGVuZCBpZjsKICBpZiBudWxsaWYodHJpbShjb2FsZXNjZShwX25hbWUsJycnJykpLCAnJycnKSBpcyBudWxsIHRoZW4KICAgIHJhaXNlIGV4Y2VwdGlvbiAnJ2NsaWVudCBuYW1lIHJlcXVpcmVkJyc7CiAgZW5kIGlmOwoKICBpZiB2X3Bob25lIGlzIG5vdCBudWxsIGFuZCBleGlzdHMgKAogICAgc2VsZWN0IDEgZnJvbSBwdWJsaWMuY2xpZW50cyBjCiAgICB3aGVyZSBjLmJvdXRpcXVlX2lkPXBfYm91dGlxdWVfaWQKICAgICAgYW5kIGMuaWQ8PnBfY2xpZW50X2lkCiAgICAgIGFuZCByZWdleHBfcmVwbGFjZShjb2FsZXNjZShjLnRlbCwnJycnKSwnJ1xcRCcnLCcnJycsJydnJycpPXJlZ2V4cF9yZXBsYWNlKHZfcGhvbmUsJydcXEQnJywnJycnLCcnZycnKQogICAgICBhbmQgbGVuZ3RoKHJlZ2V4cF9yZXBsYWNlKHZfcGhvbmUsJydcXEQnJywnJycnLCcnZycnKSk+PTgKICApIHRoZW4KICAgIHJhaXNlIGV4Y2VwdGlvbiAnJ2NsaWVudF9waG9uZV9leGlzdHMnJzsKICBlbmQgaWY7CgogIHVwZGF0ZSBwdWJsaWMuY2xpZW50cwogIHNldCBub209dHJpbShwX25hbWUpLAogICAgICB0ZWw9dl9waG9uZSwKICAgICAgZW1haWw9bnVsbGlmKHRyaW0oY29hbGVzY2UocF9lbWFpbCwnJycnKSksJycnJyksCiAgICAgIHZpbGxlPW51bGxpZih0cmltKGNvYWxlc2NlKHBfY2l0eSwnJycnKSksJycnJyksCiAgICAgIGFkcmVzc2U9bnVsbGlmKHRyaW0oY29hbGVzY2UocF9hZGRyZXNzLCcnJycpKSwnJycnKSwKICAgICAgY29udGFjdD1udWxsaWYodHJpbShjb2FsZXNjZShwX2NvbnRhY3QsJycnJykpLCcnJycpLAogICAgICB1cGRhdGVkX2F0PW5vdygpCiAgd2hlcmUgYm91dGlxdWVfaWQ9cF9ib3V0aXF1ZV9pZCBhbmQgaWQ9cF9jbGllbnRfaWQKICByZXR1cm5pbmcgKiBpbnRvIHZfY2xpZW50OwoKICBpZiBub3QgZm91bmQgdGhlbiByYWlzZSBleGNlcHRpb24gJydjbGllbnQgbm90IGZvdW5kJyc7IGVuZCBpZjsKCiAgcmV0dXJuIGpzb25iX2J1aWxkX29iamVjdCgKICAgICcnY2xpZW50X2lkJycsdl9jbGllbnQuaWQsCiAgICAnJ25hbWUnJyx2X2NsaWVudC5ub20sCiAgICAnJ3Bob25lJycsdl9jbGllbnQudGVsLAogICAgJydlbWFpbCcnLHZfY2xpZW50LmVtYWlsLAogICAgJydjaXR5Jycsdl9jbGllbnQudmlsbGUsCiAgICAnJ2FkZHJlc3MnJyx2X2NsaWVudC5hZHJlc3NlLAogICAgJydjb250YWN0Jycsdl9jbGllbnQuY29udGFjdAogICk7CmVuZDsKJGZ1bmN0aW9uJAonOwplbmQgJGlubmVyJDs=','base64'),'UTF8');
-end
-$restore$;
+  if v_uid is null then raise exception 'Connexion requise'; end if;
+  if p_user_id is null then raise exception 'Utilisateur requis'; end if;
+
+  select coalesce(u.is_super_admin,false) and not coalesce(u.is_suspended,false)
+    into v_is_super
+  from public.platform_users u where u.id = v_uid;
+
+  select exists(
+    select 1 from public.boutique_assignments a
+    where a.user_id = p_user_id and a.role = 'owner'
+  ) into v_target_is_owner;
+
+  if v_is_super then
+    v_authorized := true;
+  elsif not v_target_is_owner then
+    select exists(
+      select 1
+      from public.boutique_assignments target_a
+      join public.boutique_assignments caller_a
+        on caller_a.boutique_id = target_a.boutique_id
+       and caller_a.user_id = v_uid
+       and caller_a.role = 'owner'
+      where target_a.user_id = p_user_id
+    ) into v_authorized;
+  end if;
+
+  if not v_authorized then raise exception 'Accès refusé'; end if;
+  delete from private.user_pins where user_id = p_user_id;
+end;
+$function$
+;
+
+CREATE OR REPLACE FUNCTION public.save_inventory_count(p_session_id uuid, p_product_id bigint, p_counted_qty numeric, p_counting_detail jsonb DEFAULT '{}'::jsonb)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'pg_catalog', 'public', 'private'
+AS $function$
+declare v_boutique text; v_status text;
+begin
+  select boutique_id,status into v_boutique,v_status from public.inventory_sessions where id=p_session_id for update;
+  if not found then raise exception 'inventory session not found'; end if;
+  if not private.auth_has_permission(v_boutique,'inventaire') then raise exception 'forbidden'; end if;
+  if v_status<>'draft' then raise exception 'inventory session is closed'; end if;
+  if p_counted_qty is null or p_counted_qty<0 then raise exception 'invalid counted quantity'; end if;
+
+  update public.inventory_lines
+  set counted_qty=p_counted_qty,
+      counting_detail=coalesce(p_counting_detail,'{}'::jsonb),
+      updated_at=now()
+  where session_id=p_session_id and product_id=p_product_id;
+  if not found then raise exception 'inventory product not found'; end if;
+  update public.inventory_sessions set updated_at=now() where id=p_session_id;
+  return public.get_inventory_session(p_session_id);
+end;
+$function$
+;
+
+CREATE OR REPLACE FUNCTION public.set_quick_pin(p_pin text)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception 'Connexion requise';
+  end if;
+  if p_pin is null or p_pin !~ '^\d{6}$' then
+    raise exception 'Le PIN doit contenir exactement 6 chiffres';
+  end if;
+  if not exists (
+    select 1 from public.platform_users u
+    where u.id = v_uid
+      and coalesce(u.is_suspended,false) = false
+      and coalesce(u.must_change_password,false) = false
+  ) then
+    raise exception 'Compte non prêt pour la configuration du PIN';
+  end if;
+
+  insert into private.user_pins(user_id,pin_hash,failed_attempts,locked_until,updated_at)
+  values (v_uid, extensions.crypt(p_pin, extensions.gen_salt('bf', 12)), 0, null, now())
+  on conflict (user_id) do update
+  set pin_hash = excluded.pin_hash,
+      failed_attempts = 0,
+      locked_until = null,
+      updated_at = now();
+end;
+$function$
+;
+
+CREATE OR REPLACE FUNCTION public.snapshot_invoice_identity()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SET search_path TO 'public'
+AS $function$
+declare
+  c public.clients%rowtype;
+  b public.boutiques%rowtype;
+  op_name text;
+begin
+  if new.client_id is not null then
+    select * into c
+    from public.clients
+    where boutique_id = new.boutique_id and id = new.client_id;
+
+    if found then
+      new.client_nom := coalesce(c.nom, new.client_nom);
+      new.client_tel := coalesce(c.tel, new.client_tel);
+      new.client_email_snapshot := c.email;
+      new.client_adresse_snapshot := c.adresse;
+      new.client_ville_snapshot := c.ville;
+      new.client_type_snapshot := c.type;
+    end if;
+  end if;
+
+  select * into b from public.boutiques where id = new.boutique_id;
+  if found then
+    new.boutique_nom_snapshot := b.nom;
+    new.boutique_ville_snapshot := b.ville;
+    new.boutique_adresse_snapshot := b.adresse;
+    new.boutique_tel_snapshot := b.tel;
+    new.boutique_email_snapshot := b.email;
+    -- Deliberately do not duplicate the base64 logo in every invoice.
+    -- The PDF renderer already uses public.boutiques.logo_url.
+    new.boutique_logo_snapshot := null;
+  end if;
+
+  if new.operator_id is not null then
+    select nom into op_name from public.platform_users where id = new.operator_id;
+    new.operator_nom_snapshot := op_name;
+  end if;
+
+  return new;
+end;
+$function$
+;
+
+CREATE OR REPLACE FUNCTION public.start_inventory_session(p_boutique_id text, p_scope_type text, p_scope_id text DEFAULT NULL::text, p_as_of_at timestamp with time zone DEFAULT now())
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'pg_catalog', 'public', 'private'
+AS $function$
+declare v_id uuid:=gen_random_uuid(); v_label text; v_count integer; v_asof timestamptz:=least(coalesce(p_as_of_at,now()),now()); begin
+ if not private.auth_has_permission(p_boutique_id,'inventaire') then raise exception 'forbidden'; end if; if p_scope_type not in ('all','category','product') then raise exception 'invalid inventory scope'; end if;
+ if p_scope_type='all' then v_label:='Tous les produits'; elsif p_scope_type='category' then select nom into v_label from public.categories where boutique_id=p_boutique_id and id=p_scope_id; if not found then raise exception 'category not found'; end if; else select nom into v_label from public.products where boutique_id=p_boutique_id and id=p_scope_id::bigint; if not found then raise exception 'product not found'; end if; end if;
+ insert into public.inventory_sessions(id,boutique_id,scope_type,scope_id,scope_label,operator_id,as_of_at) values(v_id,p_boutique_id,p_scope_type,p_scope_id,v_label,auth.uid(),v_asof);
+ insert into public.inventory_lines(session_id,product_id,product_name,category_name,unit,theoretical_qty,purchase_price,sale_price,pieces_per_lot,length_per_piece,fifo_theoretical_cost,fifo_unit_cost)
+ select v_id,p.id,p.nom,c.nom,p.unit,coalesce((select sum(se.qty) from public.stock_entries se where se.boutique_id=p_boutique_id and se.product_id=p.id and se.entry_date<=v_asof),0),coalesce(p.prix_achat,0),coalesce(p.prix_vente,0),coalesce(p.pieces_per_lot,c.pieces_per_lot,0),coalesce(p.length_per_piece,c.length_per_piece,0),private.fifo_stock_value(p_boutique_id,p.id,v_asof,null),case when coalesce((select sum(se.qty) from public.stock_entries se where se.boutique_id=p_boutique_id and se.product_id=p.id and se.entry_date<=v_asof),0)>0 then private.fifo_stock_value(p_boutique_id,p.id,v_asof,null)/coalesce((select sum(se.qty) from public.stock_entries se where se.boutique_id=p_boutique_id and se.product_id=p.id and se.entry_date<=v_asof),0) else 0 end
+ from public.products p left join public.categories c on c.boutique_id=p.boutique_id and c.id=p.category_id where p.boutique_id=p_boutique_id and (coalesce(p.actif,true) or coalesce(p.stock,0)<>0) and case p_scope_type when 'all' then true when 'category' then p.category_id=p_scope_id when 'product' then p.id=p_scope_id::bigint else false end order by c.nom nulls last,p.nom;
+ get diagnostics v_count=row_count; if v_count=0 then raise exception 'no product in inventory scope'; end if; return public.get_inventory_session(v_id); end $function$
+;
+
+CREATE OR REPLACE FUNCTION public.sync_push_subscription_context(p_endpoint text)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+declare
+  v_uid uuid:=auth.uid();
+  v_sid uuid:=nullif(auth.jwt() ->> 'session_id','')::uuid;
+  v_boutique text;
+begin
+  if v_uid is null or v_sid is null then raise exception 'Connexion requise'; end if;
+  select c.boutique_id into v_boutique
+  from private.notification_session_context c
+  where c.session_id=v_sid and c.user_id=v_uid;
+  if v_boutique is null or not private.auth_has_boutique_access(v_boutique) then raise exception 'Boutique active requise'; end if;
+  update public.push_subscriptions
+  set boutique_id=v_boutique,enabled=true,last_seen_at=now()
+  where endpoint=p_endpoint and user_id=v_uid;
+end;
+$function$
+;
+
+CREATE OR REPLACE FUNCTION public.update_client_profile(p_boutique_id text, p_client_id bigint, p_name text, p_phone text DEFAULT NULL::text, p_email text DEFAULT NULL::text, p_city text DEFAULT NULL::text, p_address text DEFAULT NULL::text, p_contact text DEFAULT NULL::text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'pg_catalog', 'public', 'private'
+AS $function$
+declare
+  v_client public.clients%rowtype;
+  v_phone text := nullif(trim(coalesce(p_phone,'')), '');
+begin
+  if auth.uid() is null or not private.auth_has_permission(p_boutique_id,'clients') then
+    raise exception 'forbidden';
+  end if;
+  if nullif(trim(coalesce(p_name,'')), '') is null then
+    raise exception 'client name required';
+  end if;
+
+  if v_phone is not null and exists (
+    select 1 from public.clients c
+    where c.boutique_id=p_boutique_id
+      and c.id<>p_client_id
+      and regexp_replace(coalesce(c.tel,''),'\D','','g')=regexp_replace(v_phone,'\D','','g')
+      and length(regexp_replace(v_phone,'\D','','g'))>=8
+  ) then
+    raise exception 'client_phone_exists';
+  end if;
+
+  update public.clients
+  set nom=trim(p_name),
+      tel=v_phone,
+      email=nullif(trim(coalesce(p_email,'')),''),
+      ville=nullif(trim(coalesce(p_city,'')),''),
+      adresse=nullif(trim(coalesce(p_address,'')),''),
+      contact=nullif(trim(coalesce(p_contact,'')),''),
+      updated_at=now()
+  where boutique_id=p_boutique_id and id=p_client_id
+  returning * into v_client;
+
+  if not found then raise exception 'client not found'; end if;
+
+  return jsonb_build_object(
+    'client_id',v_client.id,
+    'name',v_client.nom,
+    'phone',v_client.tel,
+    'email',v_client.email,
+    'city',v_client.ville,
+    'address',v_client.adresse,
+    'contact',v_client.contact
+  );
+end;
+$function$
+;
