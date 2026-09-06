@@ -1,0 +1,124 @@
+name: Fix stock bootstrap merge once
+
+on:
+  push:
+    branches: [fix/stock-integrity-p0]
+    paths:
+      - .github/workflows/fix-stock-bootstrap-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/stock-integrity-p0
+      - name: Preserve current stock while merging deferred history
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('src/app/App.tsx')
+          text = path.read_text()
+          old = '''function mergeOlderBootstrapHistory(current: Boutique, older: Boutique): Boutique {
+            const byIdPreferCurrent = <T extends { id: string | number }>(currentRows: T[] = [], olderRows: T[] = []) => {
+              const merged = new Map<string, T>();
+              for (const row of olderRows) merged.set(String(row.id), row);
+              for (const row of currentRows) merged.set(String(row.id), row);
+              return [...merged.values()];
+            };
+            return {
+              ...current,
+              invoices: byIdPreferCurrent(current.invoices, older.invoices).sort((a,b)=>String(b.dateRaw ?? '').localeCompare(String(a.dateRaw ?? ''))),
+              entries: byIdPreferCurrent(current.entries, older.entries).sort((a:any,b:any)=>String(b.recordedAt ?? b.date ?? '').localeCompare(String(a.recordedAt ?? a.date ?? ''))),
+            };
+          }'''
+          new = '''function mergeOlderBootstrapHistory(current: Boutique, older: Boutique): Boutique {
+            const byIdPreferCurrent = <T extends { id: string | number }>(currentRows: T[] = [], olderRows: T[] = []) => {
+              const merged = new Map<string, T>();
+              for (const row of olderRows) merged.set(String(row.id), row);
+              for (const row of currentRows) merged.set(String(row.id), row);
+              return [...merged.values()];
+            };
+            // The bounded snapshot already contains one synthetic bootstrap row
+            // per product so that bootstrap + recent movements equals the live
+            // products.stock value. Deferred 30-day history adds older explicit
+            // movements. Reusing the bounded bootstrap unchanged would count that
+            // older window twice (for example MEULFEU: 803 - 252 = 551). Rebuild
+            // only the synthetic reconciliation rows so adding history can never
+            // change the quantity that was authoritative before the merge.
+            const mergeStockEntriesPreservingCurrentQty = (currentRows: StockEntry[] = [], olderRows: StockEntry[] = []) => {
+              const actualById = new Map<string, StockEntry>();
+              for (const row of olderRows) if (row.movementType !== "bootstrap") actualById.set(String(row.id), row);
+              for (const row of currentRows) if (row.movementType !== "bootstrap") actualById.set(String(row.id), row);
+              const actualRows = [...actualById.values()];
+
+              const currentTotalByProduct = new Map<number, number>();
+              for (const row of currentRows) currentTotalByProduct.set(row.productId, (currentTotalByProduct.get(row.productId) ?? 0) + row.qty);
+              const actualTotalByProduct = new Map<number, number>();
+              for (const row of actualRows) actualTotalByProduct.set(row.productId, (actualTotalByProduct.get(row.productId) ?? 0) + row.qty);
+              const bootstrapByProduct = new Map<number, StockEntry>();
+              for (const row of currentRows) if (row.movementType === "bootstrap") bootstrapByProduct.set(row.productId, row);
+
+              const reconciliations: StockEntry[] = [];
+              for (const [productId, currentTotal] of currentTotalByProduct) {
+                const qty = currentTotal - (actualTotalByProduct.get(productId) ?? 0);
+                if (Math.abs(qty) <= 0.000001) continue;
+                const template = bootstrapByProduct.get(productId);
+                reconciliations.push(template ? { ...template, qty } : {
+                  id: -(9_000_000_000_000 + productId), productId, qty,
+                  unit: "unité", montantDu: 0, date: "", fournisseur: "", movementType: "bootstrap",
+                });
+              }
+              return [...reconciliations, ...actualRows];
+            };
+            return {
+              ...current,
+              invoices: byIdPreferCurrent(current.invoices, older.invoices).sort((a,b)=>String(b.dateRaw ?? '').localeCompare(String(a.dateRaw ?? ''))),
+              entries: mergeStockEntriesPreservingCurrentQty(current.entries, older.entries).sort((a:any,b:any)=>String(b.recordedAt ?? b.date ?? '').localeCompare(String(a.recordedAt ?? a.date ?? ''))),
+            };
+          }'''
+          if text.count(old) != 1:
+              raise SystemExit(f'expected merge function once, found {text.count(old)}')
+          path.write_text(text.replace(old, new))
+
+          test = Path('scripts/test-stock-bootstrap-merge.mjs')
+          test.write_text(r'''import fs from "node:fs";
+import assert from "node:assert/strict";
+
+const app = fs.readFileSync("src/app/App.tsx", "utf8");
+assert.ok(app.includes("mergeStockEntriesPreservingCurrentQty"), "deferred stock history must reconcile bootstrap rows");
+assert.ok(app.includes("currentTotal - (actualTotalByProduct.get(productId) ?? 0)"), "stock merge must preserve the authoritative current quantity");
+assert.ok(!app.includes("entries: byIdPreferCurrent(current.entries, older.entries)"), "stock entries must not use the generic history merge");
+
+// Regression fixture from production: bounded snapshot = 803, deferred older
+// history has net -252. The old merge returned 551 by counting -252 twice.
+const current = [
+  { id: -1, productId: 1, qty: 516, movementType: "bootstrap" },
+  { id: 10, productId: 1, qty: 287, movementType: "ajustement" },
+];
+const older = [{ id: 5, productId: 1, qty: -252, movementType: "ajustement" }];
+const actualById = new Map();
+for (const row of older) if (row.movementType !== "bootstrap") actualById.set(String(row.id), row);
+for (const row of current) if (row.movementType !== "bootstrap") actualById.set(String(row.id), row);
+const actual = [...actualById.values()];
+const authoritative = current.reduce((sum, row) => sum + row.qty, 0);
+const actualTotal = actual.reduce((sum, row) => sum + row.qty, 0);
+const reconciledBootstrap = authoritative - actualTotal;
+assert.equal(authoritative, 803);
+assert.equal(516 + 287 - 252, 551, "fixture must reproduce the previous bug");
+assert.equal(reconciledBootstrap + actualTotal, 803, "deferred history must not change current stock");
+console.log("Stock bootstrap merge regression OK");
+''')
+          PY
+          node scripts/test-stock-bootstrap-merge.mjs
+          git diff --check
+      - name: Commit repaired stock merge
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/app/App.tsx scripts/test-stock-bootstrap-merge.mjs
+          git commit -m "Fix deferred stock history double counting"
+          git push origin HEAD:fix/stock-integrity-p0
