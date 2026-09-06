@@ -112,9 +112,9 @@ if (!boundedSql.includes('revoke all on function private.auth_can_read_boutique(
 for (const rpc of ['read_bounded_stock_entries','read_bounded_invoices','read_bounded_invoice_payments']) {
   if (!api.includes(\`dataRpc<any[]>("\${rpc}"\`)) throw new Error(\`bootstrap does not use \${rpc}\`);
 }
-if (api.includes('stock_entries_app?select=*${scoped()}${stockWindow}')) throw new Error('bootstrap regressed to barrier stock view');
-if (api.includes('invoices_app?select=*${scoped()}${invoiceWindow}')) throw new Error('bootstrap regressed to barrier invoice view');
-if (api.includes('invoice_payments?select=${INVOICE_PAYMENT_SELECT}')) throw new Error('bootstrap regressed to direct payment RLS path');
+if (api.includes('stock_entries_app?select=*') && api.includes('stockWindow')) throw new Error('bootstrap regressed to barrier stock view');
+if (api.includes('invoices_app?select=*') && api.includes('invoiceWindow')) throw new Error('bootstrap regressed to barrier invoice view');
+if (api.includes('INVOICE_PAYMENT_SELECT')) throw new Error('bootstrap regressed to direct payment RLS path');
 if (!api.includes('p_include_pending: !options.historyOnly')) throw new Error('initial invoice bootstrap must retain older pending invoices');
 if (!api.includes('p_to: options.historyOnly ? null : historyTo ?? null')) throw new Error('deferred old invoices must retain newer payments needed for current balance');
 
