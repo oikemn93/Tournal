@@ -92,6 +92,9 @@ jobs:
       - name: Supplier ledger consistency
         run: node scripts/test-supplier-ledger-contract.mjs
 
+      - name: Stock integrity contract
+        run: node scripts/test-stock-integrity-contract.mjs
+
       - name: Numeric keypads
         run: node scripts/test-numeric-keypads.mjs
 
@@ -123,7 +126,7 @@ jobs:
           test ! -e .github/scripts/apply-invoice-summary-patch.mjs
           test ! -e .github/scripts/apply-invoice-summary-patch-v2.mjs
           test ! -e .github/workflows/refund-method-patcher.yml
-          test ! -e .github/workflows/security-hardening-patcher.yml
+          test ! -e .github/workflows/security_hardening-patcher.yml
           test ! -e .github/workflows/realtime-coverage-patcher.yml
           test ! -e .github/workflows/refine-client-invoice-actions.yml
           test ! -e .github/workflows/apply-margin-dashboard-isolation.yml
