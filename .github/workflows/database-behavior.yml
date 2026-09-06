@@ -37,6 +37,7 @@ jobs:
           psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f .ci-historical-migrations/20260904184600_make_inventory_reads_session_independent.sql
           psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f .github/audit/replay-migrations/20260906181500_stock_integrity_guardrails.sql
           psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f .github/audit/replay-migrations/20260906191745_inventory_race_same_transaction_guard.sql
+          psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f .github/audit/replay-migrations/20260906192500_dashboard_fifo_stock_value.sql
 
       - name: Run behavioral database matrix
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f scripts/test-db-behavior.sql
@@ -46,6 +47,12 @@ jobs:
 
       - name: Run inventory race matrix
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f scripts/test-inventory-race-db.sql
+
+      - name: Run commercial transfer stock matrix
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f scripts/test-commercial-transfer-stock-db.sql
+
+      - name: Run dashboard FIFO matrix
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f scripts/test-dashboard-fifo-db.sql
 
       - name: Verify deterministic return lock migration
         run: |
