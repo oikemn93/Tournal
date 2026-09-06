@@ -162,7 +162,7 @@ export function StockView({ boutique, onUpdate, logAction, canSeeMargin, initial
       const receiptCharge = persisted.charge_id ? {
         id:persisted.charge_id, label:`Réception stock · ${supplier.nom}`, montant:Number(dMontant) || 0,
         date:today(), dateRaw:new Date().toISOString(), categorie:"Achat stock" as const, recurrence:"unique" as const,
-        fournisseur:supplier.nom, supplierId:supplier.id, status:"pending" as const, paidAmount:0,
+        fournisseur:supplier.nom, supplierId:supplier.id, status:(Number(dMontant)>0?"pending":"paid") as const, paidAmount:0,
         source:"supplier_receipt" as const, stockEntryId:persisted.entry_id, dueDate:persisted.due_date ?? undefined,
       } : null;
       onUpdate({ entries: [...entries, newEntry], ...(receiptCharge ? { charges:[...charges, receiptCharge] } : {}) });
@@ -210,7 +210,7 @@ export function StockView({ boutique, onUpdate, logAction, canSeeMargin, initial
       const receiptCharge = movement?.charge_id && supplier ? {
         id:movement.charge_id, label:`Réception stock · ${supplier.nom}`, montant:Number(nMontant) || 0,
         date:today(), dateRaw:new Date().toISOString(), categorie:"Achat stock" as const, recurrence:"unique" as const,
-        fournisseur:supplier.nom, supplierId:supplier.id, status:"pending" as const, paidAmount:0,
+        fournisseur:supplier.nom, supplierId:supplier.id, status:(Number(nMontant)>0?"pending":"paid") as const, paidAmount:0,
         source:"supplier_receipt" as const, stockEntryId:movement.entry_id, dueDate:movement.due_date ?? undefined,
       } : null;
       onUpdate({

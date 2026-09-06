@@ -61,25 +61,15 @@ function matchesSupplier(record: { supplierId?: number; fournisseur?: string }, 
   return record.supplierId === supplier.id || (record.supplierId == null && record.fournisseur === supplier.nom);
 }
 
-export function supplierBalance(supplier: Pick<Supplier, "id"|"nom"> | string, entries: StockEntry[], charges?: Charge[]) {
+export function supplierBalance(supplier: Pick<Supplier, "id"|"nom"> | string, _entries: StockEntry[], charges?: Charge[]) {
   const linkedCharges = (charges ?? []).filter(c => matchesSupplier(c, supplier));
-  // Supplier debt is ledger-driven. A stock entry only carries inventory cost;
-  // it does not by itself mean money is owed. This is essential for the
-  // special self-supplier, whose receipts intentionally create stock without a
-  // supplier payable. Historical entries without a payable also remain debt-free.
-  const regularPurchases = linkedCharges
+  // A supplier balance is the sum of outstanding payable documents. Payments
+  // mutate paidAmount on those documents; subtracting supplier_payment rows a
+  // second time can hide a still-open receipt. Inter-boutique transfer debts
+  // use their dedicated transfer payment flow and are deliberately excluded.
+  return Math.max(0, linkedCharges
     .filter(c => c.source === "supplier_receipt")
-    .reduce((s, c) => s + Number(c.montant), 0);
-  const transferPurchases = linkedCharges
-    .filter(c => c.source === "transfer")
-    .reduce((s, c) => s + Number(c.montant), 0);
-  const regularPayments = linkedCharges
-    .filter(c => c.source === "supplier_payment")
-    .reduce((s, c) => s + Number(c.montant), 0);
-  const transferPayments = linkedCharges
-    .filter(c => c.source === "transfer")
-    .reduce((s, c) => s + Number(c.paidAmount ?? 0), 0);
-  return Math.max(0, regularPurchases + transferPurchases - regularPayments - transferPayments);
+    .reduce((sum, c) => sum + Math.max(0, Number(c.montant) - Number(c.paidAmount ?? 0)), 0));
 }
 // ─── MARGIN (FIFO cost of stock entries) ────────────────────────────────────
 // Unit cost for selling `qty` base units of a product, walking stock receipts
