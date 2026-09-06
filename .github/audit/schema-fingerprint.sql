@@ -132,3 +132,7 @@ begin
   end if;
 end
 $audit$;
+
+\echo schema_fingerprint_matches_production
+-- The business smoke is deliberately included only after the fingerprint gate.
+\ir ../../scripts/test-business-smoke.sql
