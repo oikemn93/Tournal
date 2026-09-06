@@ -194,3 +194,4 @@
 20260906165307|backfill_legacy_supplier_receipts
 20260906191105|stock_integrity_guardrails
 20260906191745|inventory_race_same_transaction_guard
+20260906192435|dashboard_fifo_stock_value
