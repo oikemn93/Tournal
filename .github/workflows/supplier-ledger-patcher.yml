@@ -1,0 +1,412 @@
+name: Supplier ledger patcher
+
+on:
+  push:
+    branches: [fix/supplier-ledger-consistency]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/supplier-ledger-consistency
+      - name: Apply deterministic supplier ledger patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count == 0 and new in text:
+                  return
+              if count != 1:
+                  raise SystemExit(f"{path}: expected exactly one anchor, found {count}")
+              p.write_text(text.replace(old, new, 1))
+
+          # One ledger: supplier receipts minus their own paid_amount.
+          replace_once(
+              'src/app/utils/inventory.ts',
+              '''export function supplierBalance(supplier: Pick<Supplier, "id"|"nom"> | string, entries: StockEntry[], charges?: Charge[]) {
+  const linkedCharges = (charges ?? []).filter(c => matchesSupplier(c, supplier));
+  // Supplier debt is ledger-driven. A stock entry only carries inventory cost;
+  // it does not by itself mean money is owed. This is essential for the
+  // special self-supplier, whose receipts intentionally create stock without a
+  // supplier payable. Historical entries without a payable also remain debt-free.
+  const regularPurchases = linkedCharges
+    .filter(c => c.source === "supplier_receipt")
+    .reduce((s, c) => s + Number(c.montant), 0);
+  const transferPurchases = linkedCharges
+    .filter(c => c.source === "transfer")
+    .reduce((s, c) => s + Number(c.montant), 0);
+  const regularPayments = linkedCharges
+    .filter(c => c.source === "supplier_payment")
+    .reduce((s, c) => s + Number(c.montant), 0);
+  const transferPayments = linkedCharges
+    .filter(c => c.source === "transfer")
+    .reduce((s, c) => s + Number(c.paidAmount ?? 0), 0);
+  return Math.max(0, regularPurchases + transferPurchases - regularPayments - transferPayments);
+}''',
+              '''export function supplierBalance(supplier: Pick<Supplier, "id"|"nom"> | string, _entries: StockEntry[], charges?: Charge[]) {
+  const linkedCharges = (charges ?? []).filter(c => matchesSupplier(c, supplier));
+  // A supplier balance is the sum of outstanding payable documents. Payments
+  // mutate paidAmount on those documents; subtracting supplier_payment rows a
+  // second time can hide a still-open receipt. Inter-boutique transfer debts
+  // use their dedicated transfer payment flow and are deliberately excluded.
+  return Math.max(0, linkedCharges
+    .filter(c => c.source === "supplier_receipt")
+    .reduce((sum, c) => sum + Math.max(0, Number(c.montant) - Number(c.paidAmount ?? 0)), 0));
+}'''
+          )
+
+          # Let the caller preserve the same key after an ambiguous network response.
+          replace_once(
+              'src/lib/api.ts',
+              '''export async function recordSupplierPayment(params:{ boutiqueId:string; supplierId:number; amount:number; paymentMethod:string; note?:string; paymentDate:string }) {
+  return dataRequest<{charge_id:number; supplier_id:number; applied_amount:number; remaining_due:number; paid_at:string; payment_method:string; operator_name?:string; allocations:Array<{charge_id:number;amount:number}>}>("rpc/record_supplier_payment", { method:"POST", headers:{ Prefer:"return=representation" }, body:JSON.stringify({ p_boutique_id:params.boutiqueId,p_supplier_id:params.supplierId,p_idempotency_key:crypto.randomUUID(),p_montant:params.amount,p_payment_method:params.paymentMethod,p_note:params.note ?? null,p_payment_date:params.paymentDate }) });
+}''',
+              '''export async function recordSupplierPayment(params:{ boutiqueId:string; supplierId:number; amount:number; paymentMethod:string; note?:string; paymentDate:string; idempotencyKey?:string }) {
+  return dataRequest<{charge_id:number; supplier_id:number; applied_amount:number; remaining_due:number; paid_at:string; payment_method:string; operator_name?:string; allocations:Array<{charge_id:number;amount:number}>}>("rpc/record_supplier_payment", { method:"POST", headers:{ Prefer:"return=representation" }, body:JSON.stringify({ p_boutique_id:params.boutiqueId,p_supplier_id:params.supplierId,p_idempotency_key:params.idempotencyKey ?? crypto.randomUUID(),p_montant:params.amount,p_payment_method:params.paymentMethod,p_note:params.note ?? null,p_payment_date:params.paymentDate }) });
+}'''
+          )
+
+          replace_once(
+              'src/app/screens/FournisseursView.tsx',
+              '''  const [paymentAmount,setPaymentAmount] = useState(""); const [paymentMethod,setPaymentMethod] = useState<PaymentMethod>("Espèces"); const [paymentNote,setPaymentNote] = useState(""); const [paymentDate,setPaymentDate] = useState(isoToday()); const [paying,setPaying] = useState(false); const [paymentDone,setPaymentDone] = useState(false);''',
+              '''  const [paymentAmount,setPaymentAmount] = useState(""); const [paymentMethod,setPaymentMethod] = useState<PaymentMethod>("Espèces"); const [paymentNote,setPaymentNote] = useState(""); const [paymentDate,setPaymentDate] = useState(isoToday()); const [paying,setPaying] = useState(false); const [paymentDone,setPaymentDone] = useState(false); const [paymentIdempotencyKey,setPaymentIdempotencyKey] = useState<string|null>(null);'''
+          )
+          replace_once(
+              'src/app/screens/FournisseursView.tsx',
+              '''    setPaying(true);
+    try {
+      const result = await recordSupplierPayment({ boutiqueId:boutique.id, supplierId:supplier.id, amount:Math.min(requested,due), paymentMethod, note:paymentNote.trim() || undefined, paymentDate });''',
+              '''    const requestKey = paymentIdempotencyKey ?? crypto.randomUUID();
+    if (!paymentIdempotencyKey) setPaymentIdempotencyKey(requestKey);
+    setPaying(true);
+    try {
+      const result = await recordSupplierPayment({ boutiqueId:boutique.id, supplierId:supplier.id, amount:Math.min(requested,due), paymentMethod, note:paymentNote.trim() || undefined, paymentDate, idempotencyKey:requestKey });'''
+          )
+          replace_once(
+              'src/app/screens/FournisseursView.tsx',
+              '''      window.setTimeout(()=>{ setPaymentSupplier(null); setPaymentAmount(""); setPaymentNote(""); setPaymentDone(false); }, 900);''',
+              '''      window.setTimeout(()=>{ setPaymentSupplier(null); setPaymentAmount(""); setPaymentNote(""); setPaymentDone(false); setPaymentIdempotencyKey(null); }, 900);'''
+          )
+          replace_once(
+              'src/app/screens/FournisseursView.tsx',
+              '''type PeriodFilter = "all" | "30" | "365" | "custom";''',
+              '''type PeriodFilter = "all" | "30" | "custom";'''
+          )
+          replace_once(
+              'src/app/screens/FournisseursView.tsx',
+              '''    const totalPurchased = receipts.filter(entry=>new Date(entry.recordedAt ?? entry.date).getTime() >= Date.now()-365*86_400_000).reduce((sum,entry)=>sum+entry.montantDu,0);''',
+              '''    const totalPurchased = receipts.reduce((sum,entry)=>sum+entry.montantDu,0);'''
+          )
+          replace_once(
+              'src/app/screens/FournisseursView.tsx',
+              '''<Metric label="SOLDE DÛ" value={fmt(balance)} color={balance>0?"#dc2626":SEM.success.accent}/><Metric label="ACHATS · 12 MOIS" value={fmt(totalPurchased)} color={supplier.color}/><Metric label="RÉCEPTIONS" value={String(receipts.length)}/><Metric label="RÉGLÉES / PART." value={`${paidReceipts} / ${receipts.length}`} color={SEM.success.accent}/><Metric label="MOYENNE / LIVRAISON" value={fmt(averageReceipt)} color={supplier.color}/>''',
+              '''<Metric label="SOLDE DÛ" value={fmt(balance)} color={balance>0?"#dc2626":SEM.success.accent}/><Metric label="ACHATS · 30 JOURS" value={fmt(totalPurchased)} color={supplier.color}/><Metric label="RÉCEPTIONS · 30 J" value={String(receipts.length)}/><Metric label="RÉGLÉES / PART." value={`${paidReceipts} / ${receipts.length}`} color={SEM.success.accent}/><Metric label="MOYENNE · 30 J" value={fmt(averageReceipt)} color={supplier.color}/>'''
+          )
+          replace_once(
+              'src/app/screens/FournisseursView.tsx',
+              '''<p className="text-xs font-black tracking-wider text-muted-foreground">HISTORIQUE UNIFIÉ</p><span className="text-[10px] text-muted-foreground">Plus récent d’abord</span>''',
+              '''<p className="text-xs font-black tracking-wider text-muted-foreground">HISTORIQUE RÉCENT</p><span className="text-[10px] text-muted-foreground">30 derniers jours chargés</span>'''
+          )
+          replace_once(
+              'src/app/screens/FournisseursView.tsx',
+              '''{(["all","30","365","custom"] as PeriodFilter[]).map(period=>''',
+              '''{(["all","30","custom"] as PeriodFilter[]).map(period=>'''
+          )
+          replace_once(
+              'src/app/screens/FournisseursView.tsx',
+              '''{period==="all"?"Tout":period==="30"?"30 j":period==="365"?"12 mois":"Dates"}''',
+              '''{period==="all"?"Tout":period==="30"?"30 j":"Dates"}'''
+          )
+          replace_once(
+              'src/app/screens/FournisseursView.tsx',
+              '''onClick={()=>{setPaymentSupplier(supplier);setPaymentAmount(String(balance));setPaymentNote("");setPaymentDate(isoToday());}}''',
+              '''onClick={()=>{setPaymentSupplier(supplier);setPaymentAmount(String(balance));setPaymentNote("");setPaymentDate(isoToday());setPaymentIdempotencyKey(crypto.randomUUID());}}'''
+          )
+          replace_once(
+              'src/app/screens/FournisseursView.tsx',
+              '''{paymentSupplier&&<Modal title="Versement fournisseur" color={SEM.success.accent} onClose={()=>!paying&&setPaymentSupplier(null)}>''',
+              '''{paymentSupplier&&<Modal title="Versement fournisseur" color={SEM.success.accent} onClose={()=>{if(!paying){setPaymentSupplier(null);setPaymentIdempotencyKey(null);}}}>'''
+          )
+          replace_once(
+              'src/app/screens/FournisseursView.tsx',
+              '''Les droits « Fournisseurs » et « Charges » sont nécessaires pour enregistrer un versement.''',
+              '''Le droit « Décaissement » et l’accès « Charges » sont nécessaires pour enregistrer un versement.'''
+          )
+
+          # Keep local optimistic state consistent with the database for free/zero-value receipts.
+          replace_once(
+              'src/app/screens/StockView.tsx',
+              '''fournisseur:supplier.nom, supplierId:supplier.id, status:"pending" as const, paidAmount:0,
+        source:"supplier_receipt" as const, stockEntryId:persisted.entry_id, dueDate:persisted.due_date ?? undefined,''',
+              '''fournisseur:supplier.nom, supplierId:supplier.id, status:(Number(dMontant)>0?"pending":"paid") as const, paidAmount:0,
+        source:"supplier_receipt" as const, stockEntryId:persisted.entry_id, dueDate:persisted.due_date ?? undefined,'''
+          )
+          replace_once(
+              'src/app/screens/StockView.tsx',
+              '''fournisseur:supplier.nom, supplierId:supplier.id, status:"pending" as const, paidAmount:0,
+        source:"supplier_receipt" as const, stockEntryId:movement.entry_id, dueDate:movement.due_date ?? undefined,''',
+              '''fournisseur:supplier.nom, supplierId:supplier.id, status:(Number(nMontant)>0?"pending":"paid") as const, paidAmount:0,
+        source:"supplier_receipt" as const, stockEntryId:movement.entry_id, dueDate:movement.due_date ?? undefined,'''
+          )
+
+          migration = r'''create or replace function public.get_supplier_current_balances(p_boutique_id text)
+returns table(supplier_id bigint, balance numeric)
+language sql
+stable
+security definer
+set search_path to 'pg_catalog', 'public', 'private'
+as $function$
+  select s.id,
+         coalesce((
+           select sum(greatest(c.montant - c.paid_amount, 0::numeric))
+           from public.charges c
+           where c.boutique_id = p_boutique_id
+             and c.supplier_id = s.id
+             and c.source = 'supplier_receipt'
+         ), 0)::numeric as balance
+  from public.suppliers s
+  where s.boutique_id = p_boutique_id
+    and (
+      (select private.auth_is_super_admin())
+      or ((select private.auth_is_active_user()) and exists (
+        select 1 from public.boutique_assignments ba
+        where ba.boutique_id = p_boutique_id
+          and ba.user_id = (select auth.uid())
+      ))
+    );
+$function$;
+
+create or replace function public.record_supplier_payment(p_boutique_id text,p_supplier_id bigint,p_idempotency_key uuid,p_montant numeric,p_payment_method text,p_note text,p_payment_date date)
+returns jsonb language plpgsql security definer set search_path to 'pg_catalog', 'public', 'private'
+as $function$
+declare
+  v_user uuid := auth.uid(); v_existing jsonb; v_supplier public.suppliers%rowtype; v_receipt public.charges%rowtype;
+  v_due numeric := 0; v_applied numeric := 0; v_remaining numeric := 0; v_from_receipt numeric; v_charge_id bigint;
+  v_paid_at timestamptz; v_operator_name text; v_allocations jsonb := '[]'::jsonb; v_response jsonb;
+begin
+  if v_user is null or not private.auth_has_permission(p_boutique_id, 'fournisseurs') or not private.auth_has_permission(p_boutique_id, 'charges') then raise exception 'forbidden'; end if;
+  if p_montant is null or p_montant <= 0 then raise exception 'invalid payment'; end if;
+  if p_payment_method is null or p_payment_method not in ('Espèces', 'Wave', 'Orange Money', 'Autre') then raise exception 'invalid payment method'; end if;
+  select response into v_existing from private.idempotency_keys where user_id = v_user and operation = 'supplier_payment' and key = p_idempotency_key;
+  if v_existing is not null then return v_existing; end if;
+  select * into v_supplier from public.suppliers where boutique_id = p_boutique_id and id = p_supplier_id for update;
+  if not found then raise exception 'supplier not found'; end if;
+  select coalesce(sum(greatest(c.montant - c.paid_amount, 0::numeric)), 0) into v_due
+  from public.charges c where c.boutique_id = p_boutique_id and c.supplier_id = p_supplier_id and c.source = 'supplier_receipt';
+  if v_due <= 0 then raise exception 'supplier is already settled'; end if;
+  v_applied := least(p_montant, v_due);
+  v_paid_at := ((coalesce(p_payment_date, current_date) + (now() at time zone 'Africa/Dakar')::time) at time zone 'Africa/Dakar');
+  select nom into v_operator_name from public.platform_users where id = v_user; v_operator_name := coalesce(v_operator_name, 'Utilisateur');
+  v_remaining := v_applied;
+  for v_receipt in select * from public.charges where boutique_id = p_boutique_id and supplier_id = p_supplier_id and source = 'supplier_receipt' and paid_amount < montant order by charge_date asc, id asc for update loop
+    exit when v_remaining <= 0;
+    v_from_receipt := least(v_remaining, v_receipt.montant - v_receipt.paid_amount);
+    update public.charges set paid_amount = paid_amount + v_from_receipt,status = case when paid_amount + v_from_receipt >= montant then 'paid' else 'partial' end,updated_at = now() where boutique_id = p_boutique_id and id = v_receipt.id;
+    v_allocations := v_allocations || jsonb_build_array(jsonb_build_object('charge_id', v_receipt.id,'amount', v_from_receipt));
+    v_remaining := v_remaining - v_from_receipt;
+  end loop;
+  if v_remaining > 0 then raise exception 'supplier ledger inconsistent'; end if;
+  v_charge_id := nextval('private.charge_id_seq');
+  insert into public.charges (id,boutique_id,label,montant,categorie,charge_date,operator_id,note,fournisseur,supplier_id,payment_method,status,paid_amount,source)
+  values (v_charge_id,p_boutique_id,'Versement fournisseur · ' || v_supplier.nom,v_applied,'Achat stock',v_paid_at,v_user,nullif(trim(p_note), ''),v_supplier.nom,p_supplier_id,p_payment_method,'paid',v_applied,'supplier_payment');
+  v_response := jsonb_build_object('charge_id',v_charge_id,'supplier_id',p_supplier_id,'applied_amount',v_applied,'remaining_due',v_due-v_applied,'paid_at',v_paid_at,'payment_method',p_payment_method,'operator_name',v_operator_name,'allocations',v_allocations);
+  insert into private.idempotency_keys (user_id,operation,key,response) values (v_user,'supplier_payment',p_idempotency_key,v_response);
+  return v_response;
+end;
+$function$;
+
+create or replace function public.create_charge(p_boutique_id text,p_idempotency_key uuid,p_label text,p_montant numeric,p_categorie text,p_note text default null::text)
+returns jsonb language plpgsql security definer set search_path to 'pg_catalog', 'public', 'private'
+as $function$
+begin
+  return public.create_charge(p_boutique_id,p_idempotency_key,p_label,p_montant,p_categorie,p_note,null::text);
+end;
+$function$;
+
+create or replace function public.record_stock_movement(p_boutique_id text,p_product_id bigint,p_idempotency_key uuid,p_qty numeric,p_type text,p_prix_unit numeric,p_note text,p_supplier_id bigint,p_reference text)
+returns jsonb language plpgsql security definer set search_path to 'pg_catalog', 'public', 'private'
+as $function$
+declare
+  v_user uuid := auth.uid(); v_existing jsonb; v_product public.products%rowtype; v_supplier public.suppliers%rowtype;
+  v_entry_id bigint; v_charge_id bigint; v_due_date date; v_terms_days integer; v_response jsonb; v_is_self_supplier boolean := false; v_receipt_amount numeric;
+begin
+  if v_user is null or not (case when p_type='inventaire' then private.auth_has_permission(p_boutique_id,'inventaire') else private.auth_has_permission(p_boutique_id,'stock') end) then raise exception 'forbidden'; end if;
+  if p_qty = 0 or p_type not in ('achat','ajustement','retour','inventaire') then raise exception 'invalid movement'; end if;
+  if coalesce(p_prix_unit,0) < 0 then raise exception 'invalid unit price'; end if;
+  select response into v_existing from private.idempotency_keys where user_id=v_user and operation='stock_movement' and key=p_idempotency_key;
+  if v_existing is not null then return v_existing; end if;
+  if p_type='achat' and p_qty>0 and p_supplier_id is null then raise exception 'supplier required'; end if;
+  if p_supplier_id is not null then
+    if p_type not in ('achat','ajustement') then raise exception 'supplier is only valid for supplier receipts or corrections'; end if;
+    select * into v_supplier from public.suppliers where boutique_id=p_boutique_id and id=p_supplier_id;
+    if not found then raise exception 'supplier not found'; end if;
+    v_is_self_supplier := v_supplier.linked_boutique_id=p_boutique_id;
+  end if;
+  select * into v_product from public.products where boutique_id=p_boutique_id and id=p_product_id for update;
+  if not found or v_product.stock+p_qty<0 then raise exception 'invalid stock'; end if;
+  update public.products set stock=stock+p_qty,updated_at=now() where boutique_id=p_boutique_id and id=p_product_id;
+  v_entry_id:=nextval('private.stock_entry_id_seq');
+  insert into public.stock_entries(id,boutique_id,product_id,type,qty,prix_unit,entry_date,operator_id,note,supplier_id,reference)
+  values(v_entry_id,p_boutique_id,p_product_id,p_type,p_qty,coalesce(p_prix_unit,0),now(),v_user,coalesce(nullif(trim(p_note),''),v_supplier.nom),p_supplier_id,nullif(trim(p_reference),''));
+  if p_supplier_id is not null and p_type='achat' and p_qty>0 and not v_is_self_supplier then
+    select coalesce(settings.supplier_payment_terms_days,30) into v_terms_days from public.auth_settings settings where settings.boutique_id=p_boutique_id;
+    v_terms_days:=coalesce(v_supplier.payment_terms_days,v_terms_days,30); v_due_date:=(now() at time zone 'Africa/Dakar')::date+v_terms_days;
+    v_charge_id:=nextval('private.charge_id_seq'); v_receipt_amount:=p_qty*coalesce(p_prix_unit,0);
+    insert into public.charges(id,boutique_id,label,montant,categorie,charge_date,operator_id,note,fournisseur,supplier_id,status,paid_amount,source,stock_entry_id,due_date)
+    values(v_charge_id,p_boutique_id,'Réception stock · '||v_supplier.nom,v_receipt_amount,'Achat stock',now(),v_user,nullif(trim(p_note),''),v_supplier.nom,p_supplier_id,case when v_receipt_amount=0 then 'paid' else 'pending' end,0,'supplier_receipt',v_entry_id,v_due_date);
+  end if;
+  if p_supplier_id is not null and p_type='achat' and p_qty>0 then update public.suppliers set last_delivery_at=now(),updated_at=now() where boutique_id=p_boutique_id and id=p_supplier_id; end if;
+  v_response:=jsonb_build_object('entry_id',v_entry_id,'product_id',p_product_id,'stock',v_product.stock+p_qty,'supplier_id',p_supplier_id,'charge_id',v_charge_id,'due_date',v_due_date);
+  insert into private.idempotency_keys(user_id,operation,key,response) values(v_user,'stock_movement',p_idempotency_key,v_response); return v_response;
+end;
+$function$;
+
+create or replace function public.correct_supplier_receipt(p_boutique_id text,p_stock_entry_id bigint,p_idempotency_key uuid,p_new_qty numeric,p_new_amount numeric)
+returns jsonb language plpgsql security definer set search_path to 'pg_catalog', 'public', 'private'
+as $function$
+declare
+  v_user uuid:=auth.uid(); v_existing jsonb; v_entry public.stock_entries%rowtype; v_product public.products%rowtype; v_receipt_charge public.charges%rowtype;
+  v_has_receipt_charge boolean:=false; v_delta_qty numeric; v_unit_price numeric; v_status text; v_response jsonb;
+begin
+  if v_user is null or not private.auth_has_permission(p_boutique_id,'stock') then raise exception 'forbidden'; end if;
+  if p_new_qty is null or p_new_qty<=0 then raise exception 'invalid receipt quantity'; end if;
+  if p_new_amount is null or p_new_amount<0 then raise exception 'invalid receipt amount'; end if;
+  select response into v_existing from private.idempotency_keys where user_id=v_user and operation='correct_supplier_receipt' and key=p_idempotency_key; if v_existing is not null then return v_existing; end if;
+  select * into v_entry from public.stock_entries where boutique_id=p_boutique_id and id=p_stock_entry_id for update;
+  if not found or v_entry.type<>'achat' or v_entry.qty<=0 then raise exception 'only original supplier receipts can be corrected'; end if;
+  select * into v_product from public.products where boutique_id=p_boutique_id and id=v_entry.product_id for update; if not found then raise exception 'product not found'; end if;
+  select * into v_receipt_charge from public.charges where boutique_id=p_boutique_id and stock_entry_id=v_entry.id and source='supplier_receipt' for update; v_has_receipt_charge:=found;
+  if v_has_receipt_charge and p_new_amount<v_receipt_charge.paid_amount then raise exception 'new receipt amount cannot be lower than the amount already paid'; end if;
+  v_delta_qty:=p_new_qty-v_entry.qty; if v_product.stock+v_delta_qty<0 then raise exception 'receipt correction would make stock negative'; end if; v_unit_price:=p_new_amount/p_new_qty;
+  update public.products set stock=stock+v_delta_qty,updated_at=now() where boutique_id=p_boutique_id and id=v_product.id;
+  update public.stock_entries set qty=p_new_qty,prix_unit=v_unit_price where boutique_id=p_boutique_id and id=v_entry.id;
+  if v_has_receipt_charge then
+    v_status:=case when p_new_amount=0 then 'paid' when v_receipt_charge.paid_amount>=p_new_amount then 'paid' when v_receipt_charge.paid_amount>0 then 'partial' else 'pending' end;
+    update public.charges set montant=p_new_amount,status=v_status,updated_at=now() where boutique_id=p_boutique_id and id=v_receipt_charge.id;
+  end if;
+  v_response:=jsonb_build_object('entry_id',v_entry.id,'product_id',v_entry.product_id,'qty',p_new_qty,'amount',p_new_amount,'unit_price',v_unit_price,'stock',v_product.stock+v_delta_qty,'charge_id',case when v_has_receipt_charge then v_receipt_charge.id else null end,'paid_amount',case when v_has_receipt_charge then v_receipt_charge.paid_amount else 0 end,'remaining_due',case when v_has_receipt_charge then p_new_amount-v_receipt_charge.paid_amount else null end,'charge_status',case when v_has_receipt_charge then v_status else null end);
+  insert into private.idempotency_keys(user_id,operation,key,response) values(v_user,'correct_supplier_receipt',p_idempotency_key,v_response); return v_response;
+end;
+$function$;
+
+create or replace function public.get_dashboard_summary(p_boutique_id text,p_from timestamptz default null,p_to timestamptz default null)
+returns jsonb language plpgsql stable security definer set search_path to 'pg_catalog', 'public', 'private'
+as $function$
+declare
+  v_from timestamptz:=coalesce(p_from,date_trunc('day',now())-interval '6 days'); v_to timestamptz:=coalesce(p_to,now()+interval '1 second');
+  v_can_margin boolean; v_sales numeric:=0; v_collected numeric:=0; v_outstanding numeric:=0; v_charges numeric:=0; v_sales_count bigint:=0; v_clients_count bigint:=0; v_low_stock bigint:=0; v_margin numeric:=null; v_stock_value numeric:=null; v_series jsonb:='[]'::jsonb;
+begin
+  if not private.auth_has_read_permission(p_boutique_id,'dashboard') then raise exception 'forbidden'; end if; if v_to<=v_from then raise exception 'invalid dashboard period'; end if; v_can_margin:=private.auth_has_read_permission(p_boutique_id,'marges');
+  select coalesce(sum(case when lower(trim(coalesce(i.type,'')))='retour' then -i.montant else i.montant end),0),count(*) filter(where lower(trim(coalesce(i.type,'')))<>'retour'),count(distinct i.client_id) filter(where i.client_id is not null) into v_sales,v_sales_count,v_clients_count from public.invoices i where i.boutique_id=p_boutique_id and i.invoice_date>=v_from and i.invoice_date<v_to and coalesce(i.status,'')<>'annulée';
+  select coalesce(sum(ip.amount),0) into v_collected from public.invoice_payments ip where ip.boutique_id=p_boutique_id and ip.paid_at>=v_from and ip.paid_at<v_to;
+  select coalesce(sum(greatest(i.montant-coalesce(p.paid,0),0)),0) into v_outstanding from public.invoices i left join (select invoice_id,sum(amount) paid from public.invoice_payments where boutique_id=p_boutique_id group by invoice_id)p on p.invoice_id=i.id where i.boutique_id=p_boutique_id and coalesce(i.status,'')<>'annulée' and lower(trim(coalesce(i.type,'')))<>'retour';
+  select coalesce(sum(c.montant),0) into v_charges from public.charges c where c.boutique_id=p_boutique_id and c.charge_date>=v_from and c.charge_date<v_to and c.source not in ('supplier_receipt','transfer');
+  select v_charges+coalesce(sum(tcp.amount),0) into v_charges from public.transfer_charge_payments tcp where tcp.boutique_id=p_boutique_id and tcp.paid_at>=v_from and tcp.paid_at<v_to;
+  select count(*) into v_low_stock from public.products p where p.boutique_id=p_boutique_id and coalesce(p.actif,true) and p.stock<=coalesce(p.low_stock_threshold,0);
+  select coalesce(jsonb_agg(jsonb_build_object('date',d.bucket_day::date,'sales',d.net_sales) order by d.bucket_day),'[]'::jsonb) into v_series from (select date_trunc('day',i.invoice_date) bucket_day,coalesce(sum(case when lower(trim(coalesce(i.type,'')))='retour' then -i.montant else i.montant end),0) net_sales from public.invoices i where i.boutique_id=p_boutique_id and i.invoice_date>=v_from and i.invoice_date<v_to and coalesce(i.status,'')<>'annulée' group by 1)d;
+  if v_can_margin then
+    select coalesce(sum(case when lower(trim(coalesce(i.type,'')))='retour' then -1 else 1 end*((coalesce(l.sell_qty,l.qty)*l.prix_unit)-(l.qty*coalesce(l.prix_achat,0)))),0) into v_margin from public.invoices i join public.invoice_lines l on l.boutique_id=i.boutique_id and l.invoice_id=i.id where i.boutique_id=p_boutique_id and i.invoice_date>=v_from and i.invoice_date<v_to and coalesce(i.status,'')<>'annulée';
+    select coalesce(sum(greatest(p.stock,0)*coalesce(p.prix_achat,0)),0) into v_stock_value from public.products p where p.boutique_id=p_boutique_id and coalesce(p.actif,true);
+  end if;
+  return jsonb_build_object('from',v_from,'to',v_to,'sales',v_sales,'collected',v_collected,'outstanding',v_outstanding,'charges',v_charges,'sales_count',v_sales_count,'clients_count',v_clients_count,'low_stock_count',v_low_stock,'margin',v_margin,'stock_value',v_stock_value,'series',v_series);
+end;
+$function$;
+
+update public.charges set status=case when montant=0 or paid_amount>=montant then 'paid' when paid_amount>0 then 'partial' else 'pending' end,updated_at=now()
+where source='supplier_receipt' and status is distinct from case when montant=0 or paid_amount>=montant then 'paid' when paid_amount>0 then 'partial' else 'pending' end;
+lock table public.charges in access exclusive mode;
+alter table public.charges disable trigger charges_require_disbursement;
+update public.charges set paid_amount=montant,updated_at=now() where source='manual' and status='paid' and paid_amount=0 and montant>0;
+alter table public.charges enable trigger charges_require_disbursement;
+'''
+          Path('.github/audit/replay-migrations/20260906161544_supplier_ledger_single_source_of_truth.sql').write_text(migration)
+
+          manifest = Path('.github/audit/remote-migration-manifest.txt')
+          m = manifest.read_text().rstrip('\n')
+          line = '20260906161544|supplier_ledger_single_source_of_truth'
+          if line not in m.splitlines():
+              manifest.write_text(m + '\n' + line + '\n')
+
+          replace_once(
+              '.github/audit/schema-fingerprint.sql',
+              "('functions',    204, '652ce537c1ef284e99134a3e5b686955'),",
+              "('functions',    204, '8577813b33245234d0956f8db969f65f'),"
+          )
+          fp = Path('.github/audit/schema-fingerprint.sql')
+          text = fp.read_text()
+          hook = '\\ir ../../scripts/test-supplier-ledger-db.sql'
+          if hook not in text:
+              text = text.replace('\\ir ../../scripts/test-business-smoke.sql', '\\ir ../../scripts/test-business-smoke.sql\n' + hook)
+              fp.write_text(text)
+
+          Path('scripts/test-supplier-ledger-db.sql').write_text(r'''\set ON_ERROR_STOP on
+
+do $supplier_contract$
+declare
+  f text;
+begin
+  select pg_get_functiondef('public.record_supplier_payment(text,bigint,uuid,numeric,text,text,date)'::regprocedure) into f;
+  if position('public.stock_entries' in f) > 0 then raise exception 'supplier payment must not derive debt from stock entries'; end if;
+  if position('source = ''supplier_receipt''' in f) = 0 then raise exception 'supplier payment must allocate supplier receipts'; end if;
+
+  select pg_get_functiondef('public.get_supplier_current_balances(text)'::regprocedure) into f;
+  if position('supplier_receipt' in f) = 0 or position('stock_entries' in f) > 0 then raise exception 'supplier balance must be payable-ledger based'; end if;
+
+  select pg_get_functiondef('public.correct_supplier_receipt(text,bigint,uuid,numeric,numeric)'::regprocedure) into f;
+  if position('receipt correction would make stock negative' in f) = 0 then raise exception 'receipt correction stock floor missing'; end if;
+
+  select pg_get_functiondef('public.get_dashboard_summary(text,timestamp with time zone,timestamp with time zone)'::regprocedure) into f;
+  if position('supplier_receipt' in f) = 0 or position('transfer_charge_payments' in f) = 0 then raise exception 'dashboard cash charge source contract missing'; end if;
+end
+$supplier_contract$;
+
+select 'supplier_ledger_db_contract_ok' as result;
+''')
+
+          Path('scripts/test-supplier-ledger-contract.mjs').write_text(r'''import fs from 'node:fs';
+const inventory = fs.readFileSync('src/app/utils/inventory.ts','utf8');
+const api = fs.readFileSync('src/lib/api.ts','utf8');
+const suppliers = fs.readFileSync('src/app/screens/FournisseursView.tsx','utf8');
+const stock = fs.readFileSync('src/app/screens/StockView.tsx','utf8');
+const migration = fs.readFileSync('.github/audit/replay-migrations/20260906161544_supplier_ledger_single_source_of_truth.sql','utf8');
+function need(ok,msg){ if(!ok) throw new Error(msg); }
+const balanceFn = inventory.slice(inventory.indexOf('export function supplierBalance'), inventory.indexOf('// ─── MARGIN'));
+need(balanceFn.includes('c.source === "supplier_receipt"'),'supplierBalance must use supplier receipts');
+need(balanceFn.includes('Number(c.montant) - Number(c.paidAmount ?? 0)'),'supplierBalance must use receipt outstanding');
+need(!balanceFn.includes('c.source === "transfer"'),'supplierBalance must not mix transfer debt');
+need(api.includes('params.idempotencyKey ?? crypto.randomUUID()'),'supplier payment must accept a stable retry key');
+need(suppliers.includes('idempotencyKey:requestKey'),'supplier screen must reuse payment retry key');
+need(suppliers.includes('ACHATS · 30 JOURS'),'supplier metrics must state the loaded time window');
+need(!suppliers.includes('"365" as PeriodFilter'),'supplier screen must not claim unloaded 12-month history');
+need(stock.includes('Number(dMontant)>0?"pending":"paid"'),'zero-value receipt optimistic state must be paid');
+need(migration.includes("and c.source = 'supplier_receipt'"),'server supplier balance/payment must use payable ledger');
+need(!migration.includes('v_stock_due'),'legacy stock-derived supplier debt must be gone');
+need(migration.includes("c.source not in ('supplier_receipt','transfer')"),'dashboard must exclude payable documents from cash charges');
+need(migration.includes('transfer_charge_payments'),'dashboard must date transfer cash from payment ledger');
+need(migration.includes('receipt correction would make stock negative'),'receipt correction must guard stock floor');
+console.log('supplier ledger contract ok');
+''')
+          PY
+
+          git diff --check
+          node scripts/test-supplier-ledger-contract.mjs
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src scripts .github/audit
+          if git diff --cached --quiet; then
+            echo 'No patch changes to commit.'
+            exit 0
+          fi
+          git commit -m 'fix: unify supplier ledger amounts'
+          git push origin HEAD:fix/supplier-ledger-consistency
