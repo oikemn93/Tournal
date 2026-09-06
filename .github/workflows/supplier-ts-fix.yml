@@ -65,12 +65,16 @@ jobs:
 
           test = Path('scripts/test-supplier-ledger-contract.mjs')
           ts = test.read_text()
+          old_status = "need(stock.includes('Number(dMontant)>0?\"pending\":\"paid\"'),'zero-value receipt optimistic state must be paid');"
+          new_status = "need(stock.includes('status:Number(dMontant)>0 ? \"pending\" as const : \"paid\" as const') && stock.includes('status:Number(nMontant)>0 ? \"pending\" as const : \"paid\" as const'),'zero-value receipt optimistic state must be paid');"
+          if old_status in ts:
+              ts = ts.replace(old_status, new_status)
           marker = "need(suppliers.includes('ACHATS · 30 JOURS'),'supplier metrics must state the loaded time window');"
           assertion = "need(suppliers.includes('À régulariser'),'receipt without payable must never be displayed as paid');"
           if assertion not in ts:
               if marker not in ts: raise SystemExit('supplier contract anchor not found')
               ts = ts.replace(marker, marker + '\n' + assertion)
-              test.write_text(ts)
+          test.write_text(ts)
           PY
       - name: Verify targeted contract and TypeScript
         run: |
