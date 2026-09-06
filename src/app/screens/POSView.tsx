@@ -150,7 +150,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
   }
 
   function getSalesCount(p: Product) {
-    return invoices.filter(inv => inv.lines?.some(l => l.productId === p.id)).length;
+    return boutique.productSaleCounts?.[p.id] ?? invoices.filter(inv => inv.lines?.some(l => l.productId === p.id)).length;
   }
 
   const filtered = products
@@ -178,7 +178,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
   function openExpress(e: React.MouseEvent, p: Product) {
     e.stopPropagation();
     const defaultUnit = getDefaultSaleUnit(p, boutique);
-    const lastPrice = getLastSalePrice(p.id, invoices, defaultUnit);
+    const lastPrice = getLastSalePrice(p.id, invoices, defaultUnit, boutique.salePriceHints);
     setExpressModal(p);
     setExpSellUnit(defaultUnit);
     setExpQty("");
@@ -313,7 +313,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
 
   function openAdd(p: Product) {
     const defaultUnit = getDefaultSaleUnit(p, boutique);
-    const lastPrice = getLastSalePrice(p.id, invoices, defaultUnit);
+    const lastPrice = getLastSalePrice(p.id, invoices, defaultUnit, boutique.salePriceHints);
     setAddModal(p);
     setAddSellUnit(defaultUnit);
     setAddQty("");

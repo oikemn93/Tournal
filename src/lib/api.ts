@@ -231,6 +231,16 @@ async function dataRpc<T>(name: string, params: Record<string, unknown>): Promis
   });
 }
 
+export async function loadInvoiceLines(boutiqueId: string, invoiceId: string) {
+  if (!boutiqueId || !invoiceId) return [];
+  const rows = await dataRpc<any[]>("read_invoice_lines", { p_boutique_id:boutiqueId, p_invoice_ids:[invoiceId] });
+  return rows.map((line: any) => ({
+    id:Number(line.id), sourceInvoiceLineId:line.source_invoice_line_id != null ? Number(line.source_invoice_line_id) : undefined,
+    productId:Number(line.product_id), nom:line.nom, qty:Number(line.qty), unit:line.unit ?? "unité", prixUnit:Number(line.prix_unit),
+    prixAchat:line.prix_achat != null ? Number(line.prix_achat) : undefined, sellUnit:line.sell_unit ?? undefined, sellQty:line.sell_qty != null ? Number(line.sell_qty) : undefined,
+  }));
+}
+
 async function adminProvision<T>(action: string, payload: Record<string, unknown>): Promise<T> {
   const session = await refreshSessionIfNeeded();
   const response = await fetch(`${SUPABASE_URL}/functions/v1/admin-provision`, {
@@ -782,7 +792,7 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string, options: Bouti
     const secondaryHistoryFromFilter = encodeURIComponent(secondaryHistoryFrom);
     const chargeWindow = `&or=(charge_date.gte.${secondaryHistoryFromFilter},status.neq.paid)`;
     const caisseWindow = `&or=(opened_at.gte.${secondaryHistoryFromFilter},closed_at.is.null)`;
-    const [boutiques, categories, products, entries, clients, suppliers, invoices, payments, advances, creditRefunds, charges, sessions, auditLogs, userScope] = await Promise.all([
+    const [boutiques, categories, products, entries, clients, suppliers, invoices, payments, saleMetrics, advances, creditRefunds, charges, sessions, auditLogs, userScope] = await Promise.all([
       dataRequest<any[]>(`boutiques?select=*${boutiqueFilter}&order=nom.asc`),
       (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`categories?select=*${scoped()}`)), (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`products_app?select=*${scoped()}`)),
       dataRpc<any[]>("read_bounded_stock_entries", {
@@ -791,7 +801,7 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string, options: Bouti
         p_to: historyTo ?? null,
       }), dataRequest<any[]>(`clients?select=*${scoped()}`),
       (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`suppliers?select=*${scoped()}`)),
-      dataRpc<any[]>("read_bounded_invoices", {
+      dataRpc<any[]>("read_bounded_invoice_summaries", {
         p_boutique_id: boutiqueId,
         p_from: historyFrom,
         p_to: historyTo ?? null,
@@ -803,7 +813,9 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string, options: Bouti
         // Deferred old invoices still need payments posted after the 7-day
         // cutoff so their current balance cannot be hydrated stale.
         p_to: options.historyOnly ? null : historyTo ?? null,
-      }), (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`client_advances?select=*${scoped()}&order=paid_at.desc,id.desc`)),
+      }),
+      (options.historyOnly ? Promise.resolve({ prices:[], counts:[] }) : dataRpc<any>("read_recent_sale_metrics", { p_boutique_id:boutiqueId, p_from:secondaryHistoryFrom })),
+      (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`client_advances?select=*${scoped()}&order=paid_at.desc,id.desc`)),
       (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`client_credit_refunds?select=*${scoped()}&refunded_at=gte.${secondaryHistoryFromFilter}&order=refunded_at.desc,id.desc`)), (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`charges?select=*${scoped()}${chargeWindow}`)),
       (options.historyOnly ? Promise.resolve([]) : dataRequest<any[]>(`caisse_sessions?select=*${scoped()}${caisseWindow}`)),
       // The administration view presents recent activity. Loading the entire
@@ -855,6 +867,8 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string, options: Bouti
         longueurParPiece: Number(p.length_per_piece ?? 0),
         unitVente: p.unit,
       })),
+      salePriceHints: (saleMetrics?.prices ?? []).map((hint: any) => ({ productId:Number(hint.product_id), sellUnit:hint.sale_unit ?? "", prixUnit:Number(hint.prix_unit), invoiceDate:hint.invoice_date })),
+      productSaleCounts: Object.fromEntries((saleMetrics?.counts ?? []).map((row: any) => [Number(row.product_id), Number(row.invoice_count)])),
       entries: [
         ...products.filter(p => p.boutique_id === b.id).map(p => ({
           id:-(9_000_000_000_000 + Number(p.id)), productId:Number(p.id),
@@ -938,6 +952,7 @@ export async function loadBoutiqueSnapshot<T>(boutiqueId: string, options: Bouti
             batchId:p.batch_id,
             source:p.source,
           })),
+          lineCount:Number(i.line_count ?? (i.invoice_lines ?? []).length),
           lines:(i.invoice_lines ?? []).map((l: any)=>({ id:Number(l.id), sourceInvoiceLineId:l.source_invoice_line_id != null ? Number(l.source_invoice_line_id) : undefined, productId:l.product_id, nom:l.nom, qty:Number(l.qty), unit:l.unit ?? "unité", prixUnit:Number(l.prix_unit), prixAchat:l.prix_achat!=null?Number(l.prix_achat):undefined, sellUnit:l.sell_unit ?? undefined, sellQty:l.sell_qty ? Number(l.sell_qty) : undefined })),
         };
       }),

@@ -1,4 +1,4 @@
-import type { Boutique, Invoice, Product } from "../types";
+import type { Boutique, Invoice, Product, SalePriceHint } from "../types";
 
 function normalizedUnit(value?: string): string {
   const raw = (value ?? "").trim().toLowerCase();
@@ -71,18 +71,17 @@ export function getSaleUnitLabel(product: Product, boutique: Boutique, sellUnit:
   return sellUnit;
 }
 
-export function getLastSalePrice(productId: number, invoices: Invoice[], sellUnit: string): number | null {
+export function getLastSalePrice(productId: number, invoices: Invoice[], sellUnit: string, hints: SalePriceHint[] = []): number | null {
   const targetUnit = normalizedUnit(sellUnit);
-  const sorted = [...invoices]
-    .filter(inv => inv.type.toLowerCase() !== "retour")
-    .sort((a, b) => (b.dateRaw ?? b.date).localeCompare(a.dateRaw ?? a.date));
-
+  let best: { price:number; at:string } | null = null;
+  const sorted = [...invoices].filter(inv => inv.type.toLowerCase() !== "retour").sort((a,b)=>(b.dateRaw ?? b.date).localeCompare(a.dateRaw ?? a.date));
   for (const invoice of sorted) {
-    const line = invoice.lines?.find(item => {
-      if (item.productId !== productId || Number(item.prixUnit) <= 0) return false;
-      return normalizedUnit(item.sellUnit ?? item.unit) === targetUnit;
-    });
-    if (line) return Number(line.prixUnit);
+    const line = invoice.lines?.find(item => item.productId===productId && Number(item.prixUnit)>0 && normalizedUnit(item.sellUnit ?? item.unit)===targetUnit);
+    if (line) { best={price:Number(line.prixUnit),at:invoice.dateRaw ?? invoice.date}; break; }
   }
-  return null;
+  for (const hint of hints) {
+    if (hint.productId!==productId || Number(hint.prixUnit)<=0 || normalizedUnit(hint.sellUnit)!==targetUnit) continue;
+    if (!best || hint.invoiceDate > best.at) best={price:Number(hint.prixUnit),at:hint.invoiceDate};
+  }
+  return best?.price ?? null;
 }
