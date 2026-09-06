@@ -571,13 +571,4 @@ where source = 'supplier_receipt'
     else 'pending'
   end;
 
-lock table public.charges in access exclusive mode;
-alter table public.charges disable trigger charges_require_disbursement;
-update public.charges
-set paid_amount = montant,
-    updated_at = now()
-where source = 'manual'
-  and status = 'paid'
-  and paid_amount = 0
-  and montant > 0;
-alter table public.charges enable trigger charges_require_disbursement;
+-- Production-only legacy paid-charge normalization omitted from clean schema replay.
