@@ -1,7 +1,7 @@
 \set ON_ERROR_STOP on
 
 -- Audit-only structural fingerprint. No table data is read.
--- The expected values were computed read-only from production on 2026-09-05
+-- The expected values were computed read-only from production on 2026-09-06
 -- with the exact same canonicalization below.
 -- Column physical ordinal position (attnum) is intentionally excluded: the
 -- synthetic replay baseline cannot preserve historical storage order, while
@@ -18,8 +18,8 @@ create temp table audit_expected_fingerprint(
 insert into audit_expected_fingerprint(category, object_count, md5) values
   ('columns',     639, '1f4fc9b2f7b25f05bddb6a03fff155e2'),
   ('constraints', 255, 'e90f367fcc6dd044a41d7f858b9f9ec9'),
-  ('functions',    191, 'c40861e96011d1085360c1442a50df6b'),
-  ('indexes',      191, 'b244f3133889e6b1007d55817f10bc9e'),
+  ('functions',    198, '437292377c94009217fbf8f0ae88cfac'),
+  ('indexes',      192, 'fced787fcb2de669f9753271be7d5134'),
   ('policies',      88, '2e88704fe8bd522a1b4edaf602697a64'),
   ('relations',     77, 'fe47306893a1d143b92e1e3b9f6aa9a2'),
   ('triggers',      86, '70b805e2d01f8efc8598b96070dc30da'),
