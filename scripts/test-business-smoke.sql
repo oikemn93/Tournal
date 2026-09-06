@@ -4,8 +4,26 @@
 -- Runs only against the isolated local replay database and always rolls back.
 begin;
 
-insert into public.platform_users(id,phone,nom,initials)
-values('55555555-5555-4555-8555-555555555555','+221700000055','Smoke Operator','SM');
+-- platform_users is owned by auth.users through an FK and is normally created
+-- by private.handle_new_user(). Exercise that real bootstrap path locally.
+insert into auth.users(id,aud,role,email,raw_app_meta_data,raw_user_meta_data,created_at,updated_at)
+values(
+  '55555555-5555-4555-8555-555555555555',
+  'authenticated','authenticated','smoke@example.invalid',
+  '{"provider":"email","providers":["email"]}'::jsonb,
+  '{"full_name":"Smoke Operator","phone":"+221700000055"}'::jsonb,
+  now(),now()
+);
+
+-- The very first local auth user is promoted by the bootstrap trigger. The
+-- smoke operator must not stay super-admin so permission checks exercise the
+-- same boutique-assignment path as an ordinary owner.
+update public.platform_users
+set is_super_admin=false,
+    phone='+221700000055',
+    nom='Smoke Operator',
+    initials='SM'
+where id='55555555-5555-4555-8555-555555555555';
 
 insert into public.boutiques(id,nom,ville,owner_id)
 values
