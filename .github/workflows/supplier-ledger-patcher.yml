@@ -15,7 +15,7 @@ jobs:
         with:
           ref: fix/supplier-ledger-consistency
       - name: Apply deterministic supplier ledger patch
-        run: python .github/scripts/apply-supplier-ledger-fix.py
+        run: python .github/scripts/apply-supplier-ledger-fix-v2.py
       - name: Verify supplier ledger contract
         run: node scripts/test-supplier-ledger-contract.mjs
       - name: Commit patch
