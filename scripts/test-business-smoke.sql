@@ -31,6 +31,7 @@ values
   ('smoke-destination','Smoke Destination','Dakar','55555555-5555-4555-8555-555555555555');
 
 insert into public.boutique_assignments(id,boutique_id,user_id,role,droits)
+overriding system value
 values
   (950000000001,'smoke-source','55555555-5555-4555-8555-555555555555','owner',
    '{"dashboard":true,"stock":true,"fournisseurs":true,"clients":true,"factures":true,"remboursement":true,"charges":true,"compta":true,"vente":true,"inventaire":true,"marges":true,"encaissement_vente":true,"annulation_commande":true,"decaissement":true,"transferts":true}'::jsonb),
