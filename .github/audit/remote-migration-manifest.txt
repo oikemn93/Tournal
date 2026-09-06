@@ -180,3 +180,5 @@
 20260905165853|enforce_sale_stock_lifecycle_by_origin
 20260905175824|order_return_product_locks
 20260905175840|optimize_ops_rls_and_foreign_keys
+20260906121208|bounded_rls_read_paths
+20260906121437|bounded_read_json_payloads
