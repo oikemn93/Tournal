@@ -23,32 +23,14 @@ export function lineDispUnit(l: InvoiceLine | CartItem) { return l.sellUnit || l
 export function lineTotal(l: InvoiceLine | CartItem) { return lineDispQty(l) * l.prixUnit; }
 
 /**
- * Returns the live stock represented by the bounded bootstrap snapshot.
- * Deferred history rows are kept for timelines, but rows older than the
- * bootstrap anchor are already included in that synthetic quantity and must
- * not be summed a second time (803 becoming 551 on MEULFEU was the concrete
- * production regression that exposed this).
+ * Stock entries always carry a reconciliation bootstrap whose quantity is
+ * rebuilt by mergeOlderBootstrapHistory so that the sum of all rows remains
+ * equal to the authoritative live products.stock value. Every row must then be
+ * counted exactly once; applying a second time-window filter over-corrects the
+ * reconciliation (the 803 -> 1055 MEULFEU regression).
  */
 export function productQty(pid: number, entries: StockEntry[]) {
-  const rows = entries.filter(e => e.productId === pid);
-  const bootstrapRows = rows.filter(e => e.movementType === "bootstrap");
-  if (!bootstrapRows.length) return rows.reduce((sum, entry) => sum + entry.qty, 0);
-
-  const bootstrap = bootstrapRows.reduce((latest, row) => {
-    const latestAt = Date.parse(latest.recordedAt ?? latest.date ?? "");
-    const rowAt = Date.parse(row.recordedAt ?? row.date ?? "");
-    return (Number.isFinite(rowAt) ? rowAt : 0) >= (Number.isFinite(latestAt) ? latestAt : 0) ? row : latest;
-  });
-  const anchorAt = Date.parse(bootstrap.recordedAt ?? bootstrap.date ?? "");
-  const afterAnchor = rows
-    .filter(entry => entry.movementType !== "bootstrap")
-    .filter(entry => {
-      if (!Number.isFinite(anchorAt)) return true;
-      const entryAt = Date.parse(entry.recordedAt ?? entry.date ?? "");
-      return !Number.isFinite(entryAt) || entryAt >= anchorAt;
-    })
-    .reduce((sum, entry) => sum + entry.qty, 0);
-  return bootstrap.qty + afterAnchor;
+  return entries.filter(entry => entry.productId === pid).reduce((sum, entry) => sum + entry.qty, 0);
 }
 // A customer return restores physical stock at its historical cost, but it is
 // not a new supplier purchase and must never increase the amount owed.
@@ -170,8 +152,8 @@ export function invBadge(s: InvoiceStatus): [string,string] {
     "payé":       [SEM.success.text, SEM.success.bg],
     "acompte":    [SEM.warning.text, SEM.warning.bg],
     "en attente": [SEM.neutral.text, SEM.neutral.bg],
-    "en retard":  [SEM.danger.text,  SEM.danger.bg],
-    "annulée":    [SEM.danger.text,  SEM.danger.bg],
+    "en retard":  [SEM.danger.text, SEM.danger.bg],
+    "annulée":    [SEM.danger.text, SEM.danger.bg],
   } as Record<InvoiceStatus,[string,string]>)[s] ?? [SEM.neutral.text, SEM.neutral.bg];
 }
 
