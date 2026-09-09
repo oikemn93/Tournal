@@ -34,6 +34,10 @@ if (!types.includes('lineCount?: number') || !types.includes('salePriceHints?: S
 if (!factures.includes('async function hydrateInvoice(inv: Invoice)') || !/await\s+loadInvoiceLines\(boutique\.id,\s*inv\.id\)/.test(factures)) throw new Error('Factures hydration cache missing');
 if (!factures.includes('void openInvoicePayment(inv)') || !factures.includes('void openInvoiceShare(inv)')) throw new Error('Factures direct line-dependent actions must hydrate first');
 if (!pos.includes('boutique.productSaleCounts?.[p.id]')) throw new Error('POS bestseller compact metric missing');
+if (!pos.includes('loadInvoiceLines } from "../../lib/api"')) throw new Error('POS pending-order edit must import targeted line hydration');
+if (!/async function handleEditOrder\(inv: Invoice\)/.test(pos) || !/await\s+loadInvoiceLines\(boutique\.id,\s*inv\.id\)/.test(pos)) throw new Error('POS pending-order edit must hydrate summary-only invoices before editing');
+if (pos.includes('if (!inv.lines?.length) return;')) throw new Error('POS pending-order edit still silently ignores summary-only invoices');
+if (!pos.includes('editBusy===inv.id ? "Chargement…"')) throw new Error('POS pending-order edit loading feedback missing');
 if (!sales.includes('hints: SalePriceHint[] = []') || !sales.includes('hint.invoiceDate > best.at')) throw new Error('last-sale price hint fallback missing');
 if (factures.includes('setEncaissInv(inv);setEncaissSplit') || factures.includes('setShareInv(inv);')) throw new Error('counter invoice action bypasses hydration');
 

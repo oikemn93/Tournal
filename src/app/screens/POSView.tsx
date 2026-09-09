@@ -8,7 +8,7 @@ import { silentPrint, buildOrderTicketHtml, buildReceiptHtml, agentPrint, connec
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
-import { createSale, recordMultiPayment, recordPayment, cancelPendingInvoice, updatePendingInvoice } from "../../lib/api";
+import { createSale, recordMultiPayment, recordPayment, cancelPendingInvoice, updatePendingInvoice, loadInvoiceLines } from "../../lib/api";
 import { getDefaultSaleUnit, getLastSalePrice, getSaleUnitOptions, getSaleUnitLabel, toBaseSaleQty } from "../utils/sales";
 import { formatPreciseDateTime } from "../utils/payments";
 
@@ -83,6 +83,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
   const [submittingOrder, setSubmittingOrder] = useState(false);
   const [printJob, setPrintJob] = useState<{status:"printing"|"ok"|"fail"|"fallback";html:string;label:string}|null>(null);
   const [cancelBusy, setCancelBusy] = useState<string|null>(null); // invoiceId en cours d'annulation
+  const [editBusy, setEditBusy] = useState<string|null>(null);
   const [editingInvoice, setEditingInvoice] = useState<Invoice|null>(null);
   const [orderOrigin, setOrderOrigin] = useState<"pos"|"client_profile">("pos");
   const [cancelConfirmation, setCancelConfirmation] = useState<Invoice|null>(null);
@@ -405,26 +406,39 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
     }
   }
 
-  function handleEditOrder(inv: Invoice) {
+  async function handleEditOrder(inv: Invoice) {
     if (!canEditPendingOrder(inv)) {
       alert("Vous pouvez uniquement modifier les commandes que vous avez créées.");
       return;
     }
-    if (!inv.lines?.length) return;
-    const cartItems: CartItem[] = inv.lines.map(l => ({
-      productId: l.productId, nom: l.nom,
-      img: products.find(p => p.id === l.productId)?.img ?? "",
-      unit: l.unit, qty: l.qty, prixUnit: l.prixUnit,
-      sellUnit: l.sellUnit, sellQty: l.sellQty,
-    }));
-    setCart(cartItems);
-    setClientNom(inv.client === "Client comptoir" ? "" : inv.client);
-    setClientTel(inv.clientTel ?? "+221 ");
-    setSelectedClientId(inv.clientId);
-    setEditingInvoice(inv);
-    setOrderOrigin(inv.origin ?? "pos");
-    setPosTab("produits");
-    setCheckoutOpen(true);
+    if (editBusy) return;
+    setEditBusy(inv.id);
+    try {
+      const lines = inv.lines?.length ? inv.lines : await loadInvoiceLines(boutique.id, inv.id);
+      if (!lines.length) {
+        alert("Les lignes de cette commande sont introuvables. Actualisez la boutique puis réessayez.");
+        return;
+      }
+      const hydratedInvoice: Invoice = inv.lines?.length ? inv : { ...inv, lines };
+      const cartItems: CartItem[] = lines.map(l => ({
+        productId: l.productId, nom: l.nom,
+        img: products.find(p => p.id === l.productId)?.img ?? "",
+        unit: l.unit, qty: l.qty, prixUnit: l.prixUnit,
+        sellUnit: l.sellUnit, sellQty: l.sellQty,
+      }));
+      setCart(cartItems);
+      setClientNom(inv.client === "Client comptoir" ? "" : inv.client);
+      setClientTel(inv.clientTel ?? "+221 ");
+      setSelectedClientId(inv.clientId);
+      setEditingInvoice(hydratedInvoice);
+      setOrderOrigin(inv.origin ?? "pos");
+      setPosTab("produits");
+      setCheckoutOpen(true);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Chargement de la commande impossible");
+    } finally {
+      setEditBusy(null);
+    }
   }
 
   function resetCheckout() {
@@ -670,9 +684,9 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
                       Créée depuis Clients — gérez-la depuis la fiche client
                     </div>
                   ) : (canEditPendingOrder(inv) || canCancelOrder(inv)) ? <>
-                    {canEditPendingOrder(inv) && <button onClick={()=>handleEditOrder(inv)} disabled={!!cancelBusy}
-                      className="flex-1 flex items-center justify-center gap-1.5 py-3 font-bold text-sm active:scale-95" style={{ color:POS_COLOR }}>
-                      <Pencil size={14}/> Modifier
+                    {canEditPendingOrder(inv) && <button onClick={()=>void handleEditOrder(inv)} disabled={!!cancelBusy || editBusy===inv.id}
+                      className="flex-1 flex items-center justify-center gap-1.5 py-3 font-bold text-sm active:scale-95 disabled:opacity-50" style={{ color:POS_COLOR }}>
+                      {editBusy===inv.id ? "Chargement…" : <><Pencil size={14}/> Modifier</>}
                     </button>}
                     {canCancelOrder(inv) && <button onClick={()=>askCancelOrder(inv)} disabled={cancelBusy===inv.id}
                       className="flex-1 flex items-center justify-center gap-1.5 py-3 font-bold text-sm active:scale-95" style={{ color:"#ef4444" }}>
