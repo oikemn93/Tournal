@@ -732,7 +732,7 @@ export function POSView({ boutique, allBoutiques, currentUser, canEncaissVente =
                 const dUnit = lineDispUnit(item);
                 const dTotal = lineTotal(item);
                 return (
-                <div key={`${item.productId}-${item.prixUnit}-${lineIndex}`} className="flex items-center gap-3 bg-muted rounded-2xl p-3">
+                <div key={`${item.productId}-${item.sellUnit ?? item.unit}-${lineIndex}`} className="flex items-center gap-3 bg-muted rounded-2xl p-3">
                   <img src={imgSrc(item.img,80,80)} alt={item.nom} className="w-12 h-12 rounded-xl object-cover flex-shrink-0"/>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between">
