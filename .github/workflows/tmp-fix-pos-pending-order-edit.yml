@@ -1,0 +1,65 @@
+name: Temporary POS pending order edit patch
+on:
+  push:
+    branches: [fix/pos-pending-order-edit-lines]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/pos-pending-order-edit-lines
+          fetch-depth: 0
+      - name: Patch lazy hydration for pending order edits
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/app/screens/POSView.tsx')
+          s = p.read_text()
+
+          old = 'import { createSale, recordMultiPayment, recordPayment, cancelPendingInvoice, updatePendingInvoice } from "../../lib/api";'
+          new = 'import { createSale, recordMultiPayment, recordPayment, cancelPendingInvoice, updatePendingInvoice, loadInvoiceLines } from "../../lib/api";'
+          if s.count(old) != 1:
+              raise SystemExit(f'expected API import once, found {s.count(old)}')
+          s = s.replace(old, new)
+
+          old = '  const [cancelBusy, setCancelBusy] = useState<string|null>(null); // invoiceId en cours d\'annulation\n  const [editingInvoice, setEditingInvoice] = useState<Invoice|null>(null);'
+          new = '  const [cancelBusy, setCancelBusy] = useState<string|null>(null); // invoiceId en cours d\'annulation\n  const [editBusy, setEditBusy] = useState<string|null>(null);\n  const [editingInvoice, setEditingInvoice] = useState<Invoice|null>(null);'
+          if s.count(old) != 1:
+              raise SystemExit(f'expected edit state anchor once, found {s.count(old)}')
+          s = s.replace(old, new)
+
+          old = '''  function handleEditOrder(inv: Invoice) {\n    if (!canEditPendingOrder(inv)) {\n      alert("Vous pouvez uniquement modifier les commandes que vous avez créées.");\n      return;\n    }\n    if (!inv.lines?.length) return;\n    const cartItems: CartItem[] = inv.lines.map(l => ({\n      productId: l.productId, nom: l.nom,\n      img: products.find(p => p.id === l.productId)?.img ?? "",\n      unit: l.unit, qty: l.qty, prixUnit: l.prixUnit,\n      sellUnit: l.sellUnit, sellQty: l.sellQty,\n    }));\n    setCart(cartItems);\n    setClientNom(inv.client === "Client comptoir" ? "" : inv.client);\n    setClientTel(inv.clientTel ?? "+221 ");\n    setSelectedClientId(inv.clientId);\n    setEditingInvoice(inv);\n    setOrderOrigin(inv.origin ?? "pos");\n    setPosTab("produits");\n    setCheckoutOpen(true);\n  }'''
+          new = '''  async function handleEditOrder(inv: Invoice) {\n    if (!canEditPendingOrder(inv)) {\n      alert("Vous pouvez uniquement modifier les commandes que vous avez créées.");\n      return;\n    }\n    if (editBusy) return;\n    setEditBusy(inv.id);\n    try {\n      const lines = inv.lines?.length ? inv.lines : await loadInvoiceLines(boutique.id, inv.id);\n      if (!lines.length) {\n        alert("Les lignes de cette commande sont introuvables. Actualisez la boutique puis réessayez.");\n        return;\n      }\n      const hydratedInvoice: Invoice = inv.lines?.length ? inv : { ...inv, lines };\n      const cartItems: CartItem[] = lines.map(l => ({\n        productId: l.productId, nom: l.nom,\n        img: products.find(p => p.id === l.productId)?.img ?? "",\n        unit: l.unit, qty: l.qty, prixUnit: l.prixUnit,\n        sellUnit: l.sellUnit, sellQty: l.sellQty,\n      }));\n      setCart(cartItems);\n      setClientNom(inv.client === "Client comptoir" ? "" : inv.client);\n      setClientTel(inv.clientTel ?? "+221 ");\n      setSelectedClientId(inv.clientId);\n      setEditingInvoice(hydratedInvoice);\n      setOrderOrigin(inv.origin ?? "pos");\n      setPosTab("produits");\n      setCheckoutOpen(true);\n    } catch (error) {\n      alert(error instanceof Error ? error.message : "Chargement de la commande impossible");\n    } finally {\n      setEditBusy(null);\n    }\n  }'''
+          if s.count(old) != 1:
+              raise SystemExit(f'expected edit handler once, found {s.count(old)}')
+          s = s.replace(old, new)
+
+          old = '''{canEditPendingOrder(inv) && <button onClick={()=>handleEditOrder(inv)} disabled={!!cancelBusy}\n                      className="flex-1 flex items-center justify-center gap-1.5 py-3 font-bold text-sm active:scale-95" style={{ color:POS_COLOR }}>\n                      <Pencil size={14}/> Modifier\n                    </button>}'''
+          new = '''{canEditPendingOrder(inv) && <button onClick={()=>void handleEditOrder(inv)} disabled={!!cancelBusy || editBusy===inv.id}\n                      className="flex-1 flex items-center justify-center gap-1.5 py-3 font-bold text-sm active:scale-95 disabled:opacity-50" style={{ color:POS_COLOR }}>\n                      {editBusy===inv.id ? "Chargement…" : <><Pencil size={14}/> Modifier</>}\n                    </button>}'''
+          if s.count(old) != 1:
+              raise SystemExit(f'expected edit button once, found {s.count(old)}')
+          s = s.replace(old, new)
+          p.write_text(s)
+
+          t = Path('scripts/test-invoice-summary-contract.mjs')
+          test = t.read_text()
+          anchor = "if (!pos.includes('boutique.productSaleCounts?.[p.id]')) throw new Error('POS bestseller compact metric missing');"
+          addition = '''if (!pos.includes('boutique.productSaleCounts?.[p.id]')) throw new Error('POS bestseller compact metric missing');\nif (!pos.includes('loadInvoiceLines } from "../../lib/api"')) throw new Error('POS pending-order edit must import targeted line hydration');\nif (!/async function handleEditOrder\\(inv: Invoice\\)/.test(pos) || !/await\\s+loadInvoiceLines\\(boutique\\.id,\\s*inv\\.id\\)/.test(pos)) throw new Error('POS pending-order edit must hydrate summary-only invoices before editing');\nif (pos.includes('if (!inv.lines?.length) return;')) throw new Error('POS pending-order edit still silently ignores summary-only invoices');\nif (!pos.includes('editBusy===inv.id ? "Chargement…"')) throw new Error('POS pending-order edit loading feedback missing');'''
+          if test.count(anchor) != 1:
+              raise SystemExit(f'expected test anchor once, found {test.count(anchor)}')
+          t.write_text(test.replace(anchor, addition))
+          PY
+          node scripts/test-invoice-summary-contract.mjs
+          node scripts/test-sales-regressions.mjs
+          git diff --check
+      - name: Commit patch
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/app/screens/POSView.tsx scripts/test-invoice-summary-contract.mjs
+          git commit -m "fix: hydrate pending order lines before POS edit"
+          git push origin HEAD:fix/pos-pending-order-edit-lines
