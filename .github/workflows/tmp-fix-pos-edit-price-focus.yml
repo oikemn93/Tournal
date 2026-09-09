@@ -1,0 +1,46 @@
+name: Temporary POS edit price focus patch
+on:
+  push:
+    branches: [fix/pos-edit-price-focus]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/pos-edit-price-focus
+          fetch-depth: 0
+      - name: Keep edit price input mounted while typing
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/app/screens/POSView.tsx')
+          s = p.read_text()
+          old = 'key={`${item.productId}-${item.prixUnit}-${lineIndex}`}'
+          new = 'key={`${item.productId}-${item.sellUnit ?? item.unit}-${lineIndex}`}'
+          if s.count(old) != 1:
+              raise SystemExit(f'expected mutable-price row key once, found {s.count(old)}')
+          s = s.replace(old, new)
+          p.write_text(s)
+
+          t = Path('scripts/test-invoice-summary-contract.mjs')
+          test = t.read_text()
+          anchor = "if (!pos.includes('editBusy===inv.id ? \"Chargement…\"')) throw new Error('POS pending-order edit loading feedback missing');"
+          addition = anchor + "\nif (pos.includes('key={`${item.productId}-${item.prixUnit}-${lineIndex}`}')) throw new Error('POS edit price input key must not depend on mutable price');\nif (!pos.includes('key={`${item.productId}-${item.sellUnit ?? item.unit}-${lineIndex}`}')) throw new Error('POS cart row must use a stable key while editing price');"
+          if test.count(anchor) != 1:
+              raise SystemExit(f'expected contract anchor once, found {test.count(anchor)}')
+          t.write_text(test.replace(anchor, addition))
+          PY
+          node scripts/test-invoice-summary-contract.mjs
+          node scripts/test-sales-regressions.mjs
+          git diff --check
+      - name: Commit patch
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/app/screens/POSView.tsx scripts/test-invoice-summary-contract.mjs
+          git commit -m "fix: keep POS edit price input focused"
+          git push origin HEAD:fix/pos-edit-price-focus
