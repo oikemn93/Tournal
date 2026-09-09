@@ -38,6 +38,8 @@ if (!pos.includes('loadInvoiceLines } from "../../lib/api"')) throw new Error('P
 if (!/async function handleEditOrder\(inv: Invoice\)/.test(pos) || !/await\s+loadInvoiceLines\(boutique\.id,\s*inv\.id\)/.test(pos)) throw new Error('POS pending-order edit must hydrate summary-only invoices before editing');
 if (pos.includes('if (!inv.lines?.length) return;')) throw new Error('POS pending-order edit still silently ignores summary-only invoices');
 if (!pos.includes('editBusy===inv.id ? "Chargement…"')) throw new Error('POS pending-order edit loading feedback missing');
+if (pos.includes('key={`${item.productId}-${item.prixUnit}-${lineIndex}`}')) throw new Error('POS edit price input key must not depend on mutable price');
+if (!pos.includes('key={`${item.productId}-${item.sellUnit ?? item.unit}-${lineIndex}`}')) throw new Error('POS cart row must use a stable key while editing price');
 if (!sales.includes('hints: SalePriceHint[] = []') || !sales.includes('hint.invoiceDate > best.at')) throw new Error('last-sale price hint fallback missing');
 if (factures.includes('setEncaissInv(inv);setEncaissSplit') || factures.includes('setShareInv(inv);')) throw new Error('counter invoice action bypasses hydration');
 
