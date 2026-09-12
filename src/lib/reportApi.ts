@@ -40,6 +40,37 @@ export type EmployeePerformanceReport = {
   employees: EmployeePerformanceRow[];
 };
 
+export type StockInventoryProductRow = {
+  product_id: number;
+  product_name: string;
+  category_id: string | null;
+  category_name: string;
+  current_stock: number;
+  net_sold_qty: number;
+  rotation_class: "rapide" | "moyenne" | "lente" | "dormant";
+  last_sale_at: string | null;
+  days_since_last_sale: number | null;
+  dormant: boolean;
+  fifo_stock_value: number | null;
+};
+
+export type InventoryVarianceRow = {
+  session_id: string;
+  finalized_at: string;
+  scope_label: string;
+  variance_qty_abs: number;
+  variance_cost: number | null;
+};
+
+export type StockInventoryReport = {
+  from: string;
+  to: string;
+  dormant_days: number;
+  stock_value_fifo: number | null;
+  products: StockInventoryProductRow[];
+  inventory_variances: InventoryVarianceRow[];
+};
+
 function messageFrom(body: unknown) {
   if (!body || typeof body !== "object") return "";
   const value = body as Record<string, unknown>;
@@ -77,5 +108,14 @@ export function loadEmployeePerformanceReport(params: { boutiqueId: string; from
     p_boutique_id: params.boutiqueId,
     p_from: params.from,
     p_to: params.to,
+  });
+}
+
+export function loadStockInventoryReport(params: { boutiqueId: string; from: string; to: string; dormantDays: number }) {
+  return postRpc<StockInventoryReport>("get_stock_inventory_report", {
+    p_boutique_id: params.boutiqueId,
+    p_from: params.from,
+    p_to: params.to,
+    p_dormant_days: params.dormantDays,
   });
 }
