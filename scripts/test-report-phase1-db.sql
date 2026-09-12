@@ -10,12 +10,6 @@ values(991980000001,'report-phase1-ci','fbfbfbfb-1111-4111-8111-fbfbfbfbfbfb','o
 select set_config('request.jwt.claims',json_build_object('sub','fbfbfbfb-1111-4111-8111-fbfbfbfbfbfb','role','authenticated')::text,true);
 
 insert into public.categories(id,boutique_id,nom,color)
-values('report-phase1-cat','TISSUS','#999999','report-phase1-ci')
-on conflict do nothing;
-
--- Keep the explicit column order because production categories is boutique-scoped.
-delete from public.categories where id='report-phase1-cat' and boutique_id='TISSUS';
-insert into public.categories(id,boutique_id,nom,color)
 values('report-phase1-cat','report-phase1-ci','Tissus','#999999');
 
 insert into public.products(id,boutique_id,nom,category_id,stock,low_stock_threshold,prix_achat,actif)
@@ -47,6 +41,7 @@ declare
   r jsonb;
   fifo jsonb;
   row_a jsonb;
+  fifo_a jsonb;
   from_at timestamptz := now()-interval '7 days';
   to_at timestamptz := now()+interval '1 second';
 begin
@@ -68,9 +63,11 @@ begin
   if abs((row_a->>'quantity')::numeric - 1) > 0.01 then raise exception 'Produit A net quantity mismatch: %',row_a; end if;
   if (row_a->>'category_name') <> 'Tissus' then raise exception 'category mismatch: %',row_a; end if;
 
-  if abs((row_a->>'realized_margin_fifo')::numeric - (
-    select (x->>'realizedMargin')::numeric from jsonb_array_elements(fifo->'products') x where (x->>'productId')::bigint=991980000001
-  )) > 0.01 then raise exception 'product FIFO margin must reuse canonical core report=% fifo=%',row_a,fifo; end if;
+  select x into fifo_a from jsonb_array_elements(fifo->'products') x where (x->>'productId')::bigint=991980000001;
+  if fifo_a is null then raise exception 'Produit A FIFO row missing: %',fifo; end if;
+  if abs((row_a->>'realized_margin_fifo')::numeric - (fifo_a->>'realizedMargin')::numeric) > 0.01 then
+    raise exception 'product FIFO margin must reuse canonical core report=% fifo=%',row_a,fifo_a;
+  end if;
 end
 $test$;
 
