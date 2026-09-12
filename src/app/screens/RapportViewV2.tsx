@@ -7,6 +7,7 @@ import { loadFinancialMetrics, type FinancialMetrics } from "../../lib/dashboard
 import { loadClientReport, loadEmployeePerformanceReport, loadSalesProductReport, loadStockInventoryReport, type ClientReport, type EmployeePerformanceReport, type SalesProductReport, type StockInventoryReport } from "../../lib/reportApi";
 import { ReportKpiBand } from "./ReportKpiBand";
 import { FinancialDeepReportSection } from "./FinancialDeepReportSection";
+import { SalesReportSection } from "./SalesReportSection";
 
 type Section = "sales" | "team" | "stock" | "clients" | "finance";
 type SortKey = "invoiced_revenue" | "quantity" | "product_name";
@@ -50,7 +51,7 @@ export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique:
     <div className="flex items-center justify-between rounded-xl border border-border bg-card px-4 py-3"><div><p className="text-xs font-bold text-muted-foreground">Impayé sur la période</p><p className="text-[11px] text-muted-foreground">Créances des factures sélectionnées</p></div><p className={`text-base font-black ${(metrics?.period_outstanding ?? 0)>0.005?"text-red-600":"text-muted-foreground"}`}>{fmt(metrics?.period_outstanding ?? 0)}</p></div>
 
     <div className="space-y-2">
-      <Accordion title="Ventes" subtitle="Quels produits portent mon chiffre d’affaires ?" icon={<ReceiptText size={17}/>} active={open==="sales"} onClick={()=>void toggle("sales")} color={RC}>{sectionLoading==="sales"?<Loading/>:<SalesSection report={sales} rows={rows} category={category} setCategory={setCategory} sort={sort} setSort={setSort} max={maxProduct} canSeeMargin={canSeeMargin}/>}</Accordion>
+      <Accordion title="Ventes" subtitle="Quels produits portent mon chiffre d’affaires ?" icon={<ReceiptText size={17}/>} active={open==="sales"} onClick={()=>void toggle("sales")} color={RC}>{sectionLoading==="sales"?<Loading/>:<SalesReportSection report={sales} metrics={metrics} canSeeMargin={canSeeMargin}/>}</Accordion>
       {canSeeMargin && <Accordion title="Équipe" subtitle="Qui contribue le plus aux ventes ?" icon={<Users size={17}/>} active={open==="team"} onClick={()=>void toggle("team")} color={RC}>{sectionLoading==="team"?<Loading/>:<TeamSection report={team} max={maxEmployee}/>}</Accordion>}
       <Accordion title="Stock" subtitle="Où mon capital est-il immobilisé ?" icon={<Boxes size={17}/>} active={open==="stock"} onClick={()=>void toggle("stock")} color={RC}>{sectionLoading==="stock"?<Loading/>:<StockSection report={stock} dormant={dormant} lowRotation={lowRotation} days={dormantDays} onDays={d=>void refreshStock(d)} canSeeMargin={canSeeMargin}/>}</Accordion>
       <Accordion title="Clients" subtitle="Qui achète le plus et qui me doit de l’argent ?" icon={<WalletCards size={17}/>} active={open==="clients"} onClick={()=>void toggle("clients")} color={RC}>{sectionLoading==="clients"?<Loading/>:<ClientSection report={clients} overdue={overdue}/>}</Accordion>
