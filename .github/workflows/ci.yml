@@ -68,6 +68,9 @@ jobs:
       - name: Canonical financial metrics reconciliation
         run: node scripts/test-financial-metrics-reconciliation.mjs
 
+      - name: Report phase 1 sales contract
+        run: node scripts/test-report-phase1.mjs
+
       - name: Permission audit hardening
         run: node scripts/test-permission-audit-hardening.mjs
 
