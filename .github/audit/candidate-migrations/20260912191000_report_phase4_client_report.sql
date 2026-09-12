@@ -37,24 +37,47 @@ begin
       and i.invoice_date>=p_from and i.invoice_date<p_to
       and coalesce(i.status,'')<>'annulée'
     group by i.client_id
-  ), period_cash as (
-    select i.client_id,coalesce(sum(ip.amount),0) as collected_cash
+  ), period_cash_payments as (
+    select i.client_id,
+      coalesce(sum(case when lower(trim(coalesce(i.type,'')))='retour' then -ip.amount else ip.amount end),0) as collected_cash
     from public.invoice_payments ip
     join public.invoices i on i.boutique_id=ip.boutique_id and i.id=ip.invoice_id
     where ip.boutique_id=p_boutique_id
       and i.client_id is not null
       and ip.paid_at>=p_from and ip.paid_at<p_to
+      and coalesce(i.status,'')<>'annulée'
     group by i.client_id
+  ), period_refunds as (
+    select r.client_id,coalesce(sum(r.amount),0) as refunded_cash
+    from public.client_credit_refunds r
+    where r.boutique_id=p_boutique_id
+      and r.refunded_at>=p_from and r.refunded_at<p_to
+    group by r.client_id
+  ), paid as (
+    select ip.invoice_id,coalesce(sum(ip.amount),0) as paid
+    from public.invoice_payments ip
+    where ip.boutique_id=p_boutique_id
+    group by ip.invoice_id
   ), global_receivables as (
     select i.client_id,
-      coalesce(sum(private.invoice_net_due(i.boutique_id,i.id)),0) as outstanding_global,
-      coalesce(sum(case when i.due_date is not null and i.due_date<current_date then private.invoice_net_due(i.boutique_id,i.id) else 0 end),0) as overdue_global
+      coalesce(sum(greatest(i.montant-coalesce(p.paid,0),0)),0) as outstanding_global,
+      coalesce(sum(case when i.due_date is not null and i.due_date<current_date then greatest(i.montant-coalesce(p.paid,0),0) else 0 end),0) as overdue_global
     from public.invoices i
+    left join paid p on p.invoice_id=i.id
     where i.boutique_id=p_boutique_id
       and i.client_id is not null
       and lower(trim(coalesce(i.type,'')))<>'retour'
       and coalesce(i.status,'')<>'annulée'
     group by i.client_id
+  ), all_receivables as (
+    select
+      coalesce(sum(greatest(i.montant-coalesce(p.paid,0),0)),0) as outstanding_global,
+      coalesce(sum(case when i.due_date is not null and i.due_date<current_date then greatest(i.montant-coalesce(p.paid,0),0) else 0 end),0) as overdue_global
+    from public.invoices i
+    left join paid p on p.invoice_id=i.id
+    where i.boutique_id=p_boutique_id
+      and lower(trim(coalesce(i.type,'')))<>'retour'
+      and coalesce(i.status,'')<>'annulée'
   ), global_credit as (
     select a.client_id,
       coalesce(sum(greatest(a.amount-coalesce(a.allocated_amount,0),0)),0) as credit_available
@@ -70,13 +93,14 @@ begin
       coalesce(pi.invoiced_revenue,0) as invoiced_revenue,
       coalesce(pi.sales_count,0) as sales_count,
       coalesce(pi.returns_count,0) as returns_count,
-      coalesce(pc.collected_cash,0) as collected_cash,
+      coalesce(pcp.collected_cash,0)-coalesce(pr.refunded_cash,0) as collected_cash,
       coalesce(gr.outstanding_global,0) as outstanding_global,
       coalesce(gr.overdue_global,0) as overdue_global,
       coalesce(gc.credit_available,0) as credit_available
     from client_base cb
     left join period_invoices pi on pi.client_id=cb.id
-    left join period_cash pc on pc.client_id=cb.id
+    left join period_cash_payments pcp on pcp.client_id=cb.id
+    left join period_refunds pr on pr.client_id=cb.id
     left join global_receivables gr on gr.client_id=cb.id
     left join global_credit gc on gc.client_id=cb.id
   )
@@ -89,8 +113,8 @@ begin
     'clients_overdue',(select count(*) from rows where overdue_global>0.005),
     'registered_invoiced_revenue',(select coalesce(sum(invoiced_revenue),0) from rows),
     'registered_collected_cash',(select coalesce(sum(collected_cash),0) from rows),
-    'customer_outstanding_global',(select coalesce(sum(outstanding_global),0) from rows),
-    'overdue_global',(select coalesce(sum(overdue_global),0) from rows),
+    'customer_outstanding_global',(select outstanding_global from all_receivables),
+    'overdue_global',(select overdue_global from all_receivables),
     'credit_available_global',(select coalesce(sum(credit_available),0) from rows),
     'clients',coalesce((select jsonb_agg(jsonb_build_object(
       'client_id',r.client_id,
