@@ -42,6 +42,13 @@ jobs:
           alter table public.invoices add column if not exists stock_deducted_at timestamptz;
           alter table public.stock_entries add column if not exists note text;
           alter table public.stock_entries add column if not exists reference text;
+          create table if not exists public.transfer_charge_payments(
+            id bigint primary key,
+            boutique_id text not null,
+            charge_id bigint not null,
+            amount numeric not null,
+            paid_at timestamptz not null
+          );
           SQL
 
       - name: Apply canonical financial metrics candidate locally
