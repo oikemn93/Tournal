@@ -102,6 +102,26 @@ export type ClientReport = {
   clients: ClientReportRow[];
 };
 
+export type ChargeReportRow = {
+  id: string;
+  event_at: string;
+  label: string;
+  category: string;
+  amount: number;
+  source: string;
+  payment_method: string | null;
+  note: string | null;
+};
+
+export type ChargeReport = {
+  from: string;
+  to: string;
+  operating_total: number;
+  entries_count: number;
+  categories: Array<{ category: string; amount: number; entries: number }>;
+  charges: ChargeReportRow[];
+};
+
 function messageFrom(body: unknown) {
   if (!body || typeof body !== "object") return "";
   const value = body as Record<string, unknown>;
@@ -157,4 +177,12 @@ export function loadClientReport(params: { boutiqueId: string; from: string; to:
     p_from: params.from,
     p_to: params.to,
   }).then(report => ({ ...report, boutique_id: params.boutiqueId }));
+}
+
+export function loadChargeReport(params: { boutiqueId: string; from: string; to: string }) {
+  return postRpc<ChargeReport>("get_charge_report", {
+    p_boutique_id: params.boutiqueId,
+    p_from: params.from,
+    p_to: params.to,
+  });
 }
