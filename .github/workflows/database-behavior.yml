@@ -40,6 +40,7 @@ jobs:
         run: |
           psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 <<'SQL'
           alter table public.invoices add column if not exists stock_deducted_at timestamptz;
+          alter table public.invoices add column if not exists operator_id uuid;
           alter table public.invoices add column if not exists operator_nom_snapshot text;
           alter table public.stock_entries add column if not exists note text;
           alter table public.stock_entries add column if not exists reference text;
