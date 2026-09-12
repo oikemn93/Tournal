@@ -65,8 +65,8 @@ jobs:
       - name: Reconcile dashboard and report financial metrics
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f scripts/test-financial-metrics-db.sql
 
-      - name: Apply report phase 1 candidate locally
-        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f .github/audit/candidate-migrations/20260912194500_report_phase1_sales_products.sql
+      - name: Apply report phase 1 replay locally
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f .github/audit/replay-migrations/20260912174106_report_phase1_sales_products.sql
 
       - name: Reconcile report phase 1 sales products
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f scripts/test-report-phase1-db.sql
