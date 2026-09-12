@@ -8,6 +8,7 @@ import { loadClientReport, loadEmployeePerformanceReport, loadSalesProductReport
 import { ReportKpiBand } from "./ReportKpiBand";
 import { FinancialDeepReportSection } from "./FinancialDeepReportSection";
 import { SalesReportSection } from "./SalesReportSection";
+import { TeamReportSection } from "./TeamReportSection";
 
 type Section = "sales" | "team" | "stock" | "clients" | "finance";
 type SortKey = "invoiced_revenue" | "quantity" | "product_name";
@@ -52,7 +53,7 @@ export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique:
 
     <div className="space-y-2">
       <Accordion title="Ventes" subtitle="Quels produits portent mon chiffre d’affaires ?" icon={<ReceiptText size={17}/>} active={open==="sales"} onClick={()=>void toggle("sales")} color={RC}>{sectionLoading==="sales"?<Loading/>:<SalesReportSection report={sales} metrics={metrics} canSeeMargin={canSeeMargin}/>}</Accordion>
-      {canSeeMargin && <Accordion title="Équipe" subtitle="Qui contribue le plus aux ventes ?" icon={<Users size={17}/>} active={open==="team"} onClick={()=>void toggle("team")} color={RC}>{sectionLoading==="team"?<Loading/>:<TeamSection report={team} max={maxEmployee}/>}</Accordion>}
+      {canSeeMargin && <Accordion title="Équipe" subtitle="Qui contribue le plus aux ventes ?" icon={<Users size={17}/>} active={open==="team"} onClick={()=>void toggle("team")} color={RC}>{sectionLoading==="team"?<Loading/>:<TeamReportSection report={team}/>}</Accordion>}
       <Accordion title="Stock" subtitle="Où mon capital est-il immobilisé ?" icon={<Boxes size={17}/>} active={open==="stock"} onClick={()=>void toggle("stock")} color={RC}>{sectionLoading==="stock"?<Loading/>:<StockSection report={stock} dormant={dormant} lowRotation={lowRotation} days={dormantDays} onDays={d=>void refreshStock(d)} canSeeMargin={canSeeMargin}/>}</Accordion>
       <Accordion title="Clients" subtitle="Qui achète le plus et qui me doit de l’argent ?" icon={<WalletCards size={17}/>} active={open==="clients"} onClick={()=>void toggle("clients")} color={RC}>{sectionLoading==="clients"?<Loading/>:<ClientSection report={clients} overdue={overdue}/>}</Accordion>
       <Accordion title="Financier" subtitle="La période crée-t-elle de la marge et de la trésorerie ?" icon={<BarChart3 size={17}/>} active={open==="finance"} onClick={()=>void toggle("finance")} color={RC}>{sectionLoading==="finance"?<Loading/>:<FinancialDeepReportSection metrics={metrics} salesReport={sales} canSeeMargin={canSeeMargin} color={RC}/>}</Accordion>
