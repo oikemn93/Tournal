@@ -7,7 +7,7 @@ const stock = fs.readFileSync("src/app/screens/StockView.tsx", "utf8");
 const financialApi = fs.readFileSync("src/lib/dashboardApi.ts", "utf8");
 const prepare = fs.readFileSync("supabase/migrations/20260903_prepare_margin_dashboard_secure_reads.sql", "utf8");
 const enforce = fs.readFileSync("supabase/migrations/20260903_enforce_margin_dashboard_isolation.sql", "utf8");
-const canonical = fs.readFileSync(".github/audit/candidate-migrations/20260912190000_canonical_financial_metrics.sql", "utf8");
+const canonical = fs.readFileSync(".github/audit/replay-migrations/20260912165219_canonical_financial_metrics.sql", "utf8");
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
