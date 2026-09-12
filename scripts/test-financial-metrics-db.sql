@@ -34,9 +34,14 @@ values(991970000001,'financial-metrics-ci',991970000001,5,'Espèces',now()-inter
 insert into public.charges(id,boutique_id,label,montant,categorie,charge_date,status,paid_amount,source)
 values
 (991970000001,'financial-metrics-ci','Loyer',10,'Loyer',now()-interval '1 day','paid',10,'manual'),
-(991970000002,'financial-metrics-ci','Transfert payé',50,'Transport',now()-interval '1 day','paid',15,'transfer'),
+(991970000002,'financial-metrics-ci','Transfert payé',50,'Transport',now()-interval '30 days','partial',15,'transfer'),
 (991970000003,'financial-metrics-ci','Réception fournisseur',40,'Achat stock',now()-interval '1 day','paid',0,'supplier_receipt'),
 (991970000004,'financial-metrics-ci','Achat stock cash',4,'Achat stock',now()-interval '1 day','paid',4,'manual');
+
+-- The transfer shell is intentionally outside the report period: only the real
+-- payment event below is in-period, proving treasury attribution uses paid_at.
+insert into public.transfer_charge_payments(id,boutique_id,charge_id,amount,paid_at)
+values(991970000001,'financial-metrics-ci',991970000002,15,now()-interval '1 day');
 
 do $test$
 declare
