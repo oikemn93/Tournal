@@ -3,7 +3,7 @@ import fs from "node:fs";
 const view = fs.readFileSync("src/app/screens/RapportViewV2.tsx", "utf8");
 const section = fs.readFileSync("src/app/screens/ChargesReportSection.tsx", "utf8");
 const api = fs.readFileSync("src/lib/reportApi.ts", "utf8");
-const sql = fs.readFileSync("supabase/migrations/20260913014500_report_charges_detail.sql", "utf8");
+const sql = fs.readFileSync(".github/audit/replay-migrations/20260912234655_report_charges_detail.sql", "utf8");
 const canonical = fs.readFileSync(".github/audit/replay-migrations/20260912165219_canonical_financial_metrics.sql", "utf8");
 
 function ok(value, message) { if (!value) throw new Error(message); }
