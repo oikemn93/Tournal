@@ -2,7 +2,7 @@ import fs from "node:fs";
 
 const screen = fs.readFileSync("src/app/screens/RapportView.tsx", "utf8");
 const client = fs.readFileSync("src/lib/reportApi.ts", "utf8");
-const migration = fs.readFileSync(".github/audit/candidate-migrations/20260912194500_report_phase1_sales_products.sql", "utf8");
+const migration = fs.readFileSync(".github/audit/replay-migrations/20260912174106_report_phase1_sales_products.sql", "utf8");
 const compactSql = migration.replace(/\s+/g, " ");
 
 function assert(condition, message) {
