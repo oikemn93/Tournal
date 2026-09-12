@@ -259,23 +259,30 @@ begin
     and coalesce(i.status,'') <> 'annulée'
     and lower(trim(coalesce(i.type,''))) <> 'retour';
 
+  -- Manual/ordinary charges use their charge date as the disbursement date.
+  -- Transfer charges are excluded here because their actual cash events live in
+  -- transfer_charge_payments and are added below by paid_at.
   select
-    coalesce(sum(case
-      when c.source = 'supplier_receipt' then 0
-      when c.source = 'transfer' then coalesce(c.paid_amount,0)
-      else c.montant
-    end),0),
-    coalesce(sum(case
-      when c.source = 'supplier_receipt' then 0
-      when c.categorie = 'Achat stock' then 0
-      when c.source = 'transfer' then coalesce(c.paid_amount,0)
-      else c.montant
-    end),0)
+    coalesce(sum(c.montant),0),
+    coalesce(sum(c.montant) filter(where coalesce(c.categorie,'') <> 'Achat stock'),0)
   into v_cash_expenses,v_operating_cash_expenses
   from public.charges c
   where c.boutique_id = p_boutique_id
     and c.charge_date >= p_from
-    and c.charge_date < p_to;
+    and c.charge_date < p_to
+    and c.source not in ('supplier_receipt','transfer');
+
+  select
+    v_cash_expenses + coalesce(sum(tcp.amount),0),
+    v_operating_cash_expenses + coalesce(sum(tcp.amount) filter(where coalesce(c.categorie,'') <> 'Achat stock'),0)
+  into v_cash_expenses,v_operating_cash_expenses
+  from public.transfer_charge_payments tcp
+  left join public.charges c
+    on c.boutique_id = tcp.boutique_id
+   and c.id = tcp.charge_id
+  where tcp.boutique_id = p_boutique_id
+    and tcp.paid_at >= p_from
+    and tcp.paid_at < p_to;
 
   select count(*)
   into v_low_stock_count
