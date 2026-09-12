@@ -71,7 +71,7 @@ export function ReportKpiBand({ metrics, previous, canSeeMargin }: Props) {
     },
   ];
 
-  return <section aria-label="Indicateurs principaux" className="grid grid-cols-2 gap-3 xl:grid-cols-5">
+  return <section data-report-ui-stage="1" aria-label="Indicateurs principaux" className="grid grid-cols-2 gap-3 xl:grid-cols-5">
     {items.map(item => <article key={item.label} className="rounded-2xl border border-border bg-card p-4 shadow-sm">
       <div className="flex min-h-5 items-center justify-between gap-2">
         <p className="text-xs font-bold text-muted-foreground">{item.label}</p>
