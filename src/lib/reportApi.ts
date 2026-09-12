@@ -71,6 +71,36 @@ export type StockInventoryReport = {
   inventory_variances: InventoryVarianceRow[];
 };
 
+export type ClientReportRow = {
+  client_id: number;
+  client_name: string;
+  client_type: string;
+  payment_terms_days: number | null;
+  last_invoice_at: string | null;
+  invoiced_revenue: number;
+  sales_count: number;
+  returns_count: number;
+  collected_cash: number;
+  outstanding_global: number;
+  overdue_global: number;
+  credit_available: number;
+};
+
+export type ClientReport = {
+  from: string;
+  to: string;
+  clients_count: number;
+  active_clients_period: number;
+  clients_with_outstanding: number;
+  clients_overdue: number;
+  registered_invoiced_revenue: number;
+  registered_collected_cash: number;
+  customer_outstanding_global: number;
+  overdue_global: number;
+  credit_available_global: number;
+  clients: ClientReportRow[];
+};
+
 function messageFrom(body: unknown) {
   if (!body || typeof body !== "object") return "";
   const value = body as Record<string, unknown>;
@@ -117,5 +147,13 @@ export function loadStockInventoryReport(params: { boutiqueId: string; from: str
     p_from: params.from,
     p_to: params.to,
     p_dormant_days: params.dormantDays,
+  });
+}
+
+export function loadClientReport(params: { boutiqueId: string; from: string; to: string }) {
+  return postRpc<ClientReport>("get_client_report", {
+    p_boutique_id: params.boutiqueId,
+    p_from: params.from,
+    p_to: params.to,
   });
 }
