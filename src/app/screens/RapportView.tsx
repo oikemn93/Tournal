@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { BookOpen, Boxes, Download, Filter, PackageSearch, TrendingDown, TrendingUp, Users, Wallet } from "lucide-react";
 import type { Boutique, DashPeriod, PaymentMethod } from "../types";
-import { inputCls, PAYMENT_METHODS, PM_COLOR, PM_ICON, SEM } from "../constants";
+import { inputCls, PAYMENT_METHODS, PM_COLOR, PM_ICON } from "../constants";
 import { fmt } from "../utils/formatting";
 import { filterByPeriod } from "../utils/inventory";
 import { filterPaymentEventsByPeriod } from "../utils/payments";
@@ -9,6 +9,7 @@ import { boundedBootstrapCutoffIso, loadBoutiqueHistoryRange, type BoutiqueHisto
 import { loadFinancialMetrics, type FinancialMetrics } from "../../lib/dashboardApi";
 import { loadClientReport, loadEmployeePerformanceReport, loadSalesProductReport, loadStockInventoryReport, type ClientReport, type EmployeePerformanceReport, type SalesProductReport, type StockInventoryReport } from "../../lib/reportApi";
 import { ClientReportSection } from "./ClientReportSection";
+import { ReportKpiBand } from "./ReportKpiBand";
 
 function periodBounds(period: DashPeriod, customFrom: string, customTo: string) {
   const now = new Date();
@@ -25,6 +26,13 @@ function periodBounds(period: DashPeriod, customFrom: string, customTo: string) 
   return { from: from.toISOString(), to: to.toISOString() };
 }
 
+function previousPeriodBounds(bounds: { from: string; to: string }) {
+  const fromMs = new Date(bounds.from).getTime();
+  const toMs = new Date(bounds.to).getTime();
+  const duration = Math.max(1000, toMs - fromMs);
+  return { from: new Date(fromMs - duration).toISOString(), to: new Date(fromMs).toISOString() };
+}
+
 const mergeById = <T,>(current: T[], older: T[]) => [...new Map([...current, ...older].map((item, index) => [(item as { id?: unknown }).id ?? `__legacy_${index}`, item])).values()];
 
 export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique: Boutique; canSeeMargin?: boolean }) {
@@ -34,6 +42,7 @@ export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique:
   const [customTo, setCustomTo] = useState("");
   const [historicalPatch, setHistoricalPatch] = useState<BoutiqueHistoryPatch | null>(null);
   const [metrics, setMetrics] = useState<FinancialMetrics | null>(null);
+  const [previousMetrics, setPreviousMetrics] = useState<FinancialMetrics | null>(null);
   const [salesReport, setSalesReport] = useState<SalesProductReport | null>(null);
   const [employeeReport, setEmployeeReport] = useState<EmployeePerformanceReport | null>(null);
   const [stockReport, setStockReport] = useState<StockInventoryReport | null>(null);
@@ -45,6 +54,7 @@ export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique:
   const [exporting, setExporting] = useState(false);
 
   const bounds = useMemo(() => periodBounds(period, customFrom, customTo), [period, customFrom, customTo]);
+  const comparisonBounds = useMemo(() => previousPeriodBounds(bounds), [bounds.from, bounds.to]);
   const invoices = useMemo(() => mergeById(boutique.invoices, historicalPatch?.invoices ?? []) as typeof boutique.invoices, [boutique.invoices, historicalPatch?.invoices]);
   const creditRefunds = useMemo(() => mergeById(boutique.clientCreditRefunds ?? [], historicalPatch?.clientCreditRefunds ?? []) as NonNullable<typeof boutique.clientCreditRefunds>, [boutique.clientCreditRefunds, historicalPatch?.clientCreditRefunds]);
 
@@ -60,16 +70,17 @@ export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique:
     setLoading(true); setError("");
     void Promise.all([
       loadFinancialMetrics({ boutiqueId: boutique.id, ...bounds }),
+      loadFinancialMetrics({ boutiqueId: boutique.id, ...comparisonBounds }),
       loadSalesProductReport({ boutiqueId: boutique.id, ...bounds }),
       canSeeMargin ? loadEmployeePerformanceReport({ boutiqueId: boutique.id, ...bounds }) : Promise.resolve(null),
       loadStockInventoryReport({ boutiqueId: boutique.id, ...bounds, dormantDays }),
       loadClientReport({ boutiqueId: boutique.id, ...bounds }),
-    ]).then(([financial, products, employees, stock, clients]) => {
+    ]).then(([financial, previousFinancial, products, employees, stock, clients]) => {
       if (cancelled) return;
-      setMetrics(financial); setSalesReport(products); setEmployeeReport(employees); setStockReport(stock); setClientReport(clients);
+      setMetrics(financial); setPreviousMetrics(previousFinancial); setSalesReport(products); setEmployeeReport(employees); setStockReport(stock); setClientReport(clients);
     }).catch(cause => { if (!cancelled) setError(cause instanceof Error ? cause.message : "Rapport indisponible"); }).finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [boutique.id, bounds.from, bounds.to, canSeeMargin, dormantDays]);
+  }, [boutique.id, bounds.from, bounds.to, comparisonBounds.from, comparisonBounds.to, canSeeMargin, dormantDays]);
 
   const filtPayments = filterPaymentEventsByPeriod(invoices, period, customFrom, customTo);
   const filtCreditRefunds = filterByPeriod(creditRefunds, period, customFrom, customTo);
@@ -123,18 +134,28 @@ export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique:
     } finally { iframe.remove(); setExporting(false); }
   }
 
-  return <div data-screen-source="canonical-report-v5" className="space-y-4 pb-24">
-    <div className="flex gap-1.5 bg-card rounded-2xl p-1.5 border border-border">{periodBtns.map(item => <button key={item.id} onClick={() => setPeriod(item.id)} className="flex-1 py-2 rounded-xl text-xs font-bold" style={{ background: period === item.id ? RC : "transparent", color: period === item.id ? "#fff" : "#6b7280" }}>{item.label}</button>)}</div>
-    {period === "custom" && <div className="flex gap-2"><div className="flex-1"><label className="text-xs text-muted-foreground font-bold block mb-1">DU</label><input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)} className={inputCls} /></div><div className="flex-1"><label className="text-xs text-muted-foreground font-bold block mb-1">AU</label><input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)} className={inputCls} /></div></div>}
+  return <div data-screen-source="canonical-report-v6-ui" className="space-y-4 pb-24">
+    <header className="sticky top-2 z-20 rounded-2xl border border-border bg-background/95 p-3 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/85">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-black tracking-tight">Rapport</h1>
+            <span className="truncate rounded-full bg-muted px-2.5 py-1 text-[11px] font-bold text-muted-foreground">{boutique.nom}</span>
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">Vue de performance · comparaison avec la période précédente équivalente</p>
+        </div>
+        <div className="flex gap-1 overflow-x-auto rounded-xl bg-muted/70 p-1">{periodBtns.map(item => <button key={item.id} onClick={() => setPeriod(item.id)} className="shrink-0 rounded-lg px-3 py-2 text-xs font-bold transition-colors" style={{ background: period === item.id ? RC : "transparent", color: period === item.id ? "#fff" : "#6b7280" }}>{item.label}</button>)}</div>
+      </div>
+      {period === "custom" && <div className="mt-3 grid grid-cols-2 gap-2 border-t border-border pt-3"><div><label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Du</label><input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)} className={inputCls} /></div><div><label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Au</label><input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)} className={inputCls} /></div></div>}
+    </header>
+
     {error && <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{error}</div>}
     {loading && metrics && <div className="rounded-xl border border-border bg-muted px-3 py-2 text-xs font-semibold text-muted-foreground">Actualisation du rapport…</div>}
     {marginWarning && <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">{marginWarning}</div>}
     {reconciliationGap > 0.5 && <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">Écart de réconciliation produits / CA facturé : {fmt(reconciliationGap)}</div>}
     {employeeReconciliationGap > 0.5 && <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">Écart de réconciliation employés / CA facturé : {fmt(employeeReconciliationGap)}</div>}
 
-    <div className="grid grid-cols-2 gap-2">{[
-      { label: "CA facturé", value: fmt(metrics?.invoiced_revenue ?? 0), color: "#C9A227" }, { label: "CA encaissé", value: fmt(metrics?.collected_cash ?? 0), color: RC }, { label: "Transactions", value: `${metrics?.sales_count ?? 0}`, color: "#6b7280" }, { label: "Panier moyen", value: fmt(metrics?.average_basket ?? 0), color: "#a855f7" }, { label: "Impayé sur la période", value: fmt(metrics?.period_outstanding ?? 0), color: SEM.warning.accent }, ...(canSeeMargin && metrics?.realized_margin_fifo != null ? [{ label: "Marge commerciale FIFO", value: fmt(metrics.realized_margin_fifo), color: metrics.realized_margin_fifo >= 0 ? SEM.success.accent : SEM.danger.accent }] : []),
-    ].map(card => <div key={card.label} className="bg-card rounded-2xl border border-border p-4"><p className="text-xs text-muted-foreground font-bold uppercase tracking-wide">{card.label}</p><p className="text-2xl font-black mt-1" style={{ color: card.color, fontFamily: "'Nunito',sans-serif" }}>{card.value}</p></div>)}</div>
+    <ReportKpiBand metrics={metrics} previous={previousMetrics} canSeeMargin={canSeeMargin} />
 
     <div className="bg-card rounded-2xl border border-border overflow-hidden"><div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3"><div className="flex items-center gap-2"><BookOpen size={16} style={{ color: RC }} /><div><p className="font-bold text-sm">Classement produits</p><p className="text-xs text-muted-foreground">Quantité nette, CA facturé net et marge FIFO canonique</p></div></div><div className="flex items-center gap-1.5"><Filter size={14} className="text-muted-foreground" /><select value={category} onChange={e => setCategory(e.target.value)} className="max-w-[150px] rounded-lg border border-border bg-background px-2 py-1.5 text-xs font-bold"><option value="all">Toutes catégories</option>{(salesReport?.categories ?? []).map(item => <option key={item.id || "uncategorized"} value={item.id}>{item.name}</option>)}</select></div></div><div className="grid md:grid-cols-2 md:divide-x divide-border"><div><div className="px-4 py-2.5 bg-muted/40 flex items-center gap-2"><TrendingUp size={15} className="text-emerald-600" /><p className="text-xs font-black">Meilleurs vendeurs</p></div>{best.length === 0 ? <p className="px-4 py-6 text-sm text-muted-foreground">Aucune vente sur la période</p> : best.map((row, index) => <ProductRow key={row.product_id} row={row} rank={index + 1} canSeeMargin={canSeeMargin} />)}</div><div><div className="px-4 py-2.5 bg-muted/40 flex items-center gap-2"><TrendingDown size={15} className="text-amber-600" /><p className="text-xs font-black">Plus faibles vendeurs</p></div>{worst.length === 0 ? <p className="px-4 py-6 text-sm text-muted-foreground">Aucune vente sur la période</p> : worst.map((row, index) => <ProductRow key={row.product_id} row={row} rank={index + 1} canSeeMargin={canSeeMargin} />)}</div></div></div>
 
