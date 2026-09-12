@@ -42,6 +42,9 @@ jobs:
           alter table public.invoices add column if not exists stock_deducted_at timestamptz;
           alter table public.invoices add column if not exists operator_id uuid;
           alter table public.invoices add column if not exists operator_nom_snapshot text;
+          alter table public.invoices add column if not exists due_date date;
+          alter table public.clients add column if not exists payment_terms_days integer;
+          alter table public.clients add column if not exists last_invoice_at timestamptz;
           alter table public.stock_entries add column if not exists note text;
           alter table public.stock_entries add column if not exists reference text;
           alter table public.stock_entries add column if not exists source_invoice_id text;
@@ -60,6 +63,14 @@ jobs:
             charge_id bigint not null,
             amount numeric not null,
             paid_at timestamptz not null
+          );
+          create table if not exists public.client_advances(
+            id bigint primary key,
+            boutique_id text not null,
+            client_id bigint not null,
+            amount numeric not null,
+            allocated_amount numeric not null default 0,
+            paid_at timestamptz not null default now()
           );
           create table if not exists public.inventory_sessions(
             id uuid primary key default gen_random_uuid(),
@@ -134,6 +145,12 @@ jobs:
 
       - name: Reconcile report phase 3 stock inventory
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f scripts/test-report-phase3-db.sql
+
+      - name: Apply report phase 4 candidate locally
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f .github/audit/candidate-migrations/20260912191000_report_phase4_client_report.sql
+
+      - name: Reconcile report phase 4 clients
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f scripts/test-report-phase4-db.sql
 
       - name: Run behavioral database matrix
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f scripts/test-db-behavior.sql
