@@ -2,7 +2,7 @@
 begin;
 
 insert into public.platform_users(id,phone,nom,initials,is_super_admin,is_suspended,must_change_password)
-values('fafafafa-1111-4111-8111-fafafafafafa','+221700000197','Financial Metrics CI','FM',false,false,false);
+values('fafafafa-1111-4111-8111-fafafafafafa','+221700000197','Financial Metrics CI','FM',true,false,false);
 insert into public.boutiques(id,nom,ville,tel,directory_visible)
 values('financial-metrics-ci','Financial Metrics CI','Dakar',null,true);
 insert into public.boutique_assignments(id,boutique_id,user_id,role,droits)
@@ -58,8 +58,6 @@ begin
   if abs((m->>'operating_cash_expenses')::numeric - 25) > 0.01 then raise exception 'operating expenses mismatch: %',m; end if;
   if (m->>'low_stock_count')::bigint <> 1 then raise exception 'low stock mismatch: %',m; end if;
 
-  -- The canonical financial payload and the legacy FIFO endpoint must be two
-  -- projections of the exact same FIFO engine, never two calculations.
   if abs((m->>'realized_margin_fifo')::numeric - (fifo->>'realizedMargin')::numeric) > 0.01 then
     raise exception 'FIFO reconciliation mismatch metrics=% fifo=%',m,fifo;
   end if;
