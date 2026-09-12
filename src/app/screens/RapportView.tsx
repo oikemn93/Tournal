@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { BookOpen, Download, Filter, TrendingDown, TrendingUp, Users, Wallet } from "lucide-react";
+import { BookOpen, Boxes, Download, Filter, PackageSearch, TrendingDown, TrendingUp, Users, Wallet } from "lucide-react";
 import type { Boutique, DashPeriod, PaymentMethod } from "../types";
 import { inputCls, PAYMENT_METHODS, PM_COLOR, PM_ICON, SEM } from "../constants";
 import { fmt } from "../utils/formatting";
@@ -7,37 +7,24 @@ import { filterByPeriod } from "../utils/inventory";
 import { filterPaymentEventsByPeriod } from "../utils/payments";
 import { boundedBootstrapCutoffIso, loadBoutiqueHistoryRange, type BoutiqueHistoryPatch } from "../../lib/api";
 import { loadFinancialMetrics, type FinancialMetrics } from "../../lib/dashboardApi";
-import { loadEmployeePerformanceReport, loadSalesProductReport, type EmployeePerformanceReport, type SalesProductReport } from "../../lib/reportApi";
+import { loadEmployeePerformanceReport, loadSalesProductReport, loadStockInventoryReport, type EmployeePerformanceReport, type SalesProductReport, type StockInventoryReport } from "../../lib/reportApi";
 
 function periodBounds(period: DashPeriod, customFrom: string, customTo: string) {
   const now = new Date();
   let from = new Date(now);
   let to = new Date(now.getTime() + 1000);
-  if (period === "jour") {
-    from.setHours(0, 0, 0, 0);
-  } else if (period === "semaine") {
-    from.setDate(from.getDate() - 7);
-  } else if (period === "mois") {
-    from = new Date(now.getFullYear(), now.getMonth(), 1);
-  } else if (period === "annee") {
-    from = new Date(now.getFullYear(), 0, 1);
-  } else {
+  if (period === "jour") from.setHours(0, 0, 0, 0);
+  else if (period === "semaine") from.setDate(from.getDate() - 7);
+  else if (period === "mois") from = new Date(now.getFullYear(), now.getMonth(), 1);
+  else if (period === "annee") from = new Date(now.getFullYear(), 0, 1);
+  else {
     from = customFrom ? new Date(`${customFrom}T00:00:00`) : new Date(now);
-    if (customTo) {
-      to = new Date(`${customTo}T00:00:00`);
-      to.setDate(to.getDate() + 1);
-    }
+    if (customTo) { to = new Date(`${customTo}T00:00:00`); to.setDate(to.getDate() + 1); }
   }
   return { from: from.toISOString(), to: to.toISOString() };
 }
 
-const mergeById = <T,>(current: T[], older: T[]) => {
-  const rows = [...current, ...older];
-  return [...new Map(rows.map((item, index) => [
-    (item as { id?: unknown }).id ?? `__legacy_${index}`,
-    item,
-  ])).values()];
-};
+const mergeById = <T,>(current: T[], older: T[]) => [...new Map([...current, ...older].map((item, index) => [(item as { id?: unknown }).id ?? `__legacy_${index}`, item])).values()];
 
 export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique: Boutique; canSeeMargin?: boolean }) {
   const RC = boutique.color;
@@ -48,53 +35,38 @@ export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique:
   const [metrics, setMetrics] = useState<FinancialMetrics | null>(null);
   const [salesReport, setSalesReport] = useState<SalesProductReport | null>(null);
   const [employeeReport, setEmployeeReport] = useState<EmployeePerformanceReport | null>(null);
+  const [stockReport, setStockReport] = useState<StockInventoryReport | null>(null);
+  const [dormantDays, setDormantDays] = useState(60);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [category, setCategory] = useState("all");
   const [exporting, setExporting] = useState(false);
 
   const bounds = useMemo(() => periodBounds(period, customFrom, customTo), [period, customFrom, customTo]);
-  const invoices = useMemo(
-    () => mergeById(boutique.invoices, historicalPatch?.invoices ?? []) as typeof boutique.invoices,
-    [boutique.invoices, historicalPatch?.invoices],
-  );
-  const creditRefunds = useMemo(
-    () => mergeById(boutique.clientCreditRefunds ?? [], historicalPatch?.clientCreditRefunds ?? []) as NonNullable<typeof boutique.clientCreditRefunds>,
-    [boutique.clientCreditRefunds, historicalPatch?.clientCreditRefunds],
-  );
+  const invoices = useMemo(() => mergeById(boutique.invoices, historicalPatch?.invoices ?? []) as typeof boutique.invoices, [boutique.invoices, historicalPatch?.invoices]);
+  const creditRefunds = useMemo(() => mergeById(boutique.clientCreditRefunds ?? [], historicalPatch?.clientCreditRefunds ?? []) as NonNullable<typeof boutique.clientCreditRefunds>, [boutique.clientCreditRefunds, historicalPatch?.clientCreditRefunds]);
 
   useEffect(() => {
-    if (new Date(bounds.from).getTime() >= new Date(boundedBootstrapCutoffIso()).getTime()) {
-      setHistoricalPatch(null);
-      return;
-    }
+    if (new Date(bounds.from).getTime() >= new Date(boundedBootstrapCutoffIso()).getTime()) { setHistoricalPatch(null); return; }
     let cancelled = false;
-    void loadBoutiqueHistoryRange(boutique.id, bounds.from, bounds.to)
-      .then(patch => { if (!cancelled) setHistoricalPatch(patch); })
-      .catch(() => { if (!cancelled) setHistoricalPatch(null); });
+    void loadBoutiqueHistoryRange(boutique.id, bounds.from, bounds.to).then(patch => { if (!cancelled) setHistoricalPatch(patch); }).catch(() => { if (!cancelled) setHistoricalPatch(null); });
     return () => { cancelled = true; };
   }, [boutique.id, bounds.from, bounds.to]);
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setError("");
+    setLoading(true); setError("");
     void Promise.all([
       loadFinancialMetrics({ boutiqueId: boutique.id, ...bounds }),
       loadSalesProductReport({ boutiqueId: boutique.id, ...bounds }),
       canSeeMargin ? loadEmployeePerformanceReport({ boutiqueId: boutique.id, ...bounds }) : Promise.resolve(null),
-    ]).then(([financial, products, employees]) => {
+      loadStockInventoryReport({ boutiqueId: boutique.id, ...bounds, dormantDays }),
+    ]).then(([financial, products, employees, stock]) => {
       if (cancelled) return;
-      setMetrics(financial);
-      setSalesReport(products);
-      setEmployeeReport(employees);
-    }).catch(cause => {
-      if (!cancelled) setError(cause instanceof Error ? cause.message : "Rapport indisponible");
-    }).finally(() => {
-      if (!cancelled) setLoading(false);
-    });
+      setMetrics(financial); setSalesReport(products); setEmployeeReport(employees); setStockReport(stock);
+    }).catch(cause => { if (!cancelled) setError(cause instanceof Error ? cause.message : "Rapport indisponible"); }).finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [boutique.id, bounds.from, bounds.to, canSeeMargin]);
+  }, [boutique.id, bounds.from, bounds.to, canSeeMargin, dormantDays]);
 
   const filtPayments = filterPaymentEventsByPeriod(invoices, period, customFrom, customTo);
   const filtCreditRefunds = filterByPeriod(creditRefunds, period, customFrom, customTo);
@@ -102,11 +74,7 @@ export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique:
   const byMethode = reportPaymentMethods.map(m => {
     const payments = filtPayments.filter(payment => payment.paymentMethod === m);
     const refunds = filtCreditRefunds.filter(refund => refund.paymentMethod === m);
-    return {
-      m,
-      total: payments.reduce((sum, payment) => sum + payment.signedAmount, 0) - refunds.reduce((sum, refund) => sum + refund.amount, 0),
-      count: payments.length + refunds.length,
-    };
+    return { m, total: payments.reduce((sum, payment) => sum + payment.signedAmount, 0) - refunds.reduce((sum, refund) => sum + refund.amount, 0), count: payments.length + refunds.length };
   }).filter(row => row.count > 0);
 
   const filteredProducts = useMemo(() => {
@@ -115,104 +83,73 @@ export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique:
   }, [salesReport?.products, category]);
   const best = useMemo(() => [...filteredProducts].sort((a, b) => b.invoiced_revenue - a.invoiced_revenue).slice(0, 8), [filteredProducts]);
   const worst = useMemo(() => [...filteredProducts].sort((a, b) => a.invoiced_revenue - b.invoiced_revenue).slice(0, 8), [filteredProducts]);
+  const fastRotation = useMemo(() => (stockReport?.products ?? []).filter(row => row.rotation_class === "rapide").sort((a, b) => b.net_sold_qty - a.net_sold_qty).slice(0, 8), [stockReport]);
+  const slowRotation = useMemo(() => (stockReport?.products ?? []).filter(row => row.rotation_class === "lente" || row.rotation_class === "dormant").sort((a, b) => a.net_sold_qty - b.net_sold_qty).slice(0, 8), [stockReport]);
+  const dormantProducts = useMemo(() => (stockReport?.products ?? []).filter(row => row.dormant && row.current_stock > 0).sort((a, b) => b.current_stock - a.current_stock).slice(0, 12), [stockReport]);
+  const cumulativeVarianceQty = (stockReport?.inventory_variances ?? []).reduce((sum, row) => sum + Number(row.variance_qty_abs || 0), 0);
+  const cumulativeVarianceCost = canSeeMargin ? (stockReport?.inventory_variances ?? []).reduce((sum, row) => sum + Math.abs(Number(row.variance_cost || 0)), 0) : null;
 
-  const periodBtns: Array<{ id: DashPeriod; label: string }> = [
-    { id: "jour", label: "Aujourd'hui" },
-    { id: "semaine", label: "Semaine" },
-    { id: "mois", label: "Mois" },
-    { id: "custom", label: "Personnalisé" },
-  ];
-  const periodLabel: Record<DashPeriod, string> = {
-    jour: "Aujourd'hui",
-    semaine: "7 jours",
-    mois: "Ce mois",
-    annee: "Cette année",
-    custom: "Période personnalisée",
-  };
-
+  const periodBtns: Array<{ id: DashPeriod; label: string }> = [{ id: "jour", label: "Aujourd'hui" }, { id: "semaine", label: "Semaine" }, { id: "mois", label: "Mois" }, { id: "custom", label: "Personnalisé" }];
+  const periodLabel: Record<DashPeriod, string> = { jour: "Aujourd'hui", semaine: "7 jours", mois: "Ce mois", annee: "Cette année", custom: "Période personnalisée" };
   const reconciliationGap = metrics && salesReport ? Math.abs(Number(metrics.invoiced_revenue) - Number(salesReport.invoiced_revenue)) : 0;
   const employeeReconciliationGap = metrics && employeeReport ? Math.abs(Number(metrics.invoiced_revenue) - Number(employeeReport.invoiced_revenue)) : 0;
   const marginWarning = canSeeMargin && metrics?.realized_margin_fifo != null && ((metrics.margin_coverage_rate ?? 100) < 99.99 || (metrics.margin_unmatched_lines ?? 0) > 0)
-    ? `Couverture FIFO ${new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 }).format(metrics.margin_coverage_rate ?? 0)} % · ${metrics.margin_unmatched_lines ?? 0} ligne(s) sans coût fiable`
-    : null;
+    ? `Couverture FIFO ${new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 }).format(metrics.margin_coverage_rate ?? 0)} % · ${metrics.margin_unmatched_lines ?? 0} ligne(s) sans coût fiable` : null;
 
   function buildPdfHtml() {
     const productRows = best.map(row => `<tr><td>${row.product_name}</td><td>${row.category_name}</td><td class="num">${new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 2 }).format(row.quantity)}</td><td class="num">${fmt(row.invoiced_revenue)}</td>${canSeeMargin ? `<td class="num">${row.realized_margin_fifo == null ? "—" : fmt(row.realized_margin_fifo)}</td>` : ""}</tr>`).join("");
-    const paymentRows = byMethode.map(row => `<tr><td>${row.m}</td><td class="num">${row.count}</td><td class="num">${fmt(row.total)}</td></tr>`).join("");
     const employeeRows = canSeeMargin ? (employeeReport?.employees ?? []).map(row => `<tr><td>${row.operator_name}</td><td class="num">${fmt(row.invoiced_revenue)}</td><td class="num">${row.sales_count}</td><td class="num">${fmt(row.average_basket)}</td><td class="num">${row.returns_count}</td><td class="num">${row.return_rate == null ? "—" : `${new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 }).format(row.return_rate)} %`}</td></tr>`).join("") : "";
-    return `<!doctype html><html><head><meta charset="utf-8"><style>body{font-family:Arial,sans-serif;padding:28px;color:#18181b}h1{font-size:22px}h2{font-size:14px;margin-top:24px;border-bottom:1px solid #ddd;padding-bottom:6px}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.k{background:#f7f7f7;padding:12px;border-radius:10px}.l{font-size:9px;color:#777;text-transform:uppercase}.v{font-size:16px;font-weight:800;margin-top:4px}table{width:100%;border-collapse:collapse;font-size:11px}th,td{padding:7px;border-bottom:1px solid #eee;text-align:left}.num{text-align:right}</style></head><body><h1>${boutique.nom} — Rapport ventes</h1><p>${periodLabel[period]} · ${new Date().toLocaleString("fr-FR")}</p><div class="grid"><div class="k"><div class="l">CA facturé</div><div class="v">${fmt(metrics?.invoiced_revenue ?? 0)}</div></div><div class="k"><div class="l">CA encaissé</div><div class="v">${fmt(metrics?.collected_cash ?? 0)}</div></div><div class="k"><div class="l">Transactions</div><div class="v">${metrics?.sales_count ?? 0}</div></div><div class="k"><div class="l">Panier moyen</div><div class="v">${fmt(metrics?.average_basket ?? 0)}</div></div></div><h2>Meilleurs produits</h2><table><thead><tr><th>Produit</th><th>Catégorie</th><th class="num">Qté</th><th class="num">CA</th>${canSeeMargin ? '<th class="num">Marge FIFO</th>' : ''}</tr></thead><tbody>${productRows}</tbody></table>${canSeeMargin ? `<h2>Performance par employé</h2><table><thead><tr><th>Employé</th><th class="num">CA</th><th class="num">Ventes</th><th class="num">Panier moyen</th><th class="num">Retours</th><th class="num">Taux retour</th></tr></thead><tbody>${employeeRows}</tbody></table>` : ""}<h2>Modes de paiement</h2><table><thead><tr><th>Mode</th><th class="num">Opérations</th><th class="num">Montant</th></tr></thead><tbody>${paymentRows}</tbody></table></body></html>`;
+    const stockRows = (stockReport?.products ?? []).slice(0, 12).map(row => `<tr><td>${row.product_name}</td><td>${row.rotation_class}</td><td class="num">${row.net_sold_qty}</td><td class="num">${row.current_stock}</td>${canSeeMargin ? `<td class="num">${row.fifo_stock_value == null ? "—" : fmt(row.fifo_stock_value)}</td>` : ""}</tr>`).join("");
+    const paymentRows = byMethode.map(row => `<tr><td>${row.m}</td><td class="num">${row.count}</td><td class="num">${fmt(row.total)}</td></tr>`).join("");
+    return `<!doctype html><html><head><meta charset="utf-8"><style>body{font-family:Arial,sans-serif;padding:28px;color:#18181b}h1{font-size:22px}h2{font-size:14px;margin-top:24px;border-bottom:1px solid #ddd;padding-bottom:6px}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.k{background:#f7f7f7;padding:12px;border-radius:10px}.l{font-size:9px;color:#777;text-transform:uppercase}.v{font-size:16px;font-weight:800;margin-top:4px}table{width:100%;border-collapse:collapse;font-size:11px}th,td{padding:7px;border-bottom:1px solid #eee;text-align:left}.num{text-align:right}</style></head><body><h1>${boutique.nom} — Rapport</h1><p>${periodLabel[period]} · ${new Date().toLocaleString("fr-FR")}</p><div class="grid"><div class="k"><div class="l">CA facturé</div><div class="v">${fmt(metrics?.invoiced_revenue ?? 0)}</div></div><div class="k"><div class="l">CA encaissé</div><div class="v">${fmt(metrics?.collected_cash ?? 0)}</div></div><div class="k"><div class="l">Transactions</div><div class="v">${metrics?.sales_count ?? 0}</div></div><div class="k"><div class="l">Panier moyen</div><div class="v">${fmt(metrics?.average_basket ?? 0)}</div></div></div><h2>Meilleurs produits</h2><table><tbody>${productRows}</tbody></table>${canSeeMargin ? `<h2>Performance par employé</h2><table><tbody>${employeeRows}</tbody></table>` : ""}<h2>Stock & inventaire</h2>${canSeeMargin ? `<p>Valorisation FIFO actuelle : <b>${fmt(stockReport?.stock_value_fifo ?? 0)}</b></p>` : ""}<table><tbody>${stockRows}</tbody></table><h2>Modes de paiement</h2><table><tbody>${paymentRows}</tbody></table></body></html>`;
   }
 
   async function downloadPdf() {
     if (exporting) return;
     setExporting(true);
-    const iframe = document.createElement("iframe");
-    iframe.style.cssText = "position:fixed;left:-10000px;top:0;width:900px;height:1200px;border:0;background:#fff";
-    document.body.appendChild(iframe);
+    const iframe = document.createElement("iframe"); iframe.style.cssText = "position:fixed;left:-10000px;top:0;width:900px;height:1200px;border:0;background:#fff"; document.body.appendChild(iframe);
     try {
-      const doc = iframe.contentDocument ?? iframe.contentWindow?.document;
-      if (!doc) throw new Error("Aperçu PDF indisponible");
-      doc.open(); doc.write(buildPdfHtml()); doc.close();
-      await new Promise(resolve => setTimeout(resolve, 250));
-      const { default: html2canvas } = await import("html2canvas");
-      const { default: jsPDF } = await import("jspdf");
+      const doc = iframe.contentDocument ?? iframe.contentWindow?.document; if (!doc) throw new Error("Aperçu PDF indisponible");
+      doc.open(); doc.write(buildPdfHtml()); doc.close(); await new Promise(resolve => setTimeout(resolve, 250));
+      const { default: html2canvas } = await import("html2canvas"); const { default: jsPDF } = await import("jspdf");
       const canvas = await html2canvas(doc.body, { scale: 1.4, useCORS: true, backgroundColor: "#ffffff", windowWidth: 900 });
-      const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-      const pdfW = pdf.internal.pageSize.getWidth();
-      const pdfH = pdf.internal.pageSize.getHeight();
-      const imgH = canvas.height / canvas.width * pdfW;
-      const img = canvas.toDataURL("image/jpeg", 0.88);
-      for (let offset = 0; offset < imgH; offset += pdfH) {
-        if (offset > 0) pdf.addPage();
-        pdf.addImage(img, "JPEG", 0, -offset, pdfW, imgH);
-      }
-      pdf.save(`Rapport-ventes-${boutique.nom.replace(/[^a-zA-Z0-9_-]+/g, "-")}-${period}.pdf`);
-    } finally {
-      iframe.remove();
-      setExporting(false);
-    }
+      const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" }); const pdfW = pdf.internal.pageSize.getWidth(); const pdfH = pdf.internal.pageSize.getHeight(); const imgH = canvas.height / canvas.width * pdfW; const img = canvas.toDataURL("image/jpeg", 0.88);
+      for (let offset = 0; offset < imgH; offset += pdfH) { if (offset > 0) pdf.addPage(); pdf.addImage(img, "JPEG", 0, -offset, pdfW, imgH); }
+      pdf.save(`Rapport-${boutique.nom.replace(/[^a-zA-Z0-9_-]+/g, "-")}-${period}.pdf`);
+    } finally { iframe.remove(); setExporting(false); }
   }
 
-  return <div data-screen-source="canonical-report-v3" className="space-y-4 pb-24">
-    <div className="flex gap-1.5 bg-card rounded-2xl p-1.5 border border-border">
-      {periodBtns.map(item => <button key={item.id} onClick={() => setPeriod(item.id)} className="flex-1 py-2 rounded-xl text-xs font-bold" style={{ background: period === item.id ? RC : "transparent", color: period === item.id ? "#fff" : "#6b7280" }}>{item.label}</button>)}
-    </div>
+  return <div data-screen-source="canonical-report-v4" className="space-y-4 pb-24">
+    <div className="flex gap-1.5 bg-card rounded-2xl p-1.5 border border-border">{periodBtns.map(item => <button key={item.id} onClick={() => setPeriod(item.id)} className="flex-1 py-2 rounded-xl text-xs font-bold" style={{ background: period === item.id ? RC : "transparent", color: period === item.id ? "#fff" : "#6b7280" }}>{item.label}</button>)}</div>
     {period === "custom" && <div className="flex gap-2"><div className="flex-1"><label className="text-xs text-muted-foreground font-bold block mb-1">DU</label><input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)} className={inputCls} /></div><div className="flex-1"><label className="text-xs text-muted-foreground font-bold block mb-1">AU</label><input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)} className={inputCls} /></div></div>}
-
     {error && <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{error}</div>}
     {loading && metrics && <div className="rounded-xl border border-border bg-muted px-3 py-2 text-xs font-semibold text-muted-foreground">Actualisation du rapport…</div>}
     {marginWarning && <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">{marginWarning}</div>}
     {reconciliationGap > 0.5 && <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">Écart de réconciliation produits / CA facturé : {fmt(reconciliationGap)}</div>}
     {employeeReconciliationGap > 0.5 && <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">Écart de réconciliation employés / CA facturé : {fmt(employeeReconciliationGap)}</div>}
 
-    <div className="grid grid-cols-2 gap-2">
-      {[
-        { label: "CA facturé", value: fmt(metrics?.invoiced_revenue ?? 0), color: "#C9A227" },
-        { label: "CA encaissé", value: fmt(metrics?.collected_cash ?? 0), color: RC },
-        { label: "Transactions", value: `${metrics?.sales_count ?? 0}`, color: "#6b7280" },
-        { label: "Panier moyen", value: fmt(metrics?.average_basket ?? 0), color: "#a855f7" },
-        { label: "Impayé sur la période", value: fmt(metrics?.period_outstanding ?? 0), color: SEM.warning.accent },
-        ...(canSeeMargin && metrics?.realized_margin_fifo != null ? [{ label: "Marge commerciale FIFO", value: fmt(metrics.realized_margin_fifo), color: metrics.realized_margin_fifo >= 0 ? SEM.success.accent : SEM.danger.accent }] : []),
-      ].map(card => <div key={card.label} className="bg-card rounded-2xl border border-border p-4"><p className="text-xs text-muted-foreground font-bold uppercase tracking-wide">{card.label}</p><p className="text-2xl font-black mt-1" style={{ color: card.color, fontFamily: "'Nunito',sans-serif" }}>{card.value}</p></div>)}
-    </div>
+    <div className="grid grid-cols-2 gap-2">{[
+      { label: "CA facturé", value: fmt(metrics?.invoiced_revenue ?? 0), color: "#C9A227" }, { label: "CA encaissé", value: fmt(metrics?.collected_cash ?? 0), color: RC }, { label: "Transactions", value: `${metrics?.sales_count ?? 0}`, color: "#6b7280" }, { label: "Panier moyen", value: fmt(metrics?.average_basket ?? 0), color: "#a855f7" }, { label: "Impayé sur la période", value: fmt(metrics?.period_outstanding ?? 0), color: SEM.warning.accent }, ...(canSeeMargin && metrics?.realized_margin_fifo != null ? [{ label: "Marge commerciale FIFO", value: fmt(metrics.realized_margin_fifo), color: metrics.realized_margin_fifo >= 0 ? SEM.success.accent : SEM.danger.accent }] : []),
+    ].map(card => <div key={card.label} className="bg-card rounded-2xl border border-border p-4"><p className="text-xs text-muted-foreground font-bold uppercase tracking-wide">{card.label}</p><p className="text-2xl font-black mt-1" style={{ color: card.color, fontFamily: "'Nunito',sans-serif" }}>{card.value}</p></div>)}</div>
 
-    <div className="bg-card rounded-2xl border border-border overflow-hidden">
-      <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3"><div className="flex items-center gap-2"><BookOpen size={16} style={{ color: RC }} /><div><p className="font-bold text-sm">Classement produits</p><p className="text-xs text-muted-foreground">Quantité nette, CA facturé net et marge FIFO canonique</p></div></div><div className="flex items-center gap-1.5"><Filter size={14} className="text-muted-foreground" /><select value={category} onChange={e => setCategory(e.target.value)} className="max-w-[150px] rounded-lg border border-border bg-background px-2 py-1.5 text-xs font-bold"><option value="all">Toutes catégories</option>{(salesReport?.categories ?? []).map(item => <option key={item.id || "uncategorized"} value={item.id}>{item.name}</option>)}</select></div></div>
-      <div className="grid md:grid-cols-2 md:divide-x divide-border">
-        <div><div className="px-4 py-2.5 bg-muted/40 flex items-center gap-2"><TrendingUp size={15} className="text-emerald-600" /><p className="text-xs font-black">Meilleurs vendeurs</p></div>{best.length === 0 ? <p className="px-4 py-6 text-sm text-muted-foreground">Aucune vente sur la période</p> : best.map((row, index) => <ProductRow key={row.product_id} row={row} rank={index + 1} canSeeMargin={canSeeMargin} />)}</div>
-        <div><div className="px-4 py-2.5 bg-muted/40 flex items-center gap-2"><TrendingDown size={15} className="text-amber-600" /><p className="text-xs font-black">Plus faibles vendeurs</p></div>{worst.length === 0 ? <p className="px-4 py-6 text-sm text-muted-foreground">Aucune vente sur la période</p> : worst.map((row, index) => <ProductRow key={row.product_id} row={row} rank={index + 1} canSeeMargin={canSeeMargin} />)}</div>
-      </div>
-    </div>
+    <div className="bg-card rounded-2xl border border-border overflow-hidden"><div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3"><div className="flex items-center gap-2"><BookOpen size={16} style={{ color: RC }} /><div><p className="font-bold text-sm">Classement produits</p><p className="text-xs text-muted-foreground">Quantité nette, CA facturé net et marge FIFO canonique</p></div></div><div className="flex items-center gap-1.5"><Filter size={14} className="text-muted-foreground" /><select value={category} onChange={e => setCategory(e.target.value)} className="max-w-[150px] rounded-lg border border-border bg-background px-2 py-1.5 text-xs font-bold"><option value="all">Toutes catégories</option>{(salesReport?.categories ?? []).map(item => <option key={item.id || "uncategorized"} value={item.id}>{item.name}</option>)}</select></div></div><div className="grid md:grid-cols-2 md:divide-x divide-border"><div><div className="px-4 py-2.5 bg-muted/40 flex items-center gap-2"><TrendingUp size={15} className="text-emerald-600" /><p className="text-xs font-black">Meilleurs vendeurs</p></div>{best.length === 0 ? <p className="px-4 py-6 text-sm text-muted-foreground">Aucune vente sur la période</p> : best.map((row, index) => <ProductRow key={row.product_id} row={row} rank={index + 1} canSeeMargin={canSeeMargin} />)}</div><div><div className="px-4 py-2.5 bg-muted/40 flex items-center gap-2"><TrendingDown size={15} className="text-amber-600" /><p className="text-xs font-black">Plus faibles vendeurs</p></div>{worst.length === 0 ? <p className="px-4 py-6 text-sm text-muted-foreground">Aucune vente sur la période</p> : worst.map((row, index) => <ProductRow key={row.product_id} row={row} rank={index + 1} canSeeMargin={canSeeMargin} />)}</div></div></div>
 
-    {canSeeMargin && <div className="bg-card rounded-2xl border border-border overflow-hidden">
-      <div className="px-4 py-3 border-b border-border flex items-center gap-2"><Users size={16} style={{ color: RC }} /><div><p className="font-bold text-sm">Performance par employé</p><p className="text-xs text-muted-foreground">CA facturé net, ventes, panier moyen et taux de retours</p></div></div>
-      {(employeeReport?.employees ?? []).length === 0 ? <p className="px-4 py-6 text-sm text-muted-foreground">Aucune activité attribuée sur la période</p> : <div className="overflow-x-auto"><table className="w-full text-xs"><thead className="bg-muted/40 text-muted-foreground"><tr><th className="px-4 py-2 text-left">Employé</th><th className="px-3 py-2 text-right">CA</th><th className="px-3 py-2 text-right">Ventes</th><th className="px-3 py-2 text-right">Panier moyen</th><th className="px-3 py-2 text-right">Retours</th><th className="px-4 py-2 text-right">Taux retour</th></tr></thead><tbody>{(employeeReport?.employees ?? []).map(row => <tr key={row.operator_id ?? "unassigned"} className="border-t border-border"><td className="px-4 py-3 font-bold">{row.operator_name}</td><td className="px-3 py-3 text-right font-black">{fmt(row.invoiced_revenue)}</td><td className="px-3 py-3 text-right">{row.sales_count}</td><td className="px-3 py-3 text-right">{fmt(row.average_basket)}</td><td className="px-3 py-3 text-right">{row.returns_count}</td><td className="px-4 py-3 text-right">{row.return_rate == null ? "—" : `${new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 }).format(row.return_rate)} %`}</td></tr>)}</tbody></table></div>}
-    </div>}
+    {canSeeMargin && <div className="bg-card rounded-2xl border border-border overflow-hidden"><div className="px-4 py-3 border-b border-border flex items-center gap-2"><Users size={16} style={{ color: RC }} /><div><p className="font-bold text-sm">Performance par employé</p><p className="text-xs text-muted-foreground">CA facturé net, ventes, panier moyen et taux de retours</p></div></div>{(employeeReport?.employees ?? []).length === 0 ? <p className="px-4 py-6 text-sm text-muted-foreground">Aucune activité attribuée sur la période</p> : <div className="overflow-x-auto"><table className="w-full text-xs"><thead className="bg-muted/40 text-muted-foreground"><tr><th className="px-4 py-2 text-left">Employé</th><th className="px-3 py-2 text-right">CA</th><th className="px-3 py-2 text-right">Ventes</th><th className="px-3 py-2 text-right">Panier moyen</th><th className="px-3 py-2 text-right">Retours</th><th className="px-4 py-2 text-right">Taux retour</th></tr></thead><tbody>{(employeeReport?.employees ?? []).map(row => <tr key={row.operator_id ?? "unassigned"} className="border-t border-border"><td className="px-4 py-3 font-bold">{row.operator_name}</td><td className="px-3 py-3 text-right font-black">{fmt(row.invoiced_revenue)}</td><td className="px-3 py-3 text-right">{row.sales_count}</td><td className="px-3 py-3 text-right">{fmt(row.average_basket)}</td><td className="px-3 py-3 text-right">{row.returns_count}</td><td className="px-4 py-3 text-right">{row.return_rate == null ? "—" : `${new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 }).format(row.return_rate)} %`}</td></tr>)}</tbody></table></div>}</div>}
+
+    <div className="bg-card rounded-2xl border border-border overflow-hidden"><div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3"><div className="flex items-center gap-2"><Boxes size={16} style={{ color: RC }} /><div><p className="font-bold text-sm">Stock & inventaire</p><p className="text-xs text-muted-foreground">Rotation, valorisation FIFO, dormants et écarts d'inventaire</p></div></div><div className="flex items-center gap-2"><span className="text-[11px] text-muted-foreground">Dormant après</span><input aria-label="Seuil produits dormants" type="number" min={1} max={3650} value={dormantDays} onChange={e => setDormantDays(Math.max(1, Math.min(3650, Number(e.target.value) || 60)))} className="w-20 rounded-lg border border-border bg-background px-2 py-1.5 text-xs font-bold" /><span className="text-[11px] text-muted-foreground">jours</span></div></div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 p-4 bg-muted/20"><div><p className="text-[10px] uppercase font-bold text-muted-foreground">Produits dormants</p><p className="font-black text-lg">{dormantProducts.length}</p></div><div><p className="text-[10px] uppercase font-bold text-muted-foreground">Écart inventaire cumulé</p><p className="font-black text-lg">{new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 2 }).format(cumulativeVarianceQty)}</p></div>{canSeeMargin && <div><p className="text-[10px] uppercase font-bold text-muted-foreground">Valorisation FIFO</p><p className="font-black text-lg">{fmt(stockReport?.stock_value_fifo ?? 0)}</p></div>}{canSeeMargin && <div><p className="text-[10px] uppercase font-bold text-muted-foreground">Écart coût cumulé</p><p className="font-black text-lg">{fmt(cumulativeVarianceCost ?? 0)}</p></div>}</div>
+      <div className="grid md:grid-cols-2 md:divide-x divide-border"><RotationList title="Rotation rapide" rows={fastRotation} /><RotationList title="Rotation lente" rows={slowRotation} /></div>
+      <div className="border-t border-border px-4 py-3"><div className="flex items-center gap-2 mb-2"><PackageSearch size={15} className="text-amber-600" /><p className="text-xs font-black">Produits dormants avec stock</p></div>{dormantProducts.length === 0 ? <p className="text-xs text-muted-foreground">Aucun produit dormant avec stock.</p> : <div className="grid md:grid-cols-2 gap-2">{dormantProducts.map(row => <div key={row.product_id} className="rounded-xl border border-border px-3 py-2"><div className="flex justify-between gap-2"><span className="text-xs font-bold truncate">{row.product_name}</span><span className="text-xs font-black">Stock {new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 2 }).format(row.current_stock)}</span></div><p className="text-[11px] text-muted-foreground mt-1">{row.last_sale_at ? `Dernière vente il y a ${row.days_since_last_sale ?? 0} j` : "Aucune vente enregistrée"}{canSeeMargin && row.fifo_stock_value != null ? ` · FIFO ${fmt(row.fifo_stock_value)}` : ""}</p></div>)}</div>}</div>
+      {(stockReport?.inventory_variances ?? []).length > 0 && <div className="border-t border-border overflow-x-auto"><table className="w-full text-xs"><thead className="bg-muted/40 text-muted-foreground"><tr><th className="px-4 py-2 text-left">Inventaire</th><th className="px-3 py-2 text-right">Écart quantité</th>{canSeeMargin && <th className="px-4 py-2 text-right">Écart coût</th>}</tr></thead><tbody>{(stockReport?.inventory_variances ?? []).map(row => <tr key={row.session_id} className="border-t border-border"><td className="px-4 py-3"><p className="font-bold">{row.scope_label}</p><p className="text-[10px] text-muted-foreground">{new Date(row.finalized_at).toLocaleDateString("fr-FR")}</p></td><td className="px-3 py-3 text-right">{new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 2 }).format(row.variance_qty_abs)}</td>{canSeeMargin && <td className="px-4 py-3 text-right">{row.variance_cost == null ? "—" : fmt(row.variance_cost)}</td>}</tr>)}</tbody></table></div>}
+    </div>
 
     {byMethode.length > 0 && <div className="bg-card rounded-2xl border border-border overflow-hidden"><div className="px-4 py-3 border-b border-border flex items-center gap-2"><Wallet size={16} style={{ color: RC }} /><p className="font-bold text-sm">Modes de paiement</p></div>{byMethode.map(row => <div key={row.m} className="flex items-center justify-between px-4 py-3 border-b border-border last:border-0"><span className="text-sm flex items-center gap-2">{PM_ICON[row.m]} <span style={{ color: PM_COLOR[row.m] }}>{row.m}</span><span className="text-xs text-muted-foreground">({row.count})</span>{row.m === "Avoir client" && <span className="text-[10px] text-muted-foreground">crédit déjà reçu</span>}</span><span className="font-black text-sm" style={{ color: PM_COLOR[row.m], fontFamily: "'Nunito',sans-serif" }}>{fmt(row.total)}</span></div>)}</div>}
-
-    <div className="bg-card rounded-2xl border border-border p-4 flex items-center justify-between gap-3"><div><p className="font-bold text-sm">Export PDF</p><p className="text-xs text-muted-foreground">KPIs, produits, performances employé et modes de paiement</p></div><button type="button" onClick={() => void downloadPdf()} disabled={exporting || !metrics} className="rounded-xl px-4 py-2.5 text-xs font-black text-white disabled:opacity-50 flex items-center gap-2" style={{ background: RC }}><Download size={15} />{exporting ? "Génération…" : "Télécharger"}</button></div>
+    <div className="bg-card rounded-2xl border border-border p-4 flex items-center justify-between gap-3"><div><p className="font-bold text-sm">Export PDF</p><p className="text-xs text-muted-foreground">KPIs, produits, employés, stock/inventaire et paiements</p></div><button type="button" onClick={() => void downloadPdf()} disabled={exporting || !metrics} className="rounded-xl px-4 py-2.5 text-xs font-black text-white disabled:opacity-50 flex items-center gap-2" style={{ background: RC }}><Download size={15} />{exporting ? "Génération…" : "Télécharger"}</button></div>
   </div>;
+}
+
+function RotationList({ title, rows }: { title: string; rows: StockInventoryReport["products"] }) {
+  return <div><div className="px-4 py-2.5 bg-muted/40"><p className="text-xs font-black">{title}</p></div>{rows.length === 0 ? <p className="px-4 py-5 text-xs text-muted-foreground">Aucun produit</p> : rows.map(row => <div key={row.product_id} className="px-4 py-2.5 border-t border-border flex items-center justify-between gap-3"><div className="min-w-0"><p className="text-xs font-bold truncate">{row.product_name}</p><p className="text-[10px] text-muted-foreground">{row.category_name}</p></div><div className="text-right"><p className="text-xs font-black">{new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 2 }).format(row.net_sold_qty)}</p><p className="text-[10px] text-muted-foreground">vendu net</p></div></div>)}</div>;
 }
 
 function ProductRow({ row, rank, canSeeMargin }: { row: SalesProductReport["products"][number]; rank: number; canSeeMargin: boolean }) {
