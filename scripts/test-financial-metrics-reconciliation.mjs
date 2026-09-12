@@ -5,6 +5,8 @@ const reportEntry = fs.readFileSync("src/app/screens/RapportView.tsx", "utf8");
 const report = reportEntry.includes("RapportViewV2")
   ? fs.readFileSync("src/app/screens/RapportViewV2.tsx", "utf8")
   : reportEntry;
+const reportKpis = fs.readFileSync("src/app/screens/ReportKpiBand.tsx", "utf8");
+const reportSurface = `${report}\n${reportKpis}`;
 const api = fs.readFileSync("src/lib/dashboardApi.ts", "utf8");
 const migration = fs.readFileSync(".github/audit/replay-migrations/20260912165219_canonical_financial_metrics.sql", "utf8");
 const migrationLower = migration.toLowerCase();
@@ -16,6 +18,7 @@ function assert(condition, message) {
 
 assert(dashboard.includes("loadFinancialMetrics"), "Dashboard must consume loadFinancialMetrics");
 assert(report.includes("loadFinancialMetrics"), "Active Rapport view must consume loadFinancialMetrics");
+assert(report.includes("<ReportKpiBand"), "Active Rapport view must render the canonical KPI band");
 if (report !== reportEntry) {
   assert(reportEntry.includes("RapportViewV2"), "Rapport entry must delegate to the active V2 view");
 }
@@ -34,7 +37,7 @@ const canonicalMappings = [
 ];
 for (const [label, field] of canonicalMappings) {
   assert(dashboard.includes(field) || label === "Impayé sur la période", `Dashboard missing canonical field ${field}`);
-  assert(report.includes(field), `Rapport missing canonical field ${field}`);
+  assert(reportSurface.includes(field), `Rapport missing canonical field ${field}`);
 }
 
 assert(dashboard.includes("customer_outstanding_global"), "Dashboard must expose global Encours clients");
