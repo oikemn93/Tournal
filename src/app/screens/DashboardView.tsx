@@ -13,9 +13,8 @@ function periodBounds(period: Period) {
   if (period === "month") {
     return { from: new Date(now.getFullYear(), now.getMonth(), 1).toISOString(), to: to.toISOString() };
   }
-  const days = period === "30d" ? 29 : 6;
+  const days = period === "30d" ? 30 : 7;
   const from = new Date(now);
-  from.setHours(0, 0, 0, 0);
   from.setDate(from.getDate() - days);
   return { from: from.toISOString(), to: to.toISOString() };
 }
