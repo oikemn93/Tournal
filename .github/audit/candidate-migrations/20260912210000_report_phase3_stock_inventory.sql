@@ -12,6 +12,7 @@ as $function$
 declare
   v_can_margin boolean;
   v_result jsonb;
+  v_dormant_from timestamptz;
 begin
   if p_from is null or p_to is null or p_to <= p_from then raise exception 'invalid stock report period'; end if;
   if p_dormant_days is null or p_dormant_days < 1 or p_dormant_days > 3650 then raise exception 'invalid dormant threshold'; end if;
@@ -21,6 +22,7 @@ begin
     or private.auth_has_read_permission(p_boutique_id,'compta')
   ) then raise exception 'forbidden'; end if;
   v_can_margin := private.auth_has_read_permission(p_boutique_id,'marges');
+  v_dormant_from := now()-(p_dormant_days||' days')::interval;
 
   with period_moves as (
     select se.product_id,
@@ -29,23 +31,25 @@ begin
     from public.stock_entries se
     where se.boutique_id=p_boutique_id and se.entry_date>=p_from and se.entry_date<p_to
     group by se.product_id
-  ), last_sales as (
+  ), recent_sales as (
     select se.product_id,max(se.entry_date) as last_sale_at
     from public.stock_entries se
-    where se.boutique_id=p_boutique_id and se.source_invoice_id is not null and se.qty<0
+    where se.boutique_id=p_boutique_id
+      and se.entry_date>=v_dormant_from and se.entry_date<now()+interval '1 second'
+      and se.source_invoice_id is not null and se.qty<0
     group by se.product_id
   ), products_report as (
     select p.id as product_id,p.nom as product_name,p.category_id,coalesce(c.nom,'Sans catégorie') as category_name,
       coalesce(p.stock,0) as current_stock,
       greatest(coalesce(pm.sold_qty,0)-coalesce(pm.returned_qty,0),0) as net_sold_qty,
-      ls.last_sale_at,
-      case when ls.last_sale_at is null then null else floor(extract(epoch from (now()-ls.last_sale_at))/86400)::int end as days_since_last_sale,
-      case when ls.last_sale_at is null or ls.last_sale_at < now()-(p_dormant_days||' days')::interval then true else false end as dormant,
+      rs.last_sale_at,
+      case when rs.last_sale_at is null then null else floor(extract(epoch from (now()-rs.last_sale_at))/86400)::int end as days_since_last_sale,
+      (rs.last_sale_at is null) as dormant,
       case when v_can_margin then private.fifo_stock_value(p_boutique_id,p.id,now(),greatest(coalesce(p.stock,0),0)) else null end as fifo_stock_value
     from public.products p
     left join public.categories c on c.boutique_id=p.boutique_id and c.id=p.category_id
     left join period_moves pm on pm.product_id=p.id
-    left join last_sales ls on ls.product_id=p.id
+    left join recent_sales rs on rs.product_id=p.id
     where p.boutique_id=p_boutique_id and coalesce(p.actif,true)
   ), ranked as (
     select pr.*,percent_rank() over(order by pr.net_sold_qty) as rotation_rank
@@ -56,7 +60,7 @@ begin
       case when v_can_margin then coalesce(s.total_variance_cost,0) else null end as variance_cost
     from public.inventory_sessions s
     left join public.inventory_lines l on l.session_id=s.id
-    where s.boutique_id=p_boutique_id and s.status='terminé'
+    where s.boutique_id=p_boutique_id and s.status='completed'
       and s.finalized_at>=p_from and s.finalized_at<p_to
     group by s.id,s.finalized_at,s.scope_label,s.total_variance_cost
   )
