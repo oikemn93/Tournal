@@ -23,6 +23,23 @@ export type SalesProductReport = {
   categories: Array<{ id: string; name: string }>;
 };
 
+export type EmployeePerformanceRow = {
+  operator_id: string | null;
+  operator_name: string;
+  invoiced_revenue: number;
+  sales_count: number;
+  average_basket: number;
+  returns_count: number;
+  return_rate: number | null;
+};
+
+export type EmployeePerformanceReport = {
+  from: string;
+  to: string;
+  invoiced_revenue: number;
+  employees: EmployeePerformanceRow[];
+};
+
 function messageFrom(body: unknown) {
   if (!body || typeof body !== "object") return "";
   const value = body as Record<string, unknown>;
@@ -49,6 +66,14 @@ async function postRpc<T>(name: string, payload: Record<string, unknown>): Promi
 
 export function loadSalesProductReport(params: { boutiqueId: string; from: string; to: string }) {
   return postRpc<SalesProductReport>("get_sales_product_report", {
+    p_boutique_id: params.boutiqueId,
+    p_from: params.from,
+    p_to: params.to,
+  });
+}
+
+export function loadEmployeePerformanceReport(params: { boutiqueId: string; from: string; to: string }) {
+  return postRpc<EmployeePerformanceReport>("get_employee_performance_report", {
     p_boutique_id: params.boutiqueId,
     p_from: params.from,
     p_to: params.to,
