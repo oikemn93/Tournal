@@ -42,6 +42,14 @@ jobs:
           alter table public.invoices add column if not exists stock_deducted_at timestamptz;
           alter table public.stock_entries add column if not exists note text;
           alter table public.stock_entries add column if not exists reference text;
+          alter table public.products add column if not exists category_id text;
+          create table if not exists public.categories(
+            id text not null,
+            boutique_id text not null,
+            nom text not null,
+            color text,
+            primary key (boutique_id,id)
+          );
           create table if not exists public.transfer_charge_payments(
             id bigint primary key,
             boutique_id text not null,
