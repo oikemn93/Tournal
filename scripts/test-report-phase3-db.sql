@@ -2,12 +2,18 @@
 begin;
 
 insert into public.platform_users(id,phone,nom,initials,is_super_admin,is_suspended,must_change_password)
-values('fdfdfdfd-1111-4111-8111-fdfdfdfdfdfd','+221700000299','Report Phase3 CI','R3',true,false,false);
+values
+('fdfdfdfd-1111-4111-8111-fdfdfdfdfdf1','+221700000297','Report Phase3 Manager','R3',false,false,false),
+('fdfdfdfd-1111-4111-8111-fdfdfdfdfdf2','+221700000298','Report Phase3 Sans Marges','NM',false,false,false),
+('fdfdfdfd-1111-4111-8111-fdfdfdfdfdf3','+221700000299','Report Phase3 Sans Accès','NA',false,false,false);
 insert into public.boutiques(id,nom,ville,tel,directory_visible)
 values('report-phase3-ci','Report Phase3 CI','Dakar',null,true);
 insert into public.boutique_assignments(id,boutique_id,user_id,role,droits)
-values(991990000001,'report-phase3-ci','fdfdfdfd-1111-4111-8111-fdfdfdfdfdfd','owner','{"stock":true,"inventaire":true,"compta":true,"marges":true}'::jsonb);
-select set_config('request.jwt.claims',json_build_object('sub','fdfdfdfd-1111-4111-8111-fdfdfdfdfdfd','role','authenticated')::text,true);
+values
+(991990000001,'report-phase3-ci','fdfdfdfd-1111-4111-8111-fdfdfdfdfdf1','manager','{"stock":true,"inventaire":true,"compta":true,"marges":true}'::jsonb),
+(991990000002,'report-phase3-ci','fdfdfdfd-1111-4111-8111-fdfdfdfdfdf2','manager','{"stock":true,"inventaire":true,"compta":true,"marges":false}'::jsonb),
+(991990000003,'report-phase3-ci','fdfdfdfd-1111-4111-8111-fdfdfdfdfdf3','manager','{"stock":false,"inventaire":false,"compta":false,"marges":false}'::jsonb);
+select set_config('request.jwt.claims',json_build_object('sub','fdfdfdfd-1111-4111-8111-fdfdfdfdfdf1','role','authenticated')::text,true);
 
 insert into public.products(id,boutique_id,nom,stock,low_stock_threshold,prix_achat,actif)
 values
@@ -21,7 +27,7 @@ values
 (991990000003,'report-phase3-ci',991990000002,5,now()-interval '20 days','achat',5,'achat',null,null);
 
 insert into public.inventory_sessions(id,boutique_id,scope_type,scope_label,status,operator_id,started_at,finalized_at,total_variance_cost,as_of_at)
-values('11111111-2222-4333-8444-555555555555','report-phase3-ci','all','Tout le stock','completed','fdfdfdfd-1111-4111-8111-fdfdfdfdfdfd',now()-interval '3 days',now()-interval '2 days',-10,now()-interval '3 days');
+values('11111111-2222-4333-8444-555555555555','report-phase3-ci','all','Tout le stock','completed','fdfdfdfd-1111-4111-8111-fdfdfdfdfdf1',now()-interval '3 days',now()-interval '2 days',-10,now()-interval '3 days');
 insert into public.inventory_lines(session_id,product_id,product_name,unit,theoretical_qty,counted_qty,difference_qty,purchase_price,sale_price)
 values
 ('11111111-2222-4333-8444-555555555555',991990000001,'Rapide','u',9,8,-1,10,20),
@@ -45,7 +51,7 @@ begin
 end
 $test$;
 
-update public.boutique_assignments set droits='{"stock":true,"inventaire":true,"compta":true,"marges":false}'::jsonb where id=991990000001;
+select set_config('request.jwt.claims',json_build_object('sub','fdfdfdfd-1111-4111-8111-fdfdfdfdfdf2','role','authenticated')::text,true);
 do $test$
 declare r jsonb; row1 jsonb;
 begin
@@ -53,10 +59,11 @@ begin
   if r->'stock_value_fifo' <> 'null'::jsonb then raise exception 'stock value leaked without margins: %',r; end if;
   row1 := r->'products'->0;
   if row1->'fifo_stock_value' <> 'null'::jsonb then raise exception 'product FIFO value leaked without margins: %',row1; end if;
+  if r->'inventory_variances'->0->'variance_cost' <> 'null'::jsonb then raise exception 'inventory cost variance leaked without margins: %',r; end if;
 end
 $test$;
 
-update public.boutique_assignments set droits='{"stock":false,"inventaire":false,"compta":false,"marges":false}'::jsonb where id=991990000001;
+select set_config('request.jwt.claims',json_build_object('sub','fdfdfdfd-1111-4111-8111-fdfdfdfdfdf3','role','authenticated')::text,true);
 do $test$
 begin
   begin
