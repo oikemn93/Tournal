@@ -227,4 +227,6 @@
 20260906191745|inventory_race_same_transaction_guard
 20260906192435|dashboard_fifo_stock_value
 20260909201929|generate_boutique_ids_by_default
+20260912144426|unify_revenue_summary
 20260912165219|canonical_financial_metrics
+20260912174106|report_phase1_sales_products
