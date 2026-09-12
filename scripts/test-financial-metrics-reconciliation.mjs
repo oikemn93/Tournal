@@ -42,8 +42,9 @@ assert(!report.includes("getFifoRealizedMargin"), "Rapport must not call a separ
 assert(report.includes("financialMetrics?.cash_expenses"), "Rapport total charges must come from canonical server metrics");
 assert(report.includes("financialMetrics?.operating_cash_expenses"), "Report result-after-charges must use canonical operating expenses");
 
-assert(migration.includes("c.source = 'supplier_receipt' then 0"), "Canonical charge logic must exclude supplier receipts");
-assert(migration.includes("c.source = 'transfer' then coalesce(c.paid_amount,0)"), "Canonical charge logic must use transfer paid amount");
+assert(migration.includes("c.source not in ('supplier_receipt','transfer')"), "Canonical direct-charge logic must exclude supplier receipts and transfer shells");
+assert(migration.includes("public.transfer_charge_payments"), "Canonical charge logic must consume transfer payment events");
+assert(migration.includes("tcp.paid_at >= p_from") && migration.includes("tcp.paid_at < p_to"), "Transfer cash expenses must use real paid_at");
 assert(migration.includes("ip.paid_at >= p_from") && migration.includes("ip.paid_at < p_to"), "CA encaissé must be bounded by real paid_at");
 assert(migration.includes("i.invoice_date >= p_from") && migration.includes("i.invoice_date < p_to"), "CA facturé and sales count must use invoice_date");
 
