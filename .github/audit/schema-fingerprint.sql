@@ -2,6 +2,7 @@
 
 -- Audit-only structural fingerprint. No table data is read.
 -- The expected values were computed read-only from production on 2026-09-06
+-- and reconciled after deploying the canonical financial metrics functions on 2026-09-12,
 -- with the exact same canonicalization below.
 -- Column physical ordinal position (attnum) is intentionally excluded: the
 -- synthetic replay baseline cannot preserve historical storage order, while
@@ -18,7 +19,7 @@ create temp table audit_expected_fingerprint(
 insert into audit_expected_fingerprint(category, object_count, md5) values
   ('columns',     639, 'c0d9e7b93f5aee43a9920f749653c7cf'),
   ('constraints', 255, 'e90f367fcc6dd044a41d7f858b9f9ec9'),
-  ('functions',    205, '64730546c28f8cedccbafd6906ed23d9'),
+  ('functions',    207, '1cd760d97e749c622a5f133a47476dc0'),
   ('indexes',      193, '40da4fb6fd61d7158e4803fc3323f732'),
   ('policies',      88, '2e88704fe8bd522a1b4edaf602697a64'),
   ('relations',     77, 'fe47306893a1d143b92e1e3b9f6aa9a2'),
@@ -40,7 +41,7 @@ columns as (
 ),
 constraints as (
   select concat_ws('|',n.nspname||'.'||c.relname,con.conname,con.contype::text,con.condeferrable::text,con.condeferred::text,con.convalidated::text,pg_get_constraintdef(con.oid,true)) as x
-  from pg_constraint con join pg_class c on c.oid=con.conrelid join pg_namespace n on n.oid=c.relnamespace
+  from pg_constraint con join pg_class c on c.oid=con.conrelid join pg_namespace n on n.oid=con.connamespace
   where n.nspname in ('public','private')
 ),
 indexes as (
