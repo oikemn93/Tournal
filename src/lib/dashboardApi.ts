@@ -3,19 +3,28 @@ import { refreshSessionIfNeeded } from "./api";
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL ?? "https://cnxtylngddwmhugxkzju.supabase.co";
 const PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? "sb_publishable_Jeo4Bx2IsTPCkzsQMYTuFQ_VKPQc9Aq";
 
-export type DashboardSummary = {
+export type FinancialMetrics = {
   from: string;
   to: string;
-  sales: number;
-  collected: number;
-  outstanding: number;
-  charges: number;
+  invoiced_revenue: number;
+  collected_cash: number;
+  customer_outstanding_global: number;
+  period_outstanding: number;
+  cash_expenses: number;
+  operating_cash_expenses: number;
   sales_count: number;
+  average_basket: number;
   clients_count: number;
   low_stock_count: number;
-  margin: number | null;
-  stock_value: number | null;
-  series: Array<{ date: string; sales: number }>;
+  realized_margin_fifo: number | null;
+  margin_rate: number | null;
+  fifo_cost: number | null;
+  margin_revenue: number | null;
+  margin_gross_revenue: number | null;
+  margin_coverage_rate: number | null;
+  margin_line_count: number | null;
+  margin_unmatched_lines: number | null;
+  sales_series: Array<{ date: string; sales: number }>;
 };
 
 function messageFrom(body: unknown) {
@@ -26,13 +35,13 @@ function messageFrom(body: unknown) {
     .join(" ");
 }
 
-export async function loadDashboardSummary(params: {
+export async function loadFinancialMetrics(params: {
   boutiqueId: string;
-  from?: string | null;
-  to?: string | null;
-}): Promise<DashboardSummary> {
+  from: string;
+  to: string;
+}): Promise<FinancialMetrics> {
   const session = await refreshSessionIfNeeded();
-  const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_dashboard_summary`, {
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_financial_metrics`, {
     method: "POST",
     headers: {
       apikey: PUBLISHABLE_KEY,
@@ -41,11 +50,11 @@ export async function loadDashboardSummary(params: {
     },
     body: JSON.stringify({
       p_boutique_id: params.boutiqueId,
-      p_from: params.from ?? null,
-      p_to: params.to ?? null,
+      p_from: params.from,
+      p_to: params.to,
     }),
   });
   const body = await response.json().catch(() => null);
-  if (!response.ok) throw new Error(messageFrom(body) || "Dashboard indisponible");
-  return body as DashboardSummary;
+  if (!response.ok) throw new Error(messageFrom(body) || "Indicateurs financiers indisponibles");
+  return body as FinancialMetrics;
 }
