@@ -87,6 +87,7 @@ export type ClientReportRow = {
 };
 
 export type ClientReport = {
+  boutique_id: string;
   from: string;
   to: string;
   clients_count: number;
@@ -151,9 +152,9 @@ export function loadStockInventoryReport(params: { boutiqueId: string; from: str
 }
 
 export function loadClientReport(params: { boutiqueId: string; from: string; to: string }) {
-  return postRpc<ClientReport>("get_client_report", {
+  return postRpc<Omit<ClientReport, "boutique_id">>("get_client_report", {
     p_boutique_id: params.boutiqueId,
     p_from: params.from,
     p_to: params.to,
-  });
+  }).then(report => ({ ...report, boutique_id: params.boutiqueId }));
 }
