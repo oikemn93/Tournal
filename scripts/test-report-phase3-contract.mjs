@@ -1,6 +1,9 @@
 import fs from "node:fs";
 
-const report = fs.readFileSync("src/app/screens/RapportView.tsx", "utf8");
+const entry = fs.readFileSync("src/app/screens/RapportView.tsx", "utf8");
+const report = entry.includes("RapportViewV2")
+  ? fs.readFileSync("src/app/screens/RapportViewV2.tsx", "utf8")
+  : entry;
 const api = fs.readFileSync("src/lib/reportApi.ts", "utf8");
 const migration = fs.readFileSync(".github/audit/replay-migrations/20260912190106_report_phase3_stock_inventory.sql", "utf8");
 
@@ -8,10 +11,10 @@ function assert(condition, message) { if (!condition) throw new Error(message); 
 
 assert(api.includes("get_stock_inventory_report"), "Phase 3 client must call stock inventory RPC");
 assert(report.includes("loadStockInventoryReport"), "Rapport must load stock inventory report");
-assert(report.includes("Stock & inventaire"), "Stock & inventory section missing");
-assert(report.includes("Seuil produits dormants"), "Dormant threshold control missing");
-assert(report.includes("Valorisation FIFO"), "FIFO stock valuation missing");
-assert(report.includes("Écart inventaire cumulé"), "Cumulative inventory variance missing");
+assert(report.includes('title="Stock"') && report.includes('section === "stock"'), "Stock section must exist and lazy-load");
+assert(report.includes("dormantDays") && report.includes("refreshStock"), "Dormant threshold control missing");
+assert(report.includes("fifo_stock_value") || report.includes("stock_value_fifo"), "FIFO stock valuation missing");
+assert(report.includes("variance_qty_abs") || report.includes("inventory_variances"), "Inventory variance detail missing");
 assert(migration.includes("private.fifo_stock_value"), "Stock valuation must reuse canonical FIFO stock value");
 assert(migration.includes("se.entry_date>=p_from") && migration.includes("se.entry_date<p_to"), "Rotation reads must be bounded by period");
 assert(migration.includes("se.entry_date>=v_dormant_from"), "Dormancy lookup must be bounded by threshold");
