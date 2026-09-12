@@ -1,7 +1,12 @@
 import fs from "node:fs";
 
 const dashboard = fs.readFileSync("src/app/screens/DashboardView.tsx", "utf8");
-const report = fs.readFileSync("src/app/screens/RapportView.tsx", "utf8");
+const reportEntry = fs.readFileSync("src/app/screens/RapportView.tsx", "utf8");
+const report = reportEntry.includes("RapportViewV2")
+  ? fs.readFileSync("src/app/screens/RapportViewV2.tsx", "utf8")
+  : reportEntry;
+const reportKpis = fs.readFileSync("src/app/screens/ReportKpiBand.tsx", "utf8");
+const reportSurface = `${report}\n${reportKpis}`;
 const api = fs.readFileSync("src/lib/dashboardApi.ts", "utf8");
 const migration = fs.readFileSync(".github/audit/replay-migrations/20260912165219_canonical_financial_metrics.sql", "utf8");
 const migrationLower = migration.toLowerCase();
@@ -11,8 +16,11 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-for (const source of [dashboard, report]) {
-  assert(source.includes("loadFinancialMetrics"), "Dashboard and Rapport must consume loadFinancialMetrics");
+assert(dashboard.includes("loadFinancialMetrics"), "Dashboard must consume loadFinancialMetrics");
+assert(report.includes("loadFinancialMetrics"), "Active Rapport view must consume loadFinancialMetrics");
+assert(report.includes("<ReportKpiBand"), "Active Rapport view must render the canonical KPI band");
+if (report !== reportEntry) {
+  assert(reportEntry.includes("RapportViewV2"), "Rapport entry must delegate to the active V2 view");
 }
 
 assert(api.includes("/rest/v1/rpc/get_financial_metrics"), "Financial client must call get_financial_metrics");
@@ -29,12 +37,12 @@ const canonicalMappings = [
 ];
 for (const [label, field] of canonicalMappings) {
   assert(dashboard.includes(field) || label === "Impayé sur la période", `Dashboard missing canonical field ${field}`);
-  assert(report.includes(field), `Rapport missing canonical field ${field}`);
+  assert(reportSurface.includes(field), `Rapport missing canonical field ${field}`);
 }
 
 assert(dashboard.includes("customer_outstanding_global"), "Dashboard must expose global Encours clients");
 assert(dashboard.includes('label: "Encours clients"'), "Dashboard global debt must be labelled Encours clients");
-assert(report.includes('label:"Impayé sur la période"') || report.includes('label: "Impayé sur la période"'), "Rapport period debt must be labelled explicitly");
+assert(report.includes("Impayé sur la période"), "Rapport period debt must be labelled explicitly");
 
 assert(!report.includes("const ca           = filtPayments.reduce"), "Rapport must not recompute canonical collected cash locally");
 assert(!report.includes("const caTotal      = filtInv.reduce"), "Rapport must not recompute canonical invoiced revenue locally");
