@@ -1,0 +1,38 @@
+name: Report UI Team Stage 3
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/app/screens/RapportViewV2.tsx"
+      - "src/app/screens/TeamReportSection.tsx"
+      - "src/lib/reportApi.ts"
+      - "scripts/test-report-ui-team-stage3.mjs"
+      - ".github/workflows/report-ui-team-stage3.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/app/screens/RapportViewV2.tsx"
+      - "src/app/screens/TeamReportSection.tsx"
+      - "src/lib/reportApi.ts"
+      - "scripts/test-report-ui-team-stage3.mjs"
+      - ".github/workflows/report-ui-team-stage3.yml"
+permissions:
+  contents: read
+jobs:
+  team-stage3:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: node scripts/test-report-ui-team-stage3.mjs
+      - run: pnpm exec tsc --noEmit
+      - run: pnpm build
