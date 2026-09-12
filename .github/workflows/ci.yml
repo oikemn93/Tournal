@@ -77,6 +77,9 @@ jobs:
       - name: Report phase 3 stock inventory contract
         run: node scripts/test-report-phase3-contract.mjs
 
+      - name: Report phase 4 client analytics contract
+        run: node scripts/test-report-phase4-contract.mjs
+
       - name: Permission audit hardening
         run: node scripts/test-permission-audit-hardening.mjs
 
