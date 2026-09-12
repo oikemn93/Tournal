@@ -1,0 +1,33 @@
+name: Report Phase 5
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  financial-deep-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Phase 5 canonical financial contract
+        run: node scripts/test-report-phase5-contract.mjs
+      - name: TypeScript contract
+        run: pnpm exec tsc --noEmit
+      - name: Production build
+        run: pnpm build
