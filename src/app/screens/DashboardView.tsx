@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ArrowRight, BarChart3, CircleDollarSign, PackageSearch, ReceiptText, TrendingUp, Users } from "lucide-react";
-import { loadDashboardSummary, type DashboardSummary } from "../../lib/dashboardApi";
+import { loadFinancialMetrics, type FinancialMetrics } from "../../lib/dashboardApi";
 import type { Tab } from "../types";
 
 const fmt = (value: number) => `${new Intl.NumberFormat("fr-FR").format(Math.round(value || 0))} F`;
@@ -26,7 +26,7 @@ export function DashboardView({ boutiqueId, canSeeMargin, onNavigate }: {
   onNavigate: (tab: Tab, filter?: Record<string, string>) => void;
 }) {
   const [period, setPeriod] = useState<Period>("7d");
-  const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [summary, setSummary] = useState<FinancialMetrics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -35,14 +35,14 @@ export function DashboardView({ boutiqueId, canSeeMargin, onNavigate }: {
     const bounds = periodBounds(period);
     setLoading(true);
     setError("");
-    void loadDashboardSummary({ boutiqueId, ...bounds })
+    void loadFinancialMetrics({ boutiqueId, ...bounds })
       .then((result) => { if (!cancelled) setSummary(result); })
       .catch((cause) => { if (!cancelled) setError(cause instanceof Error ? cause.message : "Dashboard indisponible"); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [boutiqueId, period]);
 
-  const maxSeries = useMemo(() => Math.max(1, ...(summary?.series ?? []).map(point => Number(point.sales) || 0)), [summary?.series]);
+  const maxSeries = useMemo(() => Math.max(1, ...(summary?.sales_series ?? []).map(point => Number(point.sales) || 0)), [summary?.sales_series]);
 
   if (loading && !summary) {
     return <div className="py-16 text-center text-sm font-semibold text-muted-foreground">Chargement du tableau de bord…</div>;
@@ -52,18 +52,23 @@ export function DashboardView({ boutiqueId, canSeeMargin, onNavigate }: {
   }
   if (!summary) return null;
 
+  const marginCoverageWarning = canSeeMargin && summary.realized_margin_fifo != null
+    && ((summary.margin_coverage_rate ?? 100) < 99.99 || (summary.margin_unmatched_lines ?? 0) > 0)
+      ? `Couverture FIFO ${new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 }).format(summary.margin_coverage_rate ?? 0)} % · ${summary.margin_unmatched_lines ?? 0} ligne(s) sans coût fiable`
+      : null;
+
   const cards = [
-    { label: "Chiffre d’affaires", value: fmt(summary.sales), icon: TrendingUp },
-    { label: "Encaissé", value: fmt(summary.collected), icon: CircleDollarSign },
-    { label: "Impayé", value: fmt(summary.outstanding), icon: ReceiptText },
-    { label: "Charges payées", value: fmt(summary.charges), icon: BarChart3 },
+    { label: "CA facturé", value: fmt(summary.invoiced_revenue), icon: TrendingUp },
+    { label: "CA encaissé", value: fmt(summary.collected_cash), icon: CircleDollarSign },
+    { label: "Encours clients", value: fmt(summary.customer_outstanding_global), icon: ReceiptText },
+    { label: "Charges décaissées", value: fmt(summary.cash_expenses), icon: BarChart3 },
   ];
 
   return <div className="space-y-4 pb-24">
     <div className="flex items-center justify-between gap-3">
       <div>
         <h1 className="text-xl font-black">Tableau de bord</h1>
-        <p className="text-xs text-muted-foreground mt-1">Agrégats sécurisés, sans téléchargement des tables métier.</p>
+        <p className="text-xs text-muted-foreground mt-1">Indicateurs financiers canoniques calculés côté serveur.</p>
       </div>
       <select value={period} onChange={e => setPeriod(e.target.value as Period)} className="rounded-xl bg-muted px-3 py-2 text-sm font-bold outline-none">
         <option value="7d">7 jours</option>
@@ -73,6 +78,7 @@ export function DashboardView({ boutiqueId, canSeeMargin, onNavigate }: {
     </div>
 
     {error && <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">Données précédentes conservées · {error}</div>}
+    {marginCoverageWarning && <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">{marginCoverageWarning}</div>}
 
     <div className="grid grid-cols-2 gap-3">
       {cards.map(({ label, value, icon: Icon }) => <div key={label} className="rounded-2xl border border-border bg-card p-4">
@@ -84,11 +90,11 @@ export function DashboardView({ boutiqueId, canSeeMargin, onNavigate }: {
 
     <div className="rounded-2xl border border-border bg-card p-4">
       <div className="flex items-center justify-between">
-        <div><p className="text-sm font-black">Activité commerciale</p><p className="text-xs text-muted-foreground">Ventes nettes par jour</p></div>
+        <div><p className="text-sm font-black">Activité commerciale</p><p className="text-xs text-muted-foreground">CA facturé net par jour</p></div>
         <span className="text-xs font-bold text-muted-foreground">{summary.sales_count} vente{summary.sales_count !== 1 ? "s" : ""}</span>
       </div>
       <div className="mt-4 flex h-28 items-end gap-2">
-        {(summary.series ?? []).length === 0 ? <div className="m-auto text-xs text-muted-foreground">Aucune vente sur la période</div> : summary.series.map(point => {
+        {(summary.sales_series ?? []).length === 0 ? <div className="m-auto text-xs text-muted-foreground">Aucune vente sur la période</div> : summary.sales_series.map(point => {
           const height = Math.max(4, Math.round((Number(point.sales) || 0) / maxSeries * 100));
           return <div key={point.date} className="flex min-w-0 flex-1 flex-col items-center justify-end gap-1 h-full">
             <div className="w-full rounded-t-lg bg-foreground/15" style={{ height: `${height}%` }} title={`${point.date} · ${fmt(Number(point.sales))}`} />
@@ -108,9 +114,9 @@ export function DashboardView({ boutiqueId, canSeeMargin, onNavigate }: {
       </button>
     </div>
 
-    {canSeeMargin && summary.margin != null && <div className="rounded-2xl border border-border bg-card p-4">
-      <div className="flex items-center justify-between"><p className="text-sm font-black">Marge réalisée</p><span className="text-lg font-black">{fmt(summary.margin)}</span></div>
-      {summary.stock_value != null && <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground"><span>Valeur d’achat du stock</span><span className="font-bold text-foreground">{fmt(summary.stock_value)}</span></div>}
+    {canSeeMargin && summary.realized_margin_fifo != null && <div className="rounded-2xl border border-border bg-card p-4">
+      <div className="flex items-center justify-between"><p className="text-sm font-black">Marge réalisée FIFO</p><span className="text-lg font-black">{fmt(summary.realized_margin_fifo)}</span></div>
+      <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground"><span>Taux de marge</span><span className="font-bold text-foreground">{new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 }).format(summary.margin_rate ?? 0)} %</span></div>
     </div>}
 
     <div className="flex gap-2">
