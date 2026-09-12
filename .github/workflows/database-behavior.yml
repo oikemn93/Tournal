@@ -126,6 +126,9 @@ jobs:
       - name: Reconcile report phase 2 employee performance
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f scripts/test-report-phase2-db.sql
 
+      - name: Load production FIFO stock helper for phase 3
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f scripts/ci-fifo-stock-value.sql
+
       - name: Apply report phase 3 candidate locally
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f .github/audit/candidate-migrations/20260912210000_report_phase3_stock_inventory.sql
 
