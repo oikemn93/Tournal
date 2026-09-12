@@ -40,6 +40,7 @@ jobs:
         run: |
           psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 <<'SQL'
           alter table public.invoices add column if not exists stock_deducted_at timestamptz;
+          alter table public.invoices add column if not exists operator_nom_snapshot text;
           alter table public.stock_entries add column if not exists note text;
           alter table public.stock_entries add column if not exists reference text;
           alter table public.products add column if not exists category_id text;
@@ -70,6 +71,12 @@ jobs:
 
       - name: Reconcile report phase 1 sales products
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f scripts/test-report-phase1-db.sql
+
+      - name: Apply report phase 2 candidate locally
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f .github/audit/candidate-migrations/20260912202000_report_phase2_employee_performance.sql
+
+      - name: Reconcile report phase 2 employee performance
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f scripts/test-report-phase2-db.sql
 
       - name: Run behavioral database matrix
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f scripts/test-db-behavior.sql
