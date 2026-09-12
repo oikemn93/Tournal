@@ -51,8 +51,8 @@ jobs:
           );
           SQL
 
-      - name: Apply canonical financial metrics candidate locally
-        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f .github/audit/candidate-migrations/20260912190000_canonical_financial_metrics.sql
+      - name: Apply canonical financial metrics replay locally
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f .github/audit/replay-migrations/20260912165219_canonical_financial_metrics.sql
 
       - name: Reconcile dashboard and report financial metrics
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f scripts/test-financial-metrics-db.sql
