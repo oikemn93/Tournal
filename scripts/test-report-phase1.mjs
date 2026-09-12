@@ -21,7 +21,7 @@ assert(!screen.includes("const caTotal") && !screen.includes("filtInv.reduce"), 
 assert(client.includes("get_sales_product_report"), "Report client must call get_sales_product_report");
 assert(migration.includes("private.fifo_realized_margin_core"), "Product margin must reuse canonical FIFO core");
 assert(/i\.invoice_date\s*>=\s*p_from/.test(migration) && /i\.invoice_date\s*<\s*p_to/.test(migration), "Product report must be bounded by invoice date");
-assert(/lower\(trim\(coalesce\(i\.type,''\)\)\)\s*=\s*'retour'\s+then\s+-1\s+else\s+1/i.test(compactSql), "Product revenue and quantity must net returns");
+assert(/lower\(trim\(coalesce\(l\.invoice_type,''\)\)\)\s*=\s*'retour'\s+then\s+-1\s+else\s+1/i.test(compactSql), "Product revenue and quantity must net returns");
 assert(/private\.auth_has_read_permission\(p_boutique_id\s*,\s*'marges'\)/.test(migration), "Product margin must respect margin permission");
 assert(/private\.auth_has_read_permission\(p_boutique_id\s*,\s*'compta'\)/.test(migration), "Product report must enforce financial read permission");
 assert(migration.includes("public.categories"), "Product report must expose category metadata for filtering");
