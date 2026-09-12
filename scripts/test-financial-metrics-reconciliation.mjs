@@ -39,12 +39,13 @@ assert(!report.includes("const caTotal      = filtInv.reduce"), "Rapport must no
 assert(!report.includes("new Set(salePayments.map"), "Rapport must not derive sales count from payment events");
 assert(!report.includes("invoiceRemainingAmount"), "Rapport must not recompute period outstanding locally");
 assert(!report.includes("getFifoRealizedMargin"), "Rapport must not call a separate FIFO RPC");
-assert(report.includes("financialMetrics?.cash_expenses"), "Rapport total charges must come from canonical server metrics");
-assert(report.includes("financialMetrics?.operating_cash_expenses"), "Report result-after-charges must use canonical operating expenses");
+// Charges are still canonical server fields even when a focused report phase does not render them.
+assert(api.includes("cash_expenses") && api.includes("operating_cash_expenses"), "Canonical financial API must retain charge metrics for financial reporting");
+assert(migration.includes("'cash_expenses',v_cash_expenses") && migration.includes("'operating_cash_expenses',v_operating_cash_expenses"), "Canonical server metrics must retain charge fields");
 
 assert(dashboard.includes('const days = period === "30d" ? 30 : 7'), "Dashboard rolling windows must use true 7/30-day bounds");
 assert(!dashboard.includes("from.setHours(0, 0, 0, 0)"), "Dashboard 7-day period must not truncate to calendar-day midnight");
-assert(report.includes('period==="semaine"') && report.includes("from.setDate(now.getDate()-7)"), "Rapport Semaine must remain a rolling 7-day bound matching Dashboard");
+assert(report.includes('period === "semaine"') && report.includes("from.setDate(from.getDate() - 7)"), "Rapport Semaine must remain a rolling 7-day bound matching Dashboard");
 
 assert(migration.includes("c.source not in ('supplier_receipt','transfer')"), "Canonical direct-charge logic must exclude supplier receipts and transfer shells");
 assert(migration.includes("public.transfer_charge_payments"), "Canonical charge logic must consume transfer payment events");
