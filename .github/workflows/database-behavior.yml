@@ -36,6 +36,27 @@ jobs:
           psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f .ci-historical-migrations/20260904184500_make_read_rpcs_session_independent.sql
           psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f .ci-historical-migrations/20260904184600_make_inventory_reads_session_independent.sql
 
+      - name: Prepare financial reconciliation fixture schema
+        run: |
+          psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 <<'SQL'
+          alter table public.invoices add column if not exists stock_deducted_at timestamptz;
+          alter table public.stock_entries add column if not exists note text;
+          alter table public.stock_entries add column if not exists reference text;
+          create table if not exists public.transfer_charge_payments(
+            id bigint primary key,
+            boutique_id text not null,
+            charge_id bigint not null,
+            amount numeric not null,
+            paid_at timestamptz not null
+          );
+          SQL
+
+      - name: Apply canonical financial metrics replay locally
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f .github/audit/replay-migrations/20260912165219_canonical_financial_metrics.sql
+
+      - name: Reconcile dashboard and report financial metrics
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f scripts/test-financial-metrics-db.sql
+
       - name: Run behavioral database matrix
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f scripts/test-db-behavior.sql
 
