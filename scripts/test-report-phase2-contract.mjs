@@ -15,7 +15,7 @@ assert(api.includes("get_employee_performance_report"), "Employee report client 
 assert(report.includes("loadEmployeePerformanceReport"), "Rapport must load employee performance from server");
 assert(report.includes('canSeeMargin && <Accordion title="Équipe"'), "Employee performance UI must stay margin-permission gated");
 assert(report.includes('section === "team"') && report.includes("loadEmployeePerformanceReport"), "Employee report must lazy-load when the team section opens");
-assert(report.includes("return_rate") && report.includes("average_basket") && report.includes("sales_count"), "Employee KPI fields missing");
+assert(report.includes("invoiced_revenue") && report.includes("average_basket") && report.includes("sales_count"), "Employee KPI fields missing");
 assert(migration.toLowerCase().includes("create or replace function public.get_employee_performance_report"), "Employee performance RPC migration missing");
 assert(migration.includes("auth_has_read_permission(p_boutique_id,'marges')"), "Employee performance RPC must require margins permission");
 assert(migration.includes("i.invoice_date>=p_from") && migration.includes("i.invoice_date<p_to"), "Employee performance must use bounded invoice_date reads");
