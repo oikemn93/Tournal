@@ -32,7 +32,7 @@ export function FinancialDeepReportSection({ metrics, salesReport, canSeeMargin,
   const netCash = cashIn - totalOut;
   const netAfterOperating = canSeeMargin && metrics?.realized_margin_fifo != null ? Number(metrics.realized_margin_fifo) - operating : null;
 
-  return <div className="space-y-4">
+  return <div data-report-phase="5" className="space-y-4">
     {canSeeMargin && <div className="bg-card rounded-2xl border border-border overflow-hidden">
       <div className="px-4 py-3 border-b border-border"><p className="font-bold text-sm">Marge par produit et catégorie</p><p className="text-xs text-muted-foreground">Ventilation issue du même moteur FIFO canonique que le total du Rapport</p></div>
       <div className="grid md:grid-cols-2 md:divide-x divide-border">
