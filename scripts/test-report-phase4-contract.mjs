@@ -3,7 +3,7 @@ import fs from "node:fs";
 const report = fs.readFileSync("src/app/screens/RapportView.tsx", "utf8");
 const section = fs.readFileSync("src/app/screens/ClientReportSection.tsx", "utf8");
 const api = fs.readFileSync("src/lib/reportApi.ts", "utf8");
-const migration = fs.readFileSync(".github/audit/candidate-migrations/20260912191000_report_phase4_client_report.sql", "utf8");
+const migration = fs.readFileSync(".github/audit/replay-migrations/20260912192118_report_phase4_client_report.sql", "utf8");
 
 function assert(condition, message) { if (!condition) throw new Error(message); }
 
