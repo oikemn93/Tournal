@@ -3,6 +3,7 @@ import fs from "node:fs";
 const screen = fs.readFileSync("src/app/screens/RapportView.tsx", "utf8");
 const client = fs.readFileSync("src/lib/reportApi.ts", "utf8");
 const migration = fs.readFileSync(".github/audit/candidate-migrations/20260912194500_report_phase1_sales_products.sql", "utf8");
+const compactSql = migration.replace(/\s+/g, " ");
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -19,10 +20,10 @@ assert(!screen.includes("const caTotal") && !screen.includes("filtInv.reduce"), 
 
 assert(client.includes("get_sales_product_report"), "Report client must call get_sales_product_report");
 assert(migration.includes("private.fifo_realized_margin_core"), "Product margin must reuse canonical FIFO core");
-assert(migration.includes("i.invoice_date>=p_from") && migration.includes("i.invoice_date<p_to"), "Product report must be bounded by invoice date");
-assert(migration.includes("lower(trim(coalesce(i.type,'')))='retour' then -1 else 1"), "Product revenue and quantity must net returns");
-assert(migration.includes("private.auth_has_read_permission(p_boutique_id,'marges')"), "Product margin must respect margin permission");
-assert(migration.includes("private.auth_has_read_permission(p_boutique_id,'compta')"), "Product report must enforce financial read permission");
+assert(/i\.invoice_date\s*>=\s*p_from/.test(migration) && /i\.invoice_date\s*<\s*p_to/.test(migration), "Product report must be bounded by invoice date");
+assert(/lower\(trim\(coalesce\(i\.type,''\)\)\)\s*=\s*'retour'\s+then\s+-1\s+else\s+1/i.test(compactSql), "Product revenue and quantity must net returns");
+assert(/private\.auth_has_read_permission\(p_boutique_id\s*,\s*'marges'\)/.test(migration), "Product margin must respect margin permission");
+assert(/private\.auth_has_read_permission\(p_boutique_id\s*,\s*'compta'\)/.test(migration), "Product report must enforce financial read permission");
 assert(migration.includes("public.categories"), "Product report must expose category metadata for filtering");
 assert(migration.includes("revoke all on function public.get_sales_product_report"), "Report RPC must revoke public/anon execution");
 
