@@ -4,6 +4,16 @@ do $supplier_contract$
 declare
   f text;
 begin
+  select pg_get_functiondef('public.record_stock_movement(text,bigint,uuid,numeric,text,numeric,text,bigint,text)'::regprocedure) into f;
+  if position('v_is_self_supplier := coalesce(v_supplier.linked_boutique_id = p_boutique_id, false);' in f) = 0 then
+    raise exception 'external supplier NULL link must not suppress the payable';
+  end if;
+  if coalesce(null::text = 'shop', false) is distinct from false
+    or coalesce('shop'::text = 'shop', false) is distinct from true
+    or coalesce('other'::text = 'shop', false) is distinct from false then
+    raise exception 'external, self and inter-boutique supplier classification failed';
+  end if;
+
   select pg_get_functiondef('public.record_supplier_payment(text,bigint,uuid,numeric,text,text,date)'::regprocedure) into f;
   if position('public.stock_entries' in f) > 0 then raise exception 'supplier payment must not derive debt from stock entries'; end if;
   if position($needle$source = 'supplier_receipt'$needle$ in f) = 0 then raise exception 'supplier payment must allocate supplier receipts'; end if;

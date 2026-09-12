@@ -3,9 +3,11 @@ import { BookOpen, Wallet, FileText, Download } from "lucide-react";
 import type { Boutique, DashPeriod, ChargeCategorie, PaymentMethod } from "../types";
 import { SEM, inputCls, PAYMENT_METHODS, PM_ICON, PM_COLOR, CHARGE_CATS, CHARGE_COLORS } from "../constants";
 import { fmt } from "../utils/formatting";
-import { invBadge, lineDispQty, lineDispUnit, lineTotal, filterByPeriod, supplierBalance } from "../utils/inventory";
+import { invBadge, lineDispQty, lineDispUnit, lineTotal, supplierBalance } from "../utils/inventory";
 import { Modal } from "../components/Modal";
-import { filterPaymentEventsByPeriod, formatPreciseDateTime, invoicePaidAmount, invoiceRemainingAmount } from "../utils/payments";
+import { formatPreciseDateTime, invoicePaidAmount, invoiceRemainingAmount } from "../utils/payments";
+import { useRevenueSummary } from "../hooks/useRevenueSummary";
+import { withinReportingBounds } from "../utils/reportingPeriod";
 import { getFifoRealizedMargin, type FifoRealizedMarginReport } from "../../lib/inventoryApi";
 import { boundedBootstrapCutoffIso, loadBoutiqueHistoryRange, type BoutiqueHistoryPatch } from "../../lib/api";
 
@@ -16,25 +18,23 @@ export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique:
   const mergeById=(current:any[],older:any[])=>[...new Map([...current,...older].map(item=>[item.id,item])).values()];
   const invoices=useMemo(()=>mergeById(boutique.invoices,historicalPatch?.invoices??[]) as typeof boutique.invoices,[boutique.invoices,historicalPatch?.invoices]);
   const charges=useMemo(()=>mergeById(boutique.charges??[],historicalPatch?.charges??[]) as NonNullable<typeof boutique.charges>,[boutique.charges,historicalPatch?.charges]);
-  const creditRefunds=useMemo(()=>mergeById(boutique.clientCreditRefunds??[],historicalPatch?.clientCreditRefunds??[]) as NonNullable<typeof boutique.clientCreditRefunds>,[boutique.clientCreditRefunds,historicalPatch?.clientCreditRefunds]);
   const [period, setPeriod] = useState<DashPeriod>("jour");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
+  const revenue = useRevenueSummary(boutique.id, period, customFrom, customTo, boutique);
   const [exportModal, setExportModal] = useState<"summary"|"full"|null>(null);
   const [serverMargin, setServerMargin] = useState<FifoRealizedMarginReport|null>(null);
   const [marginLoading, setMarginLoading] = useState(false);
 
-  const filtInv = filterByPeriod(invoices, period, customFrom, customTo);
-  const filtPayments = filterPaymentEventsByPeriod(invoices, period, customFrom, customTo);
-  const filtCreditRefunds = filterByPeriod(creditRefunds, period, customFrom, customTo);
-  const filtCh  = filterByPeriod(charges, period, customFrom, customTo);
+  const filtInv = invoices.filter(invoice => invoice.status !== "annulée" && withinReportingBounds(invoice.dateRaw, revenue.bounds));
+  const filtCh = charges.filter(charge => withinReportingBounds(charge.dateRaw, revenue.bounds));
 
   const invoiceSign = (invoice: typeof filtInv[number]) => invoice.type === "Retour" || invoice.type === "retour" ? -1 : 1;
-  const ca           = filtPayments.reduce((sum,payment)=>sum + payment.signedAmount,0) - filtCreditRefunds.reduce((sum,refund)=>sum + refund.amount,0);
-  const caTotal      = filtInv.reduce((s,i)=>s + invoiceSign(i) * i.montant,0);
-  const salePayments = filtPayments.filter(payment=>payment.signedAmount>0);
-  const nbVentes     = new Set(salePayments.map(payment=>payment.invoiceId)).size;
-  const caBrutVentes = salePayments.reduce((sum,payment)=>sum+payment.signedAmount,0);
+  // KPI and export totals use the same RPC as Accueil, never loaded invoice rows.
+  const ca           = revenue.summary?.collected ?? 0;
+  const caTotal      = revenue.summary?.invoiced ?? 0;
+  const nbVentes     = revenue.summary?.paid_sales_count ?? 0;
+  const caBrutVentes = revenue.summary?.gross_collected ?? 0;
   const panierMoyen  = nbVentes > 0 ? caBrutVentes / nbVentes : 0;
   const impayé       = filtInv.filter(i=>invoiceSign(i)>0).reduce((s,i)=>s+invoiceRemainingAmount(i),0);
   // A supplier receipt is a payable commitment, not money that has already
@@ -56,16 +56,9 @@ export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique:
   const totalCharges = paidCharges.reduce((s,c)=>s+chargeCashAmount(c),0);
   const chargesExploitation = paidCharges.filter(c=>c.categorie!=="Achat stock").reduce((s,c)=>s+chargeCashAmount(c),0);
 
-  const marginPeriod = useMemo(() => {
-    const now=new Date(); let from:Date; let to=new Date(now.getTime()+1);
-    if(period==="jour"){from=new Date(now);from.setHours(0,0,0,0);}
-    else if(period==="semaine"){from=new Date(now);from.setDate(now.getDate()-7);}
-    else if(period==="mois"){from=new Date(now.getFullYear(),now.getMonth(),1);}
-    else if(period==="annee"){from=new Date(now.getFullYear(),0,1);}
-    else {from=customFrom?new Date(`${customFrom}T00:00:00`):new Date(now);to=customTo?new Date(`${customTo}T23:59:59.999`):to;}
-    return {fromAt:from.toISOString(),toAt:to.toISOString()};
-  },[period,customFrom,customTo]);
+  const marginPeriod = { fromAt: revenue.bounds?.from ?? "", toAt: revenue.bounds?.to ?? "" };
   useEffect(()=>{
+    if (!marginPeriod.fromAt || !marginPeriod.toAt) { setHistoricalPatch(null); return; }
     if(new Date(marginPeriod.fromAt).getTime()>=new Date(boundedBootstrapCutoffIso()).getTime()){setHistoricalPatch(null);return;}
     let cancelled=false;
     void loadBoutiqueHistoryRange(boutique.id,marginPeriod.fromAt,marginPeriod.toAt).then(patch=>{if(!cancelled)setHistoricalPatch(patch);}).catch(error=>{console.warn("Historique rapport indisponible",error);if(!cancelled)setHistoricalPatch(null);});
@@ -74,7 +67,7 @@ export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique:
 
   useEffect(()=>{
     let cancelled=false;
-    if(!canSeeMargin){setServerMargin(null);return ()=>{cancelled=true;};}
+    if(!canSeeMargin || !marginPeriod.fromAt || !marginPeriod.toAt){setServerMargin(null);return ()=>{cancelled=true;};}
     setMarginLoading(true);
     void getFifoRealizedMargin({boutiqueId:boutique.id,...marginPeriod})
       .then(report=>{if(!cancelled)setServerMargin(report);})
@@ -90,21 +83,14 @@ export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique:
     ? `Couverture FIFO ${new Intl.NumberFormat("fr-FR",{maximumFractionDigits:1}).format(serverMargin.coverageRate)} % · ${serverMargin.unmatchedLines} ligne(s) sans coût fiable`
     : null;
 
-  // Credits are created by an overpayment and become an "Avoir client" payment
-  // only when applied to a later invoice.  Keep it distinct from cash methods:
-  // it settles a sale but must not be mistaken for a new cash collection.
-  const reportPaymentMethods: PaymentMethod[] = [...PAYMENT_METHODS, "Avoir client"];
-  const byMethode = reportPaymentMethods.map(m => {
-    const payments = filtPayments.filter(payment=>payment.paymentMethod===m);
-    const refunds = filtCreditRefunds.filter(refund=>refund.paymentMethod===m);
-    return { m, total:payments.reduce((sum,payment)=>sum + payment.signedAmount,0)-refunds.reduce((sum,refund)=>sum+refund.amount,0), count:payments.length+refunds.length };
-  }).filter(r=>r.count>0);
+  // Cash breakdown is returned by the same RPC as the headline total.
+  const byMethode = (revenue.summary?.payment_methods ?? []).map(row => ({ m:row.method as PaymentMethod, total:row.total, count:row.count }));
 
   const byCategorie = CHARGE_CATS.map(cat=>({
     cat, montant: paidCharges.filter(c=>c.categorie===cat).reduce((s,c)=>s+chargeCashAmount(c),0)
   })).filter(r=>r.montant>0);
 
-  const periodLabel: Record<DashPeriod,string> = { jour:"Aujourd'hui", semaine:"Cette semaine", mois:"Ce mois", annee:"Cette année", custom:"Période personnalisée" };
+  const periodLabel: Record<DashPeriod,string> = { jour:"Aujourd'hui", semaine:"7 jours", mois:"Ce mois", annee:"Cette année", custom:"Période personnalisée" };
 
   function invoicePaymentLabel(inv: typeof invoices[number]): string {
     const rows = inv.payments?.length
@@ -266,7 +252,7 @@ ${invLines}
   }
 
   const periodBtns: Array<{id:DashPeriod;label:string}> = [
-    {id:"jour",label:"Aujourd'hui"},{id:"semaine",label:"Semaine"},{id:"mois",label:"Mois"},{id:"custom",label:"Personnalisé"},
+    {id:"jour",label:"Aujourd'hui"},{id:"semaine",label:"7 jours"},{id:"mois",label:"Mois"},{id:"custom",label:"Personnalisé"},
   ];
 
   const rows = [
@@ -301,6 +287,11 @@ ${invLines}
         </div>
       )}
 
+      <p className="text-xs text-muted-foreground">Périodes à minuit, heure de Dakar. Le CA encaissé suit la date réelle des paiements.</p>
+      {!revenue.bounds && <p role="status">Choisissez une période valide.</p>}
+      {revenue.loading && <p role="status">Chargement du CA…</p>}
+      {revenue.error && <div role="alert" className="text-sm text-red-700">CA indisponible · {revenue.error} <button type="button" onClick={revenue.retry} className="underline">Réessayer</button></div>}
+      {revenue.summary && <>
       {/* KPI cards */}
       <div className="grid grid-cols-2 gap-2">
         {[
@@ -449,6 +440,7 @@ ${invLines}
           </div>
         </Modal>
       )}
+      </>}
     </div>
   );
 }

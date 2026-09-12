@@ -231,6 +231,18 @@ async function dataRpc<T>(name: string, params: Record<string, unknown>): Promis
   });
 }
 
+export type RevenueSummary = {
+  from: string; to: string; collected: number; invoiced: number;
+  paid_sales_count: number; gross_collected: number;
+  payment_methods: Array<{ method: string; total: number; count: number }>;
+};
+
+export function loadRevenueSummary(params: { boutiqueId: string; from: string; to: string }): Promise<RevenueSummary> {
+  return dataRpc<RevenueSummary>("get_revenue_summary", {
+    p_boutique_id: params.boutiqueId, p_from: params.from, p_to: params.to,
+  });
+}
+
 export async function loadInvoiceLines(boutiqueId: string, invoiceId: string) {
   if (!boutiqueId || !invoiceId) return [];
   const rows = await dataRpc<any[]>("read_invoice_lines", { p_boutique_id:boutiqueId, p_invoice_ids:[invoiceId] });
