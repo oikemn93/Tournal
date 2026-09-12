@@ -30,16 +30,29 @@ export function FinancialDeepReportSection({ metrics, salesReport, canSeeMargin,
   const supplierAndStock = Math.max(0, totalOut - operating);
   const cashIn = Number(metrics?.collected_cash ?? 0);
   const netCash = cashIn - totalOut;
-  const netAfterOperating = canSeeMargin && metrics?.realized_margin_fifo != null ? Number(metrics.realized_margin_fifo) - operating : null;
+  const grossMargin = canSeeMargin && metrics?.realized_margin_fifo != null ? Number(metrics.realized_margin_fifo) : null;
+  const purchases = grossMargin != null ? Math.max(0, Number(metrics?.margin_revenue ?? metrics?.invoiced_revenue ?? 0) - grossMargin) : null;
+  const netResult = grossMargin != null ? grossMargin - operating : null;
 
-  return <div data-report-phase="5" className="space-y-4">
+  return <div data-report-phase="6" className="space-y-4">
+    {canSeeMargin && <div className="bg-card rounded-2xl border border-border overflow-hidden">
+      <div className="px-4 py-3 border-b border-border"><p className="font-bold text-sm">Compte de résultat simplifié</p><p className="text-xs text-muted-foreground">P&amp;L sur la période, basé sur le CA et la marge FIFO canoniques. Visible uniquement avec la permission Marge.</p></div>
+      <div className="divide-y divide-border">
+        <PnlRow label="Chiffre d’affaires" value={Number(metrics?.invoiced_revenue ?? 0)} />
+        <PnlRow label="Achats / coût des marchandises vendues (FIFO)" value={-(purchases ?? 0)} muted />
+        <PnlRow label="Marge brute" value={grossMargin ?? 0} strong color={color} />
+        <PnlRow label="Charges d’exploitation décaissées" value={-operating} muted />
+        <PnlRow label="Résultat net simplifié" value={netResult ?? 0} strong color={(netResult ?? 0) >= 0 ? color : undefined} />
+      </div>
+      {(metrics?.margin_unmatched_lines ?? 0) > 0 && <div className="px-4 py-3 border-t border-border text-[11px] text-amber-700">Couverture FIFO incomplète : {metrics?.margin_unmatched_lines} ligne(s) non rapprochée(s). Le résultat reprend exactement la marge canonique disponible.</div>}
+    </div>}
+
     {canSeeMargin && <div className="bg-card rounded-2xl border border-border overflow-hidden">
       <div className="px-4 py-3 border-b border-border"><p className="font-bold text-sm">Marge par produit et catégorie</p><p className="text-xs text-muted-foreground">Ventilation issue du même moteur FIFO canonique que le total du Rapport</p></div>
       <div className="grid md:grid-cols-2 md:divide-x divide-border">
         <div><div className="px-4 py-2.5 bg-muted/40"><p className="text-xs font-black">Par catégorie</p></div>{categories.length === 0 ? <p className="px-4 py-5 text-xs text-muted-foreground">Aucune vente sur la période</p> : categories.map(row => <div key={row.id || "uncategorized"} className="px-4 py-3 border-t border-border"><div className="flex items-center justify-between gap-3"><span className="text-xs font-bold">{row.name}</span><span className="text-xs font-black">{fmt(row.margin ?? 0)}</span></div><div className="mt-1 flex justify-between text-[10px] text-muted-foreground"><span>CA {fmt(row.revenue)}</span><span>{row.unmatched > 0 ? `${row.unmatched} ligne(s) FIFO incomplète(s)` : "FIFO couvert"}</span></div></div>)}</div>
         <div><div className="px-4 py-2.5 bg-muted/40"><p className="text-xs font-black">Par produit</p></div>{products.length === 0 ? <p className="px-4 py-5 text-xs text-muted-foreground">Aucune vente sur la période</p> : products.map(row => <div key={row.product_id} className="px-4 py-3 border-t border-border"><div className="flex items-center justify-between gap-3"><span className="text-xs font-bold truncate">{row.product_name}</span><span className="text-xs font-black">{row.realized_margin_fifo == null ? "—" : fmt(row.realized_margin_fifo)}</span></div><div className="mt-1 flex justify-between text-[10px] text-muted-foreground"><span>{row.category_name}</span><span>CA {fmt(row.invoiced_revenue)}</span></div></div>)}</div>
       </div>
-      <div className="grid grid-cols-2 gap-2 p-4 border-t border-border bg-muted/20"><div><p className="text-[10px] uppercase font-bold text-muted-foreground">Marge commerciale FIFO</p><p className="font-black text-lg">{fmt(metrics?.realized_margin_fifo ?? 0)}</p></div><div><p className="text-[10px] uppercase font-bold text-muted-foreground">Résultat après charges d'exploitation</p><p className="font-black text-lg" style={{ color: (netAfterOperating ?? 0) >= 0 ? color : undefined }}>{fmt(netAfterOperating ?? 0)}</p></div></div>
     </div>}
 
     <div className="bg-card rounded-2xl border border-border overflow-hidden">
@@ -53,4 +66,8 @@ export function FinancialDeepReportSection({ metrics, salesReport, canSeeMargin,
       <div className="px-4 pb-4 text-[11px] text-muted-foreground">Sorties totales payées : <b className="text-foreground">{fmt(totalOut)}</b>. Les paiements fournisseurs/stock correspondent à la composante « Achat stock » déjà incluse dans les sorties canoniques.</div>
     </div>
   </div>;
+}
+
+function PnlRow({ label, value, strong = false, muted = false, color }: { label: string; value: number; strong?: boolean; muted?: boolean; color?: string }) {
+  return <div className={`px-4 py-3 flex items-center justify-between gap-4 ${strong ? "bg-muted/20" : ""}`}><span className={`text-xs ${strong ? "font-black" : "font-bold"} ${muted ? "text-muted-foreground" : ""}`}>{label}</span><span className={`${strong ? "text-base font-black" : "text-sm font-bold"}`} style={{ color }}>{fmt(value)}</span></div>;
 }
