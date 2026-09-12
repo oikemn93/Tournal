@@ -129,8 +129,8 @@ jobs:
       - name: Load production FIFO stock helper for phase 3
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f scripts/ci-fifo-stock-value.sql
 
-      - name: Apply report phase 3 candidate locally
-        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f .github/audit/candidate-migrations/20260912210000_report_phase3_stock_inventory.sql
+      - name: Apply report phase 3 replay locally
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f .github/audit/replay-migrations/20260912190106_report_phase3_stock_inventory.sql
 
       - name: Reconcile report phase 3 stock inventory
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f scripts/test-report-phase3-db.sql
