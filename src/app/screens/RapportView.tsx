@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { BookOpen, Download, Filter, TrendingDown, TrendingUp, Wallet } from "lucide-react";
+import { BookOpen, Download, Filter, TrendingDown, TrendingUp, Users, Wallet } from "lucide-react";
 import type { Boutique, DashPeriod, PaymentMethod } from "../types";
 import { inputCls, PAYMENT_METHODS, PM_COLOR, PM_ICON, SEM } from "../constants";
 import { fmt } from "../utils/formatting";
@@ -7,7 +7,7 @@ import { filterByPeriod } from "../utils/inventory";
 import { filterPaymentEventsByPeriod } from "../utils/payments";
 import { boundedBootstrapCutoffIso, loadBoutiqueHistoryRange, type BoutiqueHistoryPatch } from "../../lib/api";
 import { loadFinancialMetrics, type FinancialMetrics } from "../../lib/dashboardApi";
-import { loadSalesProductReport, type SalesProductReport } from "../../lib/reportApi";
+import { loadEmployeePerformanceReport, loadSalesProductReport, type EmployeePerformanceReport, type SalesProductReport } from "../../lib/reportApi";
 
 function periodBounds(period: DashPeriod, customFrom: string, customTo: string) {
   const now = new Date();
@@ -47,6 +47,7 @@ export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique:
   const [historicalPatch, setHistoricalPatch] = useState<BoutiqueHistoryPatch | null>(null);
   const [metrics, setMetrics] = useState<FinancialMetrics | null>(null);
   const [salesReport, setSalesReport] = useState<SalesProductReport | null>(null);
+  const [employeeReport, setEmployeeReport] = useState<EmployeePerformanceReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [category, setCategory] = useState("all");
@@ -81,17 +82,19 @@ export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique:
     void Promise.all([
       loadFinancialMetrics({ boutiqueId: boutique.id, ...bounds }),
       loadSalesProductReport({ boutiqueId: boutique.id, ...bounds }),
-    ]).then(([financial, products]) => {
+      canSeeMargin ? loadEmployeePerformanceReport({ boutiqueId: boutique.id, ...bounds }) : Promise.resolve(null),
+    ]).then(([financial, products, employees]) => {
       if (cancelled) return;
       setMetrics(financial);
       setSalesReport(products);
+      setEmployeeReport(employees);
     }).catch(cause => {
       if (!cancelled) setError(cause instanceof Error ? cause.message : "Rapport indisponible");
     }).finally(() => {
       if (!cancelled) setLoading(false);
     });
     return () => { cancelled = true; };
-  }, [boutique.id, bounds.from, bounds.to]);
+  }, [boutique.id, bounds.from, bounds.to, canSeeMargin]);
 
   const filtPayments = filterPaymentEventsByPeriod(invoices, period, customFrom, customTo);
   const filtCreditRefunds = filterByPeriod(creditRefunds, period, customFrom, customTo);
@@ -128,6 +131,7 @@ export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique:
   };
 
   const reconciliationGap = metrics && salesReport ? Math.abs(Number(metrics.invoiced_revenue) - Number(salesReport.invoiced_revenue)) : 0;
+  const employeeReconciliationGap = metrics && employeeReport ? Math.abs(Number(metrics.invoiced_revenue) - Number(employeeReport.invoiced_revenue)) : 0;
   const marginWarning = canSeeMargin && metrics?.realized_margin_fifo != null && ((metrics.margin_coverage_rate ?? 100) < 99.99 || (metrics.margin_unmatched_lines ?? 0) > 0)
     ? `Couverture FIFO ${new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 }).format(metrics.margin_coverage_rate ?? 0)} % · ${metrics.margin_unmatched_lines ?? 0} ligne(s) sans coût fiable`
     : null;
@@ -135,7 +139,8 @@ export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique:
   function buildPdfHtml() {
     const productRows = best.map(row => `<tr><td>${row.product_name}</td><td>${row.category_name}</td><td class="num">${new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 2 }).format(row.quantity)}</td><td class="num">${fmt(row.invoiced_revenue)}</td>${canSeeMargin ? `<td class="num">${row.realized_margin_fifo == null ? "—" : fmt(row.realized_margin_fifo)}</td>` : ""}</tr>`).join("");
     const paymentRows = byMethode.map(row => `<tr><td>${row.m}</td><td class="num">${row.count}</td><td class="num">${fmt(row.total)}</td></tr>`).join("");
-    return `<!doctype html><html><head><meta charset="utf-8"><style>body{font-family:Arial,sans-serif;padding:28px;color:#18181b}h1{font-size:22px}h2{font-size:14px;margin-top:24px;border-bottom:1px solid #ddd;padding-bottom:6px}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.k{background:#f7f7f7;padding:12px;border-radius:10px}.l{font-size:9px;color:#777;text-transform:uppercase}.v{font-size:16px;font-weight:800;margin-top:4px}table{width:100%;border-collapse:collapse;font-size:11px}th,td{padding:7px;border-bottom:1px solid #eee;text-align:left}.num{text-align:right}</style></head><body><h1>${boutique.nom} — Rapport ventes</h1><p>${periodLabel[period]} · ${new Date().toLocaleString("fr-FR")}</p><div class="grid"><div class="k"><div class="l">CA facturé</div><div class="v">${fmt(metrics?.invoiced_revenue ?? 0)}</div></div><div class="k"><div class="l">CA encaissé</div><div class="v">${fmt(metrics?.collected_cash ?? 0)}</div></div><div class="k"><div class="l">Transactions</div><div class="v">${metrics?.sales_count ?? 0}</div></div><div class="k"><div class="l">Panier moyen</div><div class="v">${fmt(metrics?.average_basket ?? 0)}</div></div></div><h2>Meilleurs produits</h2><table><thead><tr><th>Produit</th><th>Catégorie</th><th class="num">Qté</th><th class="num">CA</th>${canSeeMargin ? '<th class="num">Marge FIFO</th>' : ''}</tr></thead><tbody>${productRows}</tbody></table><h2>Modes de paiement</h2><table><thead><tr><th>Mode</th><th class="num">Opérations</th><th class="num">Montant</th></tr></thead><tbody>${paymentRows}</tbody></table></body></html>`;
+    const employeeRows = canSeeMargin ? (employeeReport?.employees ?? []).map(row => `<tr><td>${row.operator_name}</td><td class="num">${fmt(row.invoiced_revenue)}</td><td class="num">${row.sales_count}</td><td class="num">${fmt(row.average_basket)}</td><td class="num">${row.returns_count}</td><td class="num">${row.return_rate == null ? "—" : `${new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 }).format(row.return_rate)} %`}</td></tr>`).join("") : "";
+    return `<!doctype html><html><head><meta charset="utf-8"><style>body{font-family:Arial,sans-serif;padding:28px;color:#18181b}h1{font-size:22px}h2{font-size:14px;margin-top:24px;border-bottom:1px solid #ddd;padding-bottom:6px}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.k{background:#f7f7f7;padding:12px;border-radius:10px}.l{font-size:9px;color:#777;text-transform:uppercase}.v{font-size:16px;font-weight:800;margin-top:4px}table{width:100%;border-collapse:collapse;font-size:11px}th,td{padding:7px;border-bottom:1px solid #eee;text-align:left}.num{text-align:right}</style></head><body><h1>${boutique.nom} — Rapport ventes</h1><p>${periodLabel[period]} · ${new Date().toLocaleString("fr-FR")}</p><div class="grid"><div class="k"><div class="l">CA facturé</div><div class="v">${fmt(metrics?.invoiced_revenue ?? 0)}</div></div><div class="k"><div class="l">CA encaissé</div><div class="v">${fmt(metrics?.collected_cash ?? 0)}</div></div><div class="k"><div class="l">Transactions</div><div class="v">${metrics?.sales_count ?? 0}</div></div><div class="k"><div class="l">Panier moyen</div><div class="v">${fmt(metrics?.average_basket ?? 0)}</div></div></div><h2>Meilleurs produits</h2><table><thead><tr><th>Produit</th><th>Catégorie</th><th class="num">Qté</th><th class="num">CA</th>${canSeeMargin ? '<th class="num">Marge FIFO</th>' : ''}</tr></thead><tbody>${productRows}</tbody></table>${canSeeMargin ? `<h2>Performance par employé</h2><table><thead><tr><th>Employé</th><th class="num">CA</th><th class="num">Ventes</th><th class="num">Panier moyen</th><th class="num">Retours</th><th class="num">Taux retour</th></tr></thead><tbody>${employeeRows}</tbody></table>` : ""}<h2>Modes de paiement</h2><table><thead><tr><th>Mode</th><th class="num">Opérations</th><th class="num">Montant</th></tr></thead><tbody>${paymentRows}</tbody></table></body></html>`;
   }
 
   async function downloadPdf() {
@@ -168,7 +173,7 @@ export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique:
     }
   }
 
-  return <div data-screen-source="canonical-report-v2" className="space-y-4 pb-24">
+  return <div data-screen-source="canonical-report-v3" className="space-y-4 pb-24">
     <div className="flex gap-1.5 bg-card rounded-2xl p-1.5 border border-border">
       {periodBtns.map(item => <button key={item.id} onClick={() => setPeriod(item.id)} className="flex-1 py-2 rounded-xl text-xs font-bold" style={{ background: period === item.id ? RC : "transparent", color: period === item.id ? "#fff" : "#6b7280" }}>{item.label}</button>)}
     </div>
@@ -178,6 +183,7 @@ export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique:
     {loading && metrics && <div className="rounded-xl border border-border bg-muted px-3 py-2 text-xs font-semibold text-muted-foreground">Actualisation du rapport…</div>}
     {marginWarning && <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">{marginWarning}</div>}
     {reconciliationGap > 0.5 && <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">Écart de réconciliation produits / CA facturé : {fmt(reconciliationGap)}</div>}
+    {employeeReconciliationGap > 0.5 && <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">Écart de réconciliation employés / CA facturé : {fmt(employeeReconciliationGap)}</div>}
 
     <div className="grid grid-cols-2 gap-2">
       {[
@@ -198,9 +204,14 @@ export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique:
       </div>
     </div>
 
+    {canSeeMargin && <div className="bg-card rounded-2xl border border-border overflow-hidden">
+      <div className="px-4 py-3 border-b border-border flex items-center gap-2"><Users size={16} style={{ color: RC }} /><div><p className="font-bold text-sm">Performance par employé</p><p className="text-xs text-muted-foreground">CA facturé net, ventes, panier moyen et taux de retours</p></div></div>
+      {(employeeReport?.employees ?? []).length === 0 ? <p className="px-4 py-6 text-sm text-muted-foreground">Aucune activité attribuée sur la période</p> : <div className="overflow-x-auto"><table className="w-full text-xs"><thead className="bg-muted/40 text-muted-foreground"><tr><th className="px-4 py-2 text-left">Employé</th><th className="px-3 py-2 text-right">CA</th><th className="px-3 py-2 text-right">Ventes</th><th className="px-3 py-2 text-right">Panier moyen</th><th className="px-3 py-2 text-right">Retours</th><th className="px-4 py-2 text-right">Taux retour</th></tr></thead><tbody>{(employeeReport?.employees ?? []).map(row => <tr key={row.operator_id ?? "unassigned"} className="border-t border-border"><td className="px-4 py-3 font-bold">{row.operator_name}</td><td className="px-3 py-3 text-right font-black">{fmt(row.invoiced_revenue)}</td><td className="px-3 py-3 text-right">{row.sales_count}</td><td className="px-3 py-3 text-right">{fmt(row.average_basket)}</td><td className="px-3 py-3 text-right">{row.returns_count}</td><td className="px-4 py-3 text-right">{row.return_rate == null ? "—" : `${new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 }).format(row.return_rate)} %`}</td></tr>)}</tbody></table></div>}
+    </div>}
+
     {byMethode.length > 0 && <div className="bg-card rounded-2xl border border-border overflow-hidden"><div className="px-4 py-3 border-b border-border flex items-center gap-2"><Wallet size={16} style={{ color: RC }} /><p className="font-bold text-sm">Modes de paiement</p></div>{byMethode.map(row => <div key={row.m} className="flex items-center justify-between px-4 py-3 border-b border-border last:border-0"><span className="text-sm flex items-center gap-2">{PM_ICON[row.m]} <span style={{ color: PM_COLOR[row.m] }}>{row.m}</span><span className="text-xs text-muted-foreground">({row.count})</span>{row.m === "Avoir client" && <span className="text-[10px] text-muted-foreground">crédit déjà reçu</span>}</span><span className="font-black text-sm" style={{ color: PM_COLOR[row.m], fontFamily: "'Nunito',sans-serif" }}>{fmt(row.total)}</span></div>)}</div>}
 
-    <div className="bg-card rounded-2xl border border-border p-4 flex items-center justify-between gap-3"><div><p className="font-bold text-sm">Export PDF</p><p className="text-xs text-muted-foreground">KPIs, meilleurs produits et modes de paiement</p></div><button type="button" onClick={() => void downloadPdf()} disabled={exporting || !metrics} className="rounded-xl px-4 py-2.5 text-xs font-black text-white disabled:opacity-50 flex items-center gap-2" style={{ background: RC }}><Download size={15} />{exporting ? "Génération…" : "Télécharger"}</button></div>
+    <div className="bg-card rounded-2xl border border-border p-4 flex items-center justify-between gap-3"><div><p className="font-bold text-sm">Export PDF</p><p className="text-xs text-muted-foreground">KPIs, produits, performances employé et modes de paiement</p></div><button type="button" onClick={() => void downloadPdf()} disabled={exporting || !metrics} className="rounded-xl px-4 py-2.5 text-xs font-black text-white disabled:opacity-50 flex items-center gap-2" style={{ background: RC }}><Download size={15} />{exporting ? "Génération…" : "Télécharger"}</button></div>
   </div>;
 }
 
