@@ -71,6 +71,39 @@ export type StockInventoryReport = {
   inventory_variances: InventoryVarianceRow[];
 };
 
+export type ClientReportRow = {
+  client_id: number;
+  client_name: string;
+  client_type: string;
+  invoiced_revenue: number;
+  sales_count: number;
+  average_basket: number;
+  collected_cash: number;
+  outstanding_global: number;
+  overdue_global: number;
+  returns_count: number;
+  returns_amount: number;
+  last_sale_at: string | null;
+  inactive: boolean;
+};
+
+export type ClientReport = {
+  from: string;
+  to: string;
+  inactive_days: number;
+  registered_invoiced_revenue: number;
+  registered_collected_cash: number;
+  active_clients: number;
+  new_clients: number;
+  inactive_clients_count: number;
+  registered_outstanding_global: number;
+  overdue_global: number;
+  returns_count: number;
+  top_clients: ClientReportRow[];
+  debtors: ClientReportRow[];
+  inactive_clients: ClientReportRow[];
+};
+
 function messageFrom(body: unknown) {
   if (!body || typeof body !== "object") return "";
   const value = body as Record<string, unknown>;
@@ -117,5 +150,14 @@ export function loadStockInventoryReport(params: { boutiqueId: string; from: str
     p_from: params.from,
     p_to: params.to,
     p_dormant_days: params.dormantDays,
+  });
+}
+
+export function loadClientReport(params: { boutiqueId: string; from: string; to: string; inactiveDays: number }) {
+  return postRpc<ClientReport>("get_client_report", {
+    p_boutique_id: params.boutiqueId,
+    p_from: params.from,
+    p_to: params.to,
+    p_inactive_days: params.inactiveDays,
   });
 }
