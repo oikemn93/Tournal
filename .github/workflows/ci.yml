@@ -71,6 +71,9 @@ jobs:
       - name: Report phase 1 sales contract
         run: node scripts/test-report-phase1.mjs
 
+      - name: Report phase 2 employee performance contract
+        run: node scripts/test-report-phase2-contract.mjs
+
       - name: Permission audit hardening
         run: node scripts/test-permission-audit-hardening.mjs
 
@@ -133,7 +136,7 @@ jobs:
           test ! -e .github/scripts/apply-invoice-summary-patch-v2.mjs
           test ! -e .github/workflows/refund-method-patcher.yml
           test ! -e .github/workflows/security_hardening-patcher.yml
-          test ! -e .github/workflows/realtime-coverage-patcher.yml
+          test ! -e .github/workflows/realtime_coverage-patcher.yml
           test ! -e .github/workflows/refine-client-invoice-actions.yml
           test ! -e .github/workflows/apply-margin-dashboard-isolation.yml
           test ! -e .github/workflows/apply-margin-safe-stock-edit.yml
