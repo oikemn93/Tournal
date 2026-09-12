@@ -31,8 +31,13 @@ function periodBounds(period: DashPeriod, customFrom: string, customTo: string) 
   return { from: from.toISOString(), to: to.toISOString() };
 }
 
-const mergeById = <T extends { id: unknown }>(current: T[], older: T[]) =>
-  [...new Map([...current, ...older].map(item => [item.id, item])).values()];
+const mergeById = <T,>(current: T[], older: T[]) => {
+  const rows = [...current, ...older];
+  return [...new Map(rows.map((item, index) => [
+    (item as { id?: unknown }).id ?? `__legacy_${index}`,
+    item,
+  ])).values()];
+};
 
 export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique: Boutique; canSeeMargin?: boolean }) {
   const RC = boutique.color;
