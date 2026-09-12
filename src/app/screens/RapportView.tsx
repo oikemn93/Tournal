@@ -5,8 +5,8 @@ import { SEM, inputCls, PAYMENT_METHODS, PM_ICON, PM_COLOR, CHARGE_CATS, CHARGE_
 import { fmt } from "../utils/formatting";
 import { invBadge, lineDispQty, lineDispUnit, lineTotal, filterByPeriod, supplierBalance } from "../utils/inventory";
 import { Modal } from "../components/Modal";
-import { filterPaymentEventsByPeriod, formatPreciseDateTime, invoicePaidAmount, invoiceRemainingAmount } from "../utils/payments";
-import { getFifoRealizedMargin, type FifoRealizedMarginReport } from "../../lib/inventoryApi";
+import { filterPaymentEventsByPeriod, formatPreciseDateTime, invoicePaidAmount } from "../utils/payments";
+import { loadFinancialMetrics, type FinancialMetrics } from "../../lib/dashboardApi";
 import { boundedBootstrapCutoffIso, loadBoutiqueHistoryRange, type BoutiqueHistoryPatch } from "../../lib/api";
 
 export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique: Boutique; canSeeMargin?: boolean }) {
@@ -21,25 +21,15 @@ export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique:
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const [exportModal, setExportModal] = useState<"summary"|"full"|null>(null);
-  const [serverMargin, setServerMargin] = useState<FifoRealizedMarginReport|null>(null);
-  const [marginLoading, setMarginLoading] = useState(false);
+  const [financialMetrics,setFinancialMetrics]=useState<FinancialMetrics|null>(null);
+  const [metricsLoading,setMetricsLoading]=useState(false);
+  const [metricsError,setMetricsError]=useState("");
 
   const filtInv = filterByPeriod(invoices, period, customFrom, customTo);
   const filtPayments = filterPaymentEventsByPeriod(invoices, period, customFrom, customTo);
   const filtCreditRefunds = filterByPeriod(creditRefunds, period, customFrom, customTo);
   const filtCh  = filterByPeriod(charges, period, customFrom, customTo);
 
-  const invoiceSign = (invoice: typeof filtInv[number]) => invoice.type === "Retour" || invoice.type === "retour" ? -1 : 1;
-  const ca           = filtPayments.reduce((sum,payment)=>sum + payment.signedAmount,0) - filtCreditRefunds.reduce((sum,refund)=>sum + refund.amount,0);
-  const caTotal      = filtInv.reduce((s,i)=>s + invoiceSign(i) * i.montant,0);
-  const salePayments = filtPayments.filter(payment=>payment.signedAmount>0);
-  const nbVentes     = new Set(salePayments.map(payment=>payment.invoiceId)).size;
-  const caBrutVentes = salePayments.reduce((sum,payment)=>sum+payment.signedAmount,0);
-  const panierMoyen  = nbVentes > 0 ? caBrutVentes / nbVentes : 0;
-  const impayé       = filtInv.filter(i=>invoiceSign(i)>0).reduce((s,i)=>s+invoiceRemainingAmount(i),0);
-  // A supplier receipt is a payable commitment, not money that has already
-  // left the cash desk. The later supplier-payment charge is the actual cash
-  // outflow, so counting both would double-count supplier spending.
   const chargeCashAmount = (charge: typeof charges[number]) =>
     charge.source === "transfer" ? Number(charge.paidAmount ?? 0)
     : charge.source === "supplier_receipt" ? 0
@@ -53,46 +43,58 @@ export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique:
     () => (boutique.suppliers ?? []).reduce((sum, supplier) => sum + supplierBalance(supplier, entries, charges), 0),
     [boutique.suppliers, entries, charges],
   );
-  const totalCharges = paidCharges.reduce((s,c)=>s+chargeCashAmount(c),0);
-  const chargesExploitation = paidCharges.filter(c=>c.categorie!=="Achat stock").reduce((s,c)=>s+chargeCashAmount(c),0);
 
-  const marginPeriod = useMemo(() => {
+  const financialPeriod = useMemo(() => {
     const now=new Date(); let from:Date; let to=new Date(now.getTime()+1);
     if(period==="jour"){from=new Date(now);from.setHours(0,0,0,0);}
     else if(period==="semaine"){from=new Date(now);from.setDate(now.getDate()-7);}
     else if(period==="mois"){from=new Date(now.getFullYear(),now.getMonth(),1);}
     else if(period==="annee"){from=new Date(now.getFullYear(),0,1);}
     else {from=customFrom?new Date(`${customFrom}T00:00:00`):new Date(now);to=customTo?new Date(`${customTo}T23:59:59.999`):to;}
-    return {fromAt:from.toISOString(),toAt:to.toISOString()};
+    return {from:from.toISOString(),to:to.toISOString()};
   },[period,customFrom,customTo]);
+
   useEffect(()=>{
-    if(new Date(marginPeriod.fromAt).getTime()>=new Date(boundedBootstrapCutoffIso()).getTime()){setHistoricalPatch(null);return;}
+    if(new Date(financialPeriod.from).getTime()>=new Date(boundedBootstrapCutoffIso()).getTime()){setHistoricalPatch(null);return;}
     let cancelled=false;
-    void loadBoutiqueHistoryRange(boutique.id,marginPeriod.fromAt,marginPeriod.toAt).then(patch=>{if(!cancelled)setHistoricalPatch(patch);}).catch(error=>{console.warn("Historique rapport indisponible",error);if(!cancelled)setHistoricalPatch(null);});
+    void loadBoutiqueHistoryRange(boutique.id,financialPeriod.from,financialPeriod.to).then(patch=>{if(!cancelled)setHistoricalPatch(patch);}).catch(error=>{console.warn("Historique rapport indisponible",error);if(!cancelled)setHistoricalPatch(null);});
     return()=>{cancelled=true;};
-  },[boutique.id,marginPeriod.fromAt,marginPeriod.toAt]);
+  },[boutique.id,financialPeriod.from,financialPeriod.to]);
 
   useEffect(()=>{
     let cancelled=false;
-    if(!canSeeMargin){setServerMargin(null);return ()=>{cancelled=true;};}
-    setMarginLoading(true);
-    void getFifoRealizedMargin({boutiqueId:boutique.id,...marginPeriod})
-      .then(report=>{if(!cancelled)setServerMargin(report);})
-      .catch(error=>{console.warn("Marge FIFO serveur indisponible",error);if(!cancelled)setServerMargin(null);})
-      .finally(()=>{if(!cancelled)setMarginLoading(false);});
-    return ()=>{cancelled=true;};
-  },[boutique.id,canSeeMargin,marginPeriod.fromAt,marginPeriod.toAt]);
-  const margeVentesData={marge:serverMargin?.realizedMargin??0,ca:serverMargin?.revenue??0,cost:serverMargin?.fifoCost??0,has:!!serverMargin};
+    setMetricsLoading(true);
+    setMetricsError("");
+    void loadFinancialMetrics({boutiqueId:boutique.id,...financialPeriod})
+      .then(metrics=>{if(!cancelled)setFinancialMetrics(metrics);})
+      .catch(error=>{console.warn("Indicateurs financiers indisponibles",error);if(!cancelled)setMetricsError(error instanceof Error?error.message:"Indicateurs financiers indisponibles");})
+      .finally(()=>{if(!cancelled)setMetricsLoading(false);});
+    return()=>{cancelled=true;};
+  },[boutique.id,financialPeriod.from,financialPeriod.to]);
+
+  const ca=financialMetrics?.collected_cash??0;
+  const caTotal=financialMetrics?.invoiced_revenue??0;
+  const nbVentes=financialMetrics?.sales_count??0;
+  const panierMoyen=financialMetrics?.average_basket??0;
+  const impayé=financialMetrics?.period_outstanding??0;
+  const totalCharges=financialMetrics?.cash_expenses??0;
+  const chargesExploitation=financialMetrics?.operating_cash_expenses??0;
+  const margeVentesData={
+    marge:financialMetrics?.realized_margin_fifo??0,
+    ca:financialMetrics?.margin_revenue??0,
+    cost:financialMetrics?.fifo_cost??0,
+    has:financialMetrics?.realized_margin_fifo!=null,
+  };
   const margeVentes=margeVentesData.marge;
-  const tauxMargeVentes=serverMargin?.marginRate??0;
+  const tauxMargeVentes=financialMetrics?.margin_rate??0;
   const resultatApresCharges=margeVentes-chargesExploitation;
-  const marginCoverageWarning=canSeeMargin&&serverMargin&&(serverMargin.coverageRate<99.99||serverMargin.unmatchedLines>0)
-    ? `Couverture FIFO ${new Intl.NumberFormat("fr-FR",{maximumFractionDigits:1}).format(serverMargin.coverageRate)} % · ${serverMargin.unmatchedLines} ligne(s) sans coût fiable`
+  const marginCoverageWarning=canSeeMargin&&financialMetrics?.realized_margin_fifo!=null&&((financialMetrics.margin_coverage_rate??100)<99.99||(financialMetrics.margin_unmatched_lines??0)>0)
+    ? `Couverture FIFO ${new Intl.NumberFormat("fr-FR",{maximumFractionDigits:1}).format(financialMetrics.margin_coverage_rate??0)} % · ${financialMetrics.margin_unmatched_lines??0} ligne(s) sans coût fiable`
     : null;
 
   // Credits are created by an overpayment and become an "Avoir client" payment
-  // only when applied to a later invoice.  Keep it distinct from cash methods:
-  // it settles a sale but must not be mistaken for a new cash collection.
+  // only when applied to a later invoice. Keep the detailed payment breakdown
+  // local, but never use it as the source of truth for canonical totals.
   const reportPaymentMethods: PaymentMethod[] = [...PAYMENT_METHODS, "Avoir client"];
   const byMethode = reportPaymentMethods.map(m => {
     const payments = filtPayments.filter(payment=>payment.paymentMethod===m);
@@ -145,16 +147,16 @@ ${marginCoverageWarning?`<div style="padding:8px 10px;background:#fffbeb;color:#
   <div class="kpi"><div class="label">Ventes</div><div class="value">${nbVentes}</div></div>
   <div class="kpi"><div class="label">Panier moyen</div><div class="value">${fmt(panierMoyen)}</div></div>
   <div class="kpi"><div class="label">CA facturé (date de facture)</div><div class="value muted">${fmt(caTotal)}</div></div>
-  <div class="kpi"><div class="label">Impayé</div><div class="value orange">${fmt(impayé)}</div></div>
-  ${canSeeMargin && margeVentesData.has ? `<div class="kpi"><div class="label">Marge commerciale (${tauxMargeVentes}%)</div><div class="value ${margeVentes>=0?"green":"red"}">${fmt(margeVentes)}</div></div><div class="kpi"><div class="label">Résultat après charges</div><div class="value ${resultatApresCharges>=0?"green":"red"}">${fmt(resultatApresCharges)}</div></div>` : ""}
+  <div class="kpi"><div class="label">Impayé sur la période</div><div class="value orange">${fmt(impayé)}</div></div>
+  ${canSeeMargin && margeVentesData.has ? `<div class="kpi"><div class="label">Marge commerciale FIFO (${tauxMargeVentes}%)</div><div class="value ${margeVentes>=0?"green":"red"}">${fmt(margeVentes)}</div></div><div class="kpi"><div class="label">Résultat après charges</div><div class="value ${resultatApresCharges>=0?"green":"red"}">${fmt(resultatApresCharges)}</div></div>` : ""}
 </div>
 ${byMethode.length>0?`<div class="section-title">Répartition par mode de paiement</div>
 ${byMethode.map(r=>`<div class="row"><span class="label">${PM_ICON[r.m]} ${r.m} <span class="muted">(${r.count})</span></span><span class="value">${fmt(r.total)}</span></div>`).join("")}
-<div class="row total-row"><span class="label">Total des règlements</span><span class="value green">${fmt(ca)}</span></div>${byMethode.some(r=>r.m === "Avoir client") ? `<p class="muted">Les avoirs règlent une facture avec un crédit déjà reçu ; ils ne constituent pas un nouvel encaissement.</p>` : ""}`:""}
+<div class="row total-row"><span class="label">CA encaissé canonique</span><span class="value green">${fmt(ca)}</span></div>${byMethode.some(r=>r.m === "Avoir client") ? `<p class="muted">Les avoirs règlent une facture avec un crédit déjà reçu ; ils ne constituent pas un nouvel encaissement.</p>` : ""}`:""}
 ${paidCharges.length>0?`<div class="section-title">Charges décaissées (${paidCharges.length})</div>
 ${byCategorie.map(r=>`<div class="row"><span class="label">${r.cat}</span><span class="value red">${fmt(r.montant)}</span></div>`).join("")}
 ${paidCharges.map(c=>`<div class="row"><span class="label" style="padding-left:12px;color:#888">· ${c.label} · ${formatPreciseDateTime(c.dateRaw) === "—" ? c.date : formatPreciseDateTime(c.dateRaw)}</span><span class="value muted">${fmt(chargeCashAmount(c))}</span></div>`).join("")}
-<div class="row total-row"><span class="label">Total charges</span><span class="value red">${fmt(totalCharges)}</span></div>
+<div class="row total-row"><span class="label">Total charges canonique</span><span class="value red">${fmt(totalCharges)}</span></div>
 ${canSeeMargin && margeVentesData.has ? `<div class="row total-row" style="border-top:2px solid ${resultatApresCharges>=0?"#1E9B1E":"#ef4444"}"><span class="label" style="color:${resultatApresCharges>=0?"#1E9B1E":"#ef4444"}">Résultat après charges</span><span class="value" style="color:${resultatApresCharges>=0?"#1E9B1E":"#ef4444"}">${fmt(resultatApresCharges)}</span></div>` : ""}`:""}
 ${supplierReceipts.length>0?`<div class="section-title">Réceptions fournisseur — engagement non décaissé</div>
 ${supplierReceipts.map(c=>`<div class="row"><span class="label">· ${c.label} · ${formatPreciseDateTime(c.dateRaw) === "—" ? c.date : formatPreciseDateTime(c.dateRaw)}</span><span class="value muted">Reçu ${fmt(c.montant)} · réglé ${fmt(Number(c.paidAmount ?? 0))} · reste ${fmt(Math.max(0, Number(c.montant)-Number(c.paidAmount ?? 0)))}</span></div>`).join("")}
@@ -168,7 +170,7 @@ ${supplierReceipts.map(c=>`<div class="row"><span class="label">· ${c.label} ·
 <div class="section-title">Charges décaissées (${paidCharges.length})</div>
 <table><thead><tr><th>Libellé</th><th>Catégorie</th><th>Date</th><th class="val">Montant</th></tr></thead><tbody>
 ${paidCharges.map(c=>`<tr><td>${c.label}</td><td>${c.categorie}</td><td>${formatPreciseDateTime(c.dateRaw) === "—" ? c.date : formatPreciseDateTime(c.dateRaw)}</td><td class="val">${fmt(chargeCashAmount(c))}</td></tr>`).join("")}
-<tr class="total-row"><td colspan="3"><b>TOTAL CHARGES</b></td><td class="val red"><b>${fmt(totalCharges)}</b></td></tr>
+<tr class="total-row"><td colspan="3"><b>TOTAL CHARGES CANONIQUE</b></td><td class="val red"><b>${fmt(totalCharges)}</b></td></tr>
 </tbody></table>` : "";
     const supplierReceiptsBlock = supplierReceipts.length > 0 ? `
 <div class="section-title">Réceptions fournisseur — engagement non décaissé</div>
@@ -194,27 +196,28 @@ h1{font-size:20px;font-weight:900;margin:0 0 2px}.sub{color:#888;font-size:12px;
 .section-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#888;margin:16px 0 6px;border-top:1px solid #eee;padding-top:12px}
 table{width:100%;border-collapse:collapse}td,th{padding:7px 10px;text-align:left;border-bottom:1px solid #f0f0f0;font-size:12px}
 th{font-weight:700;color:#666;font-size:10px;text-transform:uppercase}
-.val{text-align:right;font-weight:700}.green{color:#1E9B1E}.red{color:#ef4444}.muted{color:#888}
+.val{text-align:right;font-weight:700}.green{color:#1E9B1E}.red{color:#ef4444}.orange{color:#f97316}.muted{color:#888}
 .total-row td{border-top:2px solid #1a1a1a;font-weight:900;padding-top:9px}
 @media print{body{padding:16px}}
 </style></head><body>
 <h1>${boutique.nom} — Rapport complet</h1>
 <div class="sub">${periodLabel[period]}${period==="custom"?` (${customFrom} → ${customTo})`:""} · Généré le ${formatPreciseDateTime(new Date().toISOString())}</div>
+${marginCoverageWarning?`<div style="padding:8px 10px;background:#fffbeb;color:#92400e;border-radius:8px;margin-bottom:12px;font-weight:700">${marginCoverageWarning}</div>`:""}
 <div class="kpis">
   <div class="kpi"><div class="label">CA encaissé (date de paiement)</div><div class="value green">${fmt(ca)}</div></div>
   <div class="kpi"><div class="label">Ventes</div><div class="value">${nbVentes}</div></div>
   <div class="kpi"><div class="label">Panier moyen</div><div class="value">${fmt(panierMoyen)}</div></div>
   <div class="kpi"><div class="label">CA facturé (date de facture)</div><div class="value">${fmt(caTotal)}</div></div>
-  <div class="kpi"><div class="label">Impayé</div><div class="value muted">${fmt(impayé)}</div></div>
+  <div class="kpi"><div class="label">Impayé sur la période</div><div class="value muted">${fmt(impayé)}</div></div>
   <div class="kpi"><div class="label">Solde fournisseurs actuel</div><div class="value orange">${fmt(supplierOutstanding)}</div></div>
-  ${canSeeMargin && margeVentesData.has ? `<div class="kpi"><div class="label">Marge commerciale (${tauxMargeVentes}%)</div><div class="value ${margeVentes>=0?"green":"red"}">${fmt(margeVentes)}</div></div><div class="kpi"><div class="label">Résultat après charges</div><div class="value ${resultatApresCharges>=0?"green":"red"}">${fmt(resultatApresCharges)}</div></div>` : ""}
+  ${canSeeMargin && margeVentesData.has ? `<div class="kpi"><div class="label">Marge commerciale FIFO (${tauxMargeVentes}%)</div><div class="value ${margeVentes>=0?"green":"red"}">${fmt(margeVentes)}</div></div><div class="kpi"><div class="label">Résultat après charges</div><div class="value ${resultatApresCharges>=0?"green":"red"}">${fmt(resultatApresCharges)}</div></div>` : ""}
 </div>
 ${chargesBlock}
 ${supplierReceiptsBlock}
 <div id="transactions" class="section-title">Transactions (${filtInv.length})</div>
 <table><thead><tr><th>Réf</th><th>Client</th><th>Date</th><th>Statut</th><th class="val">Facturé</th><th class="val">Encaissé</th></tr></thead><tbody>
 ${invLines}
-<tr class="total-row"><td colspan="4"><b>TOTAL</b></td><td class="val"><b>${fmt(caTotal)}</b></td><td class="val green"><b>${fmt(ca)}</b></td></tr>
+<tr class="total-row"><td colspan="4"><b>TOTAL CANONIQUE</b></td><td class="val"><b>${fmt(caTotal)}</b></td><td class="val green"><b>${fmt(ca)}</b></td></tr>
 </tbody></table>
 </body></html>`;
   }
@@ -272,13 +275,13 @@ ${invLines}
   const rows = [
     { label:"CA encaissé · date de paiement", value:ca, color:RC, bold:true },
     { label:"CA facturé · date de facture", value:caTotal, color:"#C9A227" },
-    { label:"Nb ventes",     value:-1,            color:"#6b7280", txt:`${nbVentes}`     },
-    { label:"Panier moyen",  value:panierMoyen,   color:"#a855f7"                        },
-    { label:"Impayé",        value:impayé,        color:SEM.warning.accent                        },
-    { label:"Charges décaissées", value:totalCharges, color:"#ef4444"                    },
+    { label:"Nb ventes", value:-1, color:"#6b7280", txt:`${nbVentes}` },
+    { label:"Panier moyen", value:panierMoyen, color:"#a855f7" },
+    { label:"Impayé sur la période", value:impayé, color:SEM.warning.accent },
+    { label:"Charges décaissées", value:totalCharges, color:"#ef4444" },
     { label:"À régler fournisseurs · solde actuel", value:supplierOutstanding, color:SEM.warning.accent },
     ...(canSeeMargin && margeVentesData.has ? [
-      { label:"Marge commerciale", value:margeVentes, color:margeVentes>=0?SEM.success.accent:SEM.danger.accent, bold:true },
+      { label:"Marge commerciale FIFO", value:margeVentes, color:margeVentes>=0?SEM.success.accent:SEM.danger.accent, bold:true },
       { label:"Taux de marge commerciale", value:-1, color:"#a855f7", txt:`${tauxMargeVentes}%` },
       { label:"Résultat après charges", value:resultatApresCharges, color:resultatApresCharges>=0?SEM.success.accent:SEM.danger.accent, bold:true },
     ] : []),
@@ -286,7 +289,6 @@ ${invLines}
 
   return (
     <div data-screen-source="relational-comptabilite" className="space-y-4 pb-24">
-      {/* Period selector */}
       <div className="flex gap-1.5 bg-card rounded-2xl p-1.5 border border-border">
         {periodBtns.map(p=>(
           <button key={p.id} onClick={()=>setPeriod(p.id)} className="flex-1 py-2 rounded-xl text-xs font-bold transition-all" style={{background:period===p.id?RC:"transparent",color:period===p.id?"#fff":"#6b7280"}}>
@@ -301,15 +303,20 @@ ${invLines}
         </div>
       )}
 
-      {/* KPI cards */}
+      {metricsError && <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{metricsError}</div>}
+      {metricsLoading && financialMetrics && <div className="rounded-xl border border-border bg-muted px-3 py-2 text-xs font-semibold text-muted-foreground">Actualisation des indicateurs financiers…</div>}
+      {marginCoverageWarning && <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">{marginCoverageWarning}</div>}
+
       <div className="grid grid-cols-2 gap-2">
         {[
           { label:"CA encaissé (paiements)", value:fmt(ca), color:RC },
+          { label:"CA facturé", value:fmt(caTotal), color:"#C9A227" },
           { label:"Ventes", value:`${nbVentes}`, color:"#6b7280" },
           { label:"Panier moyen", value:fmt(panierMoyen), color:"#a855f7" },
+          { label:"Impayé sur la période", value:fmt(impayé), color:SEM.warning.accent },
           { label:"À régler fournisseurs (solde actuel)", value:fmt(supplierOutstanding), color:SEM.warning.accent },
           ...(canSeeMargin && margeVentesData.has ? [
-            { label:`Marge commerciale (${tauxMargeVentes}%)`, value:fmt(margeVentes), color:margeVentes>=0?SEM.success.accent:SEM.danger.accent },
+            { label:`Marge commerciale FIFO (${tauxMargeVentes}%)`, value:fmt(margeVentes), color:margeVentes>=0?SEM.success.accent:SEM.danger.accent },
             { label:"Résultat après charges", value:fmt(resultatApresCharges), color:resultatApresCharges>=0?SEM.success.accent:SEM.danger.accent },
           ] : []),
         ].map((k,i)=>(
@@ -320,7 +327,6 @@ ${invLines}
         ))}
       </div>
 
-      {/* Compte de résultat */}
       <div className="bg-card rounded-2xl border border-border overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
           <div className="flex items-center gap-2"><BookOpen size={16} style={{color:RC}}/><p className="font-bold text-sm">Compte de résultat</p></div>
@@ -335,7 +341,6 @@ ${invLines}
         ))}
       </div>
 
-      {/* Répartition paiements */}
       {byMethode.length > 0 && (
         <div className="bg-card rounded-2xl border border-border overflow-hidden">
           <div className="px-4 py-3 border-b border-border flex items-center gap-2">
@@ -351,7 +356,6 @@ ${invLines}
         </div>
       )}
 
-      {/* Charges par catégorie */}
       {byCategorie.length > 0 && (
         <div className="bg-card rounded-2xl border border-border overflow-hidden">
           <div className="px-4 py-3 border-b border-border flex items-center gap-2"><Wallet size={16} style={{color:"#ef4444"}}/><p className="font-bold text-sm">Charges décaissées</p></div>
@@ -382,7 +386,6 @@ ${invLines}
         </div>
       )}
 
-      {/* Export */}
       <div className="bg-card rounded-2xl border border-border overflow-hidden">
         <div className="px-4 py-3 border-b border-border flex items-center gap-2"><Download size={16} style={{color:RC}}/><p className="font-bold text-sm">Exporter</p></div>
         <div className="grid grid-cols-2 divide-x divide-border">
@@ -399,7 +402,6 @@ ${invLines}
         </div>
       </div>
 
-      {/* Factures */}
       <div className="bg-card rounded-2xl border border-border overflow-hidden">
         <div className="px-4 py-3 border-b border-border flex items-center gap-2"><FileText size={16} style={{color:"#a855f7"}}/><p className="font-bold text-sm">Transactions ({filtInv.length})</p></div>
         {filtInv.length === 0 && <p className="text-center py-8 text-sm text-muted-foreground">Aucune transaction sur cette période</p>}
@@ -417,7 +419,6 @@ ${invLines}
         })}
       </div>
 
-      {/* Export preview modal */}
       {exportModal && (
         <Modal title={exportModal==="summary"?"Entête de rapport":"Rapport complet"} color={RC} onClose={()=>setExportModal(null)}>
           <div className="space-y-4">
