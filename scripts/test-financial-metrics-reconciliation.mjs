@@ -3,7 +3,7 @@ import fs from "node:fs";
 const dashboard = fs.readFileSync("src/app/screens/DashboardView.tsx", "utf8");
 const report = fs.readFileSync("src/app/screens/RapportView.tsx", "utf8");
 const api = fs.readFileSync("src/lib/dashboardApi.ts", "utf8");
-const migration = fs.readFileSync(".github/audit/candidate-migrations/20260912190000_canonical_financial_metrics.sql", "utf8");
+const migration = fs.readFileSync(".github/audit/replay-migrations/20260912165219_canonical_financial_metrics.sql", "utf8");
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -44,8 +44,8 @@ assert(report.includes("financialMetrics?.operating_cash_expenses"), "Report res
 
 assert(migration.includes("c.source not in ('supplier_receipt','transfer')"), "Canonical direct-charge logic must exclude supplier receipts and transfer shells");
 assert(migration.includes("public.transfer_charge_payments"), "Canonical charge logic must consume transfer payment events");
-assert(migration.includes("tcp.paid_at >= p_from") && migration.includes("tcp.paid_at < p_to"), "Transfer cash expenses must use real paid_at");
-assert(migration.includes("ip.paid_at >= p_from") && migration.includes("ip.paid_at < p_to"), "CA encaissé must be bounded by real paid_at");
-assert(migration.includes("i.invoice_date >= p_from") && migration.includes("i.invoice_date < p_to"), "CA facturé and sales count must use invoice_date");
+assert(migration.includes("tcp.paid_at>=p_from") && migration.includes("tcp.paid_at<p_to"), "Transfer cash expenses must use real paid_at");
+assert(migration.includes("ip.paid_at>=p_from") && migration.includes("ip.paid_at<p_to"), "CA encaissé must be bounded by real paid_at");
+assert(migration.includes("i.invoice_date>=p_from") && migration.includes("i.invoice_date<p_to"), "CA facturé and sales count must use invoice_date");
 
 console.log("financial-metrics-reconciliation: ok");
