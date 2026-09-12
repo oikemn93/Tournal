@@ -146,8 +146,8 @@ jobs:
       - name: Reconcile report phase 3 stock inventory
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f scripts/test-report-phase3-db.sql
 
-      - name: Apply report phase 4 candidate locally
-        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f .github/audit/candidate-migrations/20260912191000_report_phase4_client_report.sql
+      - name: Apply report phase 4 replay locally
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f .github/audit/replay-migrations/20260912192118_report_phase4_client_report.sql
 
       - name: Reconcile report phase 4 clients
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f scripts/test-report-phase4-db.sql
