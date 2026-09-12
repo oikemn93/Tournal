@@ -22,18 +22,18 @@ jobs:
         with:
           version: 2.116.0
 
-      - name: Verify deployable migration tree is unchanged
+      - name: Preserve existing migrations and allow additive fixes
         shell: bash
         run: |
           set -euo pipefail
           git fetch origin main --depth=1
-          changed="$(git diff --name-only origin/main...HEAD -- supabase/migrations || true)"
+          changed="$(git diff --name-only --diff-filter=DMRT origin/main...HEAD -- supabase/migrations || true)"
           if [ -n "$changed" ]; then
-            echo 'This PR must not alter deployable Supabase migrations:' >&2
+            echo 'Existing Supabase migrations must not be edited, removed or renamed:' >&2
             printf '%s\n' "$changed" >&2
             exit 1
           fi
-          echo 'deployable_supabase_migrations_unchanged'
+          echo 'existing_supabase_migrations_unchanged; new migrations will be replayed'
 
       - name: Materialize audit-only replay inputs
         shell: bash

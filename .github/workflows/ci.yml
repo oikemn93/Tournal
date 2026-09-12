@@ -92,6 +92,9 @@ jobs:
       - name: Supplier ledger consistency
         run: node scripts/test-supplier-ledger-contract.mjs
 
+      - name: Shared revenue periods and PostgreSQL regressions
+        run: node scripts/test-revenue-summary.mjs
+
       - name: Stock integrity contract
         run: node scripts/test-stock-integrity-contract.mjs
 

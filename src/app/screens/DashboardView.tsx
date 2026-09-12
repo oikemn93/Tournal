@@ -2,37 +2,26 @@ import React, { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ArrowRight, BarChart3, CircleDollarSign, PackageSearch, ReceiptText, TrendingUp, Users } from "lucide-react";
 import { loadDashboardSummary, type DashboardSummary } from "../../lib/dashboardApi";
 import type { Tab } from "../types";
+import { reportingBounds, type ReportingPeriod } from "../utils/reportingPeriod";
+import { useRevenueSummary } from "../hooks/useRevenueSummary";
+import { fmt } from "../utils/formatting";
 
-const fmt = (value: number) => `${new Intl.NumberFormat("fr-FR").format(Math.round(value || 0))} F`;
-
-type Period = "7d" | "30d" | "month";
-
-function periodBounds(period: Period) {
-  const now = new Date();
-  const to = new Date(now.getTime() + 1000);
-  if (period === "month") {
-    return { from: new Date(now.getFullYear(), now.getMonth(), 1).toISOString(), to: to.toISOString() };
-  }
-  const days = period === "30d" ? 29 : 6;
-  const from = new Date(now);
-  from.setHours(0, 0, 0, 0);
-  from.setDate(from.getDate() - days);
-  return { from: from.toISOString(), to: to.toISOString() };
-}
-
-export function DashboardView({ boutiqueId, canSeeMargin, onNavigate }: {
+export function DashboardView({ boutiqueId, canSeeMargin, onNavigate, revision }: {
   boutiqueId: string;
   canSeeMargin: boolean;
+  revision?: unknown;
   onNavigate: (tab: Tab, filter?: Record<string, string>) => void;
 }) {
-  const [period, setPeriod] = useState<Period>("7d");
+  const [period, setPeriod] = useState<ReportingPeriod>("jour");
+  const revenue = useRevenueSummary(boutiqueId, period, "", "", revision);
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
-    const bounds = periodBounds(period);
+    const bounds = reportingBounds(period)!;
+    setSummary(null);
     setLoading(true);
     setError("");
     void loadDashboardSummary({ boutiqueId, ...bounds })
@@ -40,7 +29,7 @@ export function DashboardView({ boutiqueId, canSeeMargin, onNavigate }: {
       .catch((cause) => { if (!cancelled) setError(cause instanceof Error ? cause.message : "Dashboard indisponible"); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [boutiqueId, period]);
+  }, [boutiqueId, period, revision]);
 
   const maxSeries = useMemo(() => Math.max(1, ...(summary?.series ?? []).map(point => Number(point.sales) || 0)), [summary?.series]);
 
@@ -53,8 +42,8 @@ export function DashboardView({ boutiqueId, canSeeMargin, onNavigate }: {
   if (!summary) return null;
 
   const cards = [
-    { label: "Chiffre d’affaires", value: fmt(summary.sales), icon: TrendingUp },
-    { label: "Encaissé", value: fmt(summary.collected), icon: CircleDollarSign },
+    { label: "CA encaissé · paiements", value: revenue.summary ? fmt(revenue.summary.collected) : "—", icon: CircleDollarSign },
+    { label: "CA facturé · factures", value: revenue.summary ? fmt(revenue.summary.invoiced) : "—", icon: TrendingUp },
     { label: "Impayé", value: fmt(summary.outstanding), icon: ReceiptText },
     { label: "Charges payées", value: fmt(summary.charges), icon: BarChart3 },
   ];
@@ -63,16 +52,19 @@ export function DashboardView({ boutiqueId, canSeeMargin, onNavigate }: {
     <div className="flex items-center justify-between gap-3">
       <div>
         <h1 className="text-xl font-black">Tableau de bord</h1>
-        <p className="text-xs text-muted-foreground mt-1">Agrégats sécurisés, sans téléchargement des tables métier.</p>
+        <p className="text-xs text-muted-foreground mt-1">Périodes à minuit, heure de Dakar.</p>
       </div>
-      <select value={period} onChange={e => setPeriod(e.target.value as Period)} className="rounded-xl bg-muted px-3 py-2 text-sm font-bold outline-none">
-        <option value="7d">7 jours</option>
+      <select aria-label="Période" value={period} onChange={e => setPeriod(e.target.value as ReportingPeriod)} className="rounded-xl bg-muted px-3 py-2 text-sm font-bold outline-none">
+        <option value="jour">Aujourd’hui</option>
+        <option value="semaine">7 jours</option>
         <option value="30d">30 jours</option>
-        <option value="month">Ce mois</option>
+        <option value="mois">Ce mois</option>
       </select>
     </div>
 
     {error && <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">Données précédentes conservées · {error}</div>}
+    {revenue.loading && <p role="status" className="text-xs text-muted-foreground">Actualisation du CA…</p>}
+    {revenue.error && <div role="alert" className="text-sm text-red-700">CA indisponible · {revenue.error} <button type="button" onClick={revenue.retry} className="underline">Réessayer</button></div>}
 
     <div className="grid grid-cols-2 gap-3">
       {cards.map(({ label, value, icon: Icon }) => <div key={label} className="rounded-2xl border border-border bg-card p-4">
