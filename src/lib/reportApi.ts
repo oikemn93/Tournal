@@ -87,6 +87,7 @@ export type ClientReportRow = {
 };
 
 export type ClientReport = {
+  boutique_id: string;
   from: string;
   to: string;
   clients_count: number;
