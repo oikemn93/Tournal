@@ -19,7 +19,7 @@ create temp table audit_expected_fingerprint(
 insert into audit_expected_fingerprint(category, object_count, md5) values
   ('columns',     639, 'c0d9e7b93f5aee43a9920f749653c7cf'),
   ('constraints', 255, 'e90f367fcc6dd044a41d7f858b9f9ec9'),
-  ('functions',    211, '8670d6087c91d09c7c8d194607aea897'),
+  ('functions',    212, '75712c8fc0c47fd0c33520e49ebb82c5'),
   ('indexes',      193, '40da4fb6fd61d7158e4803fc3323f732'),
   ('policies',      88, '2e88704fe8bd522a1b4edaf602697a64'),
   ('relations',     77, 'fe47306893a1d143b92e1e3b9f6aa9a2'),
