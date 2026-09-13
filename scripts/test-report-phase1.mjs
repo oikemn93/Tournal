@@ -4,6 +4,7 @@ const entry = fs.readFileSync("src/app/screens/RapportView.tsx", "utf8");
 const screen = entry.includes("RapportViewV2")
   ? fs.readFileSync("src/app/screens/RapportViewV2.tsx", "utf8")
   : entry;
+const sales = fs.readFileSync("src/app/screens/SalesReportSection.tsx", "utf8");
 const kpis = fs.readFileSync("src/app/screens/ReportKpiBand.tsx", "utf8");
 const client = fs.readFileSync("src/lib/reportApi.ts", "utf8");
 const migration = fs.readFileSync(".github/audit/replay-migrations/20260912174106_report_phase1_sales_products.sql", "utf8");
@@ -17,9 +18,10 @@ assert(screen.includes("loadFinancialMetrics"), "Phase 1 KPIs must remain on can
 assert(screen.includes("loadSalesProductReport"), "Phase 1 product ranking must use bounded server report RPC");
 assert(kpis.includes("metrics?.sales_count"), "Transaction count must use canonical sales_count");
 assert(kpis.includes("metrics?.average_basket"), "Average basket must use canonical average_basket");
-assert(screen.includes("Toutes catégories"), "Product ranking must be filterable by category");
-assert(screen.includes('title="Ventes"') && screen.includes("<Bars") && screen.includes("<table"), "Sales report must keep summary, visualization and detailed product ranking");
-assert(screen.includes('setSort("product_name")') && screen.includes('setSort("quantity")') && screen.includes('setSort("invoiced_revenue")'), "Product detail must remain sortable");
+assert(sales.includes("Toutes catégories"), "Product ranking must be filterable by category");
+assert(screen.includes('title="Ventes"') && screen.includes("<SalesReportSection"), "Active report must wire the focused sales section");
+assert(sales.includes("Produits qui portent le CA") && sales.includes("<table"), "Sales report must keep summary, visualization and detailed product ranking");
+assert(sales.includes('chooseSort("product_name")') && sales.includes('chooseSort("quantity")') && sales.includes('chooseSort("invoiced_revenue")'), "Product detail must remain sortable");
 assert(!screen.includes("const caTotal") && !screen.includes("filtInv.reduce"), "Report screen must not recompute canonical CA locally");
 
 assert(client.includes("get_sales_product_report"), "Report client must call get_sales_product_report");
