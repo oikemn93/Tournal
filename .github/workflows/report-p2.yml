@@ -1,0 +1,23 @@
+name: Report P2
+on:
+  pull_request:
+    paths:
+      - "src/app/screens/**"
+      - "scripts/test-report-p2-contract.mjs"
+      - ".github/workflows/report-p2.yml"
+jobs:
+  semantics:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: node scripts/test-report-p2-contract.mjs
+      - run: pnpm exec tsc --noEmit
+      - run: pnpm build

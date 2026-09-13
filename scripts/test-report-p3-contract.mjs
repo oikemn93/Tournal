@@ -1,0 +1,20 @@
+import fs from "node:fs";
+const view=fs.readFileSync("src/app/screens/RapportViewV2.tsx","utf8");
+const client=fs.readFileSync("src/app/screens/ClientReportSection.tsx","utf8");
+const stock=fs.readFileSync("src/app/screens/StockReportSection.tsx","utf8");
+const sales=fs.readFileSync("src/app/screens/SalesReportSection.tsx","utf8");
+const api=fs.readFileSync("src/lib/reportApi.ts","utf8");
+const exportUi=fs.readFileSync("src/app/screens/ReportExportActions.tsx","utf8");
+const multi=fs.readFileSync("src/app/screens/MultiBoutiqueReportSection.tsx","utf8");
+const app=fs.readFileSync("src/app/App.tsx","utf8");
+const migration=fs.readFileSync(".github/audit/replay-migrations/20260913110000_report_sales_payment_methods.sql","utf8");
+function assert(c,m){if(!c)throw new Error(m);}
+assert(view.includes('import { ClientReportSection }')&&view.includes('<ClientReportSection report={clients}'),"P3: active ClientReportSection missing");
+assert(client.includes('data-report-clients-full="1"')&&client.includes("sales_count")&&client.includes("Détail clients")&&client.includes("max-h-[440px]"),"P3: full sortable client detail missing");
+assert(stock.includes('data-report-stock-table="sortable"')&&stock.includes("Détail produits")&&stock.includes("chooseSort"),"P3: sortable stock detail missing");
+assert(api.includes("payment_methods")&&sales.includes('data-report-payment-methods="1"')&&migration.includes("payment_summary")&&migration.includes("ip.paid_at>=p_from")&&migration.includes("r.refunded_at>=p_from"),"P3: payment method regression not restored server-side");
+assert(view.includes('{id:"annee",label:"Année"}'),"P3: year selector missing");
+assert(view.includes("<ReportExportActions")&&exportUi.includes("jsPDF")&&exportUi.includes("text/csv")&&exportUi.includes("loadBundle"),"P3: real PDF/CSV exports missing");
+assert(view.includes("Multi-boutiques")&&multi.includes("loadFinancialMetrics")&&view.includes("comparisonBoutiques"),"P3: multi-boutique comparison missing");
+assert(app.includes("comparisonBoutiques={(currentUser?.isCompteMere && currentUser?.groupeId)"),"P3: App must pass authorized group context to Rapport");
+console.log("report-p3-contract: ok");

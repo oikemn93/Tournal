@@ -10,8 +10,8 @@ function ok(value, message) { if (!value) throw new Error(message); }
 
 ok(canonical.includes("'operating_cash_expenses',v_operating_cash_expenses"), "Canonical operating_cash_expenses must remain available");
 ok(view.includes('"charges"') && view.includes('title="Charges"'), "Charges accordion is missing from the active report");
-ok(view.includes("loadChargeReport") && view.includes('section === "charges"'), "Charges detail must lazy-load");
-ok(view.includes("<ChargesReportSection report={charges} metrics={metrics}/>"), "Charges section is not wired to canonical metrics");
+ok(view.includes("loadChargeReport") && /section\s*===\s*"charges"/.test(view), "Charges detail must lazy-load");
+ok(/<ChargesReportSection\s+report=\{charges\}\s+metrics=\{metrics\}\s*\/>/.test(view), "Charges section is not wired to canonical metrics");
 ok(section.includes("metrics?.operating_cash_expenses"), "Displayed total must use canonical operating_cash_expenses");
 ok(section.includes("Répartition par catégorie") && section.includes("Détail des charges"), "Charges breakdown/detail presentation missing");
 ok(section.includes('max-h-[420px] overflow-auto'), "Charges detail must remain bounded");

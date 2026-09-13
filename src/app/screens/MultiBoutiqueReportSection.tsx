@@ -1,0 +1,15 @@
+import React, { useEffect, useMemo, useState } from "react";
+import type { Boutique } from "../types";
+import { loadFinancialMetrics, type FinancialMetrics } from "../../lib/dashboardApi";
+import { fmt } from "../utils/formatting";
+
+type Row = { boutique: Boutique; metrics: FinancialMetrics };
+export function MultiBoutiqueReportSection({ boutiques, from, to }: { boutiques: Boutique[]; from: string; to: string }) {
+  const [rows,setRows]=useState<Row[]>([]); const [loading,setLoading]=useState(true); const [error,setError]=useState("");
+  useEffect(()=>{let cancelled=false;setLoading(true);setError("");setRows([]);void Promise.all(boutiques.map(async boutique=>({boutique,metrics:await loadFinancialMetrics({boutiqueId:boutique.id,from,to})}))).then(data=>{if(!cancelled)setRows(data);}).catch(cause=>{if(!cancelled)setError(cause instanceof Error?cause.message:"Comparaison indisponible");}).finally(()=>{if(!cancelled)setLoading(false);});return()=>{cancelled=true;};},[boutiques,from,to]);
+  const total=useMemo(()=>rows.reduce((sum,row)=>sum+row.metrics.invoiced_revenue,0),[rows]);
+  if(loading)return <div className="py-8 text-center text-xs font-semibold text-muted-foreground">Chargement de la comparaison…</div>;
+  if(error)return <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-3 text-xs font-semibold text-red-700">Impossible de charger la comparaison multi-boutiques.</div>;
+  return <div data-report-multi-boutiques="1" className="space-y-3"><div className="grid grid-cols-2 gap-2 md:grid-cols-3"><Mini label="Boutiques comparées" value={`${rows.length}`}/><Mini label="CA facturé groupe" value={fmt(total)}/><Mini label="Ventes groupe" value={`${rows.reduce((sum,row)=>sum+row.metrics.sales_count,0)}`}/></div><div className="overflow-auto rounded-xl border border-border"><table className="w-full text-xs"><thead className="bg-muted"><tr><th className="px-3 py-2 text-left">Boutique</th><th className="px-3 py-2 text-right">CA facturé</th><th className="px-3 py-2 text-right">CA encaissé</th><th className="px-3 py-2 text-right">Ventes</th><th className="px-3 py-2 text-right">Panier</th></tr></thead><tbody>{[...rows].sort((a,b)=>b.metrics.invoiced_revenue-a.metrics.invoiced_revenue).map((row,index)=><tr key={row.boutique.id} className={index%2?"bg-muted/20":""}><td className="px-3 py-2.5 font-bold">{row.boutique.nom}<div className="text-[10px] font-normal text-muted-foreground">{row.boutique.ville}</div></td><td className="px-3 py-2.5 text-right font-black tabular-nums">{fmt(row.metrics.invoiced_revenue)}</td><td className="px-3 py-2.5 text-right tabular-nums">{fmt(row.metrics.collected_cash)}</td><td className="px-3 py-2.5 text-right tabular-nums">{row.metrics.sales_count}</td><td className="px-3 py-2.5 text-right tabular-nums">{fmt(row.metrics.average_basket)}</td></tr>)}</tbody></table></div></div>;
+}
+function Mini({label,value}:{label:string;value:string}){return <div className="rounded-xl bg-muted/35 p-3"><p className="text-[10px] font-bold uppercase text-muted-foreground">{label}</p><p className="mt-1 text-lg font-black">{value}</p></div>}

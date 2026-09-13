@@ -49,11 +49,11 @@ export function ReportKpiBand({ metrics, previous, canSeeMargin }: Props) {
       hint: "Factures nettes des retours",
     },
     ...(canSeeMargin && metrics?.realized_margin_fifo != null ? [{
-      label: "Marge nette",
+      label: "Marge opérationnelle",
       value: fmt(Number(metrics.realized_margin_fifo ?? 0) - Number(metrics.operating_cash_expenses ?? 0)),
       current: Number(metrics.realized_margin_fifo ?? 0) - Number(metrics.operating_cash_expenses ?? 0),
       previous: previous?.realized_margin_fifo != null ? Number(previous.realized_margin_fifo ?? 0) - Number(previous.operating_cash_expenses ?? 0) : null,
-      hint: "Marge FIFO moins charges d'exploitation",
+      hint: "Marge FIFO réalisée moins charges d'exploitation décaissées",
     }] : []),
     {
       label: "Nombre de ventes",

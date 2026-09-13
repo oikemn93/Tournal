@@ -31,20 +31,20 @@ export function FinancialDeepReportSection({ metrics, salesReport, canSeeMargin,
   const cashIn = Number(metrics?.collected_cash ?? 0);
   const netCash = cashIn - totalOut;
   const grossMargin = canSeeMargin && metrics?.realized_margin_fifo != null ? Number(metrics.realized_margin_fifo) : null;
-  const purchases = grossMargin != null ? Math.max(0, Number(metrics?.margin_revenue ?? metrics?.invoiced_revenue ?? 0) - grossMargin) : null;
+  const fifoCost = canSeeMargin && metrics?.fifo_cost != null ? Number(metrics.fifo_cost) : null;
   const netResult = grossMargin != null ? grossMargin - operating : null;
 
   return <div data-report-phase="6" className="space-y-4">
     {canSeeMargin && <div className="bg-card rounded-2xl border border-border overflow-hidden">
-      <div className="px-4 py-3 border-b border-border"><p className="font-bold text-sm">Compte de résultat simplifié</p><p className="text-xs text-muted-foreground">P&amp;L sur la période, basé sur le CA et la marge FIFO canoniques. Visible uniquement avec la permission Marge.</p></div>
+      <div className="px-4 py-3 border-b border-border"><p className="font-bold text-sm">Compte de résultat simplifié</p><p className="text-xs text-muted-foreground">P&amp;L sur la période, basé sur le CA, le coût FIFO et la marge FIFO canoniques. Visible uniquement avec la permission Marge.</p></div>
       <div className="divide-y divide-border">
         <PnlRow label="Chiffre d’affaires" value={Number(metrics?.invoiced_revenue ?? 0)} />
-        <PnlRow label="Achats / coût des marchandises vendues (FIFO)" value={-(purchases ?? 0)} muted />
-        <PnlRow label="Marge brute" value={grossMargin ?? 0} strong color={color} />
+        <PnlRow label="Coût des marchandises vendues net (FIFO)" value={-(fifoCost ?? 0)} muted />
+        <PnlRow label="Marge brute réalisée FIFO" value={grossMargin ?? 0} strong color={color} />
         <PnlRow label="Charges d’exploitation décaissées" value={-operating} muted />
-        <PnlRow label="Résultat net simplifié" value={netResult ?? 0} strong color={(netResult ?? 0) >= 0 ? color : undefined} />
+        <PnlRow label="Résultat opérationnel simplifié" value={netResult ?? 0} strong color={(netResult ?? 0) >= 0 ? color : undefined} />
       </div>
-      {(metrics?.margin_unmatched_lines ?? 0) > 0 && <div className="px-4 py-3 border-t border-border text-[11px] text-amber-700">Couverture FIFO incomplète : {metrics?.margin_unmatched_lines} ligne(s) non rapprochée(s). Le résultat reprend exactement la marge canonique disponible.</div>}
+      {(metrics?.margin_unmatched_lines ?? 0) > 0 && <div className="px-4 py-3 border-t border-border text-[11px] text-amber-700">Couverture FIFO incomplète : {metrics?.margin_unmatched_lines} ligne(s) non rapprochée(s). Le résultat reprend exactement la marge et le coût FIFO canoniques disponibles.</div>}
     </div>}
 
     {canSeeMargin && <div className="bg-card rounded-2xl border border-border overflow-hidden">

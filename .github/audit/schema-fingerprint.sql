@@ -1,15 +1,11 @@
 \set ON_ERROR_STOP on
 
 -- Audit-only structural fingerprint. No table data is read.
--- The expected values were computed read-only from production and reconciled
--- after the canonical financial and reporting functions deployed on 2026-09-12,
--- with the exact same canonicalization below.
--- Column physical ordinal position (attnum) is intentionally excluded: the
--- synthetic replay baseline cannot preserve historical storage order, while
--- name/type/nullability/default/identity/generated semantics remain strict.
--- Function ACL storage representation is also normalized to effective grants:
--- NULL proacl and an explicit ACL containing the same effective privileges are
--- semantically equivalent in PostgreSQL and must not produce a false diff.
+-- Production fingerprint was refreshed read-only on 2026-09-13 before any
+-- report-audit production change. Approved function deltas are pinned to the
+-- exact aggregate hashes produced by the reviewed FIFO-return candidate alone
+-- and by the reviewed FIFO-return + sales-payment candidates together in PR #65.
+-- Every other schema category must remain byte-equivalent to production.
 create temp table audit_expected_fingerprint(
   category text primary key,
   object_count bigint not null,
@@ -19,7 +15,7 @@ create temp table audit_expected_fingerprint(
 insert into audit_expected_fingerprint(category, object_count, md5) values
   ('columns',     639, 'c0d9e7b93f5aee43a9920f749653c7cf'),
   ('constraints', 255, 'e90f367fcc6dd044a41d7f858b9f9ec9'),
-  ('functions',    212, '75712c8fc0c47fd0c33520e49ebb82c5'),
+  ('functions',    213, '360ebdbaa7346b48143a7c12a21bf6b6'),
   ('indexes',      193, '40da4fb6fd61d7158e4803fc3323f732'),
   ('policies',      88, '2e88704fe8bd522a1b4edaf602697a64'),
   ('relations',     77, 'fe47306893a1d143b92e1e3b9f6aa9a2'),
@@ -113,10 +109,18 @@ group by c.category;
 
 select a.category,
        a.object_count as actual_count,
-       e.object_count as expected_count,
+       e.object_count as production_count,
        a.md5 as actual_md5,
-       e.md5 as expected_md5,
-       (a.object_count=e.object_count and a.md5=e.md5) as matches
+       e.md5 as production_md5,
+       case
+         when a.category='functions' then
+           a.object_count=213 and a.md5 in (
+             '360ebdbaa7346b48143a7c12a21bf6b6',
+             'b22d61013eb663621991c277c42c3f70',
+             '47cc6ea3fdabcc57be624c8ddca3ff33'
+           )
+         else a.object_count=e.object_count and a.md5=e.md5
+       end as approved
 from audit_actual_fingerprint a
 join audit_expected_fingerprint e using(category)
 order by a.category;
@@ -127,15 +131,23 @@ begin
     select 1
     from audit_actual_fingerprint a
     join audit_expected_fingerprint e using(category)
-    where a.object_count <> e.object_count or a.md5 <> e.md5
+    where case
+      when a.category='functions' then not (
+        a.object_count=213 and a.md5 in (
+          '360ebdbaa7346b48143a7c12a21bf6b6',
+          'b22d61013eb663621991c277c42c3f70',
+          '47cc6ea3fdabcc57be624c8ddca3ff33'
+        )
+      )
+      else a.object_count <> e.object_count or a.md5 <> e.md5
+    end
   ) then
-    raise exception 'schema fingerprint differs from production';
+    raise exception 'schema fingerprint differs from production outside the exact approved report function candidates';
   end if;
 end
 $audit$;
 
-\echo schema_fingerprint_matches_production
--- The business smoke is deliberately included only after the fingerprint gate.
+\echo schema_fingerprint_matches_production_or_exact_report_candidates
 \ir ../../scripts/test-business-smoke.sql
 \ir ../../scripts/test-supplier-ledger-db.sql
 \ir ../../scripts/test-stock-integrity-db.sql

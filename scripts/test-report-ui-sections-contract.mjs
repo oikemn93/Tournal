@@ -4,13 +4,14 @@ const entry=fs.readFileSync("src/app/screens/RapportView.tsx","utf8");
 const sales=fs.readFileSync("src/app/screens/SalesReportSection.tsx","utf8");
 const team=fs.readFileSync("src/app/screens/TeamReportSection.tsx","utf8");
 const charges=fs.readFileSync("src/app/screens/ChargesReportSection.tsx","utf8");
+const exportUi=fs.readFileSync("src/app/screens/ReportExportActions.tsx","utf8");
 function ok(v,m){if(!v)throw new Error(m)}
 ok(entry.includes('RapportViewV2'),"new report UI not active");
-ok(ui.includes('loadFinancialMetrics({ boutiqueId: boutique.id, ...bounds })'),"canonical KPI source missing");
-ok(ui.includes('loadFinancialMetrics({ boutiqueId: boutique.id, ...prevBounds })'),"previous-period comparison missing");
-ok(ui.includes('if (section === "sales"')&&ui.includes('if (section === "team"')&&ui.includes('if (section === "stock"')&&ui.includes('if (section === "clients"')&&ui.includes('if (section === "charges"')&&ui.includes('if (section === "finance"'),"sections are not lazy-loaded");
-const bootstrapStart=ui.indexOf('useEffect(() =>');
-const bootstrapEnd=ui.indexOf('async function toggle', bootstrapStart);
+ok(/loadFinancialMetrics\(\{\s*boutiqueId\s*:\s*boutique\.id\s*,\s*\.\.\.bounds\s*\}\)/.test(ui),"canonical KPI source missing");
+ok(/loadFinancialMetrics\(\{\s*boutiqueId\s*:\s*boutique\.id\s*,\s*\.\.\.prevBounds\s*\}\)/.test(ui),"previous-period comparison missing");
+for(const section of ["sales","team","stock","clients","charges","finance"]) ok(new RegExp(`section\\s*===\\s*"${section}"`).test(ui),`${section} section is not lazy-loaded`);
+const bootstrapStart=ui.indexOf('useEffect(()=>');
+const bootstrapEnd=ui.indexOf('function abortSectionRequests', bootstrapStart);
 const bootstrap=ui.slice(bootstrapStart, bootstrapEnd);
 ok(!bootstrap.includes('loadSalesProductReport')&&!bootstrap.includes('loadEmployeePerformanceReport')&&!bootstrap.includes('loadStockInventoryReport')&&!bootstrap.includes('loadClientReport')&&!bootstrap.includes('loadChargeReport'),"detail RPC must not load with KPI bootstrap");
 ok(ui.includes("Résumé d'abord · détails chargés à la demande"),"visual hierarchy marker missing");
@@ -21,5 +22,5 @@ ok(charges.includes('Répartition par catégorie')&&charges.includes('<table'),"
 ok(sales.includes('chooseSort("product_name")')&&sales.includes('chooseSort("quantity")')&&sales.includes('chooseSort("invoiced_revenue")'),"clickable sales sorting missing");
 ok(sales.includes('max-h-[420px] overflow-auto')&&team.includes('max-h-[420px] overflow-auto')&&charges.includes('max-h-[420px] overflow-auto'),"bounded detail table scrolling missing");
 ok((ui+sales+team+charges).includes('text-red-600')&&(ui+sales+team+charges).includes('text-amber-600'),"semantic warning colors missing");
-ok(ui.includes('Les exports PDF/CSV seront regroupés ici'),"export must be separated from analysis");
+ok(ui.includes('<ReportExportActions')&&exportUi.includes('data-report-export="real"'),"real exports must remain separated from analysis");
 console.log("report-ui-sections-contract: ok");
