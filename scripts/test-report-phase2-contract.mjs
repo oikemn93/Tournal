@@ -14,7 +14,7 @@ function assert(condition, message) {
 
 assert(api.includes("get_employee_performance_report"), "Employee report client must call phase 2 RPC");
 assert(report.includes("loadEmployeePerformanceReport"), "Rapport must load employee performance from server");
-assert(report.includes('canSeeMargin && <Accordion title="Équipe"'), "Employee performance UI must stay margin-permission gated");
+assert(/canSeeMargin\s*&&\s*<Accordion\s+title="Équipe"/.test(report), "Employee performance UI must stay margin-permission gated");
 assert(report.includes('section === "team"') && report.includes("loadEmployeePerformanceReport"), "Employee report must lazy-load when the team section opens");
 assert(team.includes("invoiced_revenue") && team.includes("average_basket") && team.includes("sales_count"), "Employee KPI fields missing");
 assert(team.includes("Contribution au chiffre d’affaires") && team.includes("Rang"), "Employee contribution and explicit ranking missing");
