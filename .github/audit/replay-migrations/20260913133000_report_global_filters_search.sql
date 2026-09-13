@@ -66,7 +66,7 @@ as $function$
       )
   ), grouped as (
     select invoice_id,max(invoice_date) invoice_date,max(invoice_type) invoice_type,max(invoice_amount) invoice_amount,
-      max(operator_id) operator_id,max(operator_name) operator_name,max(client_id) client_id,max(client_name) client_name,max(client_type) client_type,
+      max(operator_id::text)::uuid operator_id,max(operator_name) operator_name,max(client_id) client_id,max(client_name) client_name,max(client_type) client_type,
       product_id,max(product_name) product_name,sum(qty) base_qty,sum(coalesce(sell_qty,qty)*prix_unit) gross_line_revenue
     from dedup_lines
     group by invoice_id,product_id
