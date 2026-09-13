@@ -23,6 +23,6 @@ const migration=fs.readFileSync('supabase/migrations/20260913113655_report_paged
 assert(!/create\s+or\s+replace\s+function\s+(public\.)?get_financial_metrics/i.test(migration));
 assert(migration.includes('limit v_limit offset v_offset'));
 const page=fs.readFileSync('src/app/screens/ReportPage.tsx','utf8');
-assert(page.indexOf('page.summary.map')<page.indexOf('page.chart.map((item')));
+assert(page.indexOf('page.summary.map')<page.indexOf('page.chart.map((item'));
 assert(page.indexOf('page.chart.map((item')<page.indexOf('<table'));
 console.log('report page: payload limits, combined filters, signals and global finance isolation passed');
