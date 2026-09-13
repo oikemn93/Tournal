@@ -3,6 +3,7 @@ import fs from "node:fs";
 const view = fs.readFileSync("src/app/screens/RapportViewV2.tsx", "utf8");
 const sales = fs.readFileSync("src/app/screens/SalesReportSection.tsx", "utf8");
 const stock = fs.readFileSync("src/app/screens/StockReportSection.tsx", "utf8");
+const clients = fs.readFileSync("src/app/screens/ClientReportSection.tsx", "utf8");
 
 function ok(value, message) { if (!value) throw new Error(message); }
 
@@ -10,8 +11,8 @@ ok(/setMetrics\(null\);\s*setPrevious\(null\);\s*setMetricsLoading\(true\)/.test
 ok(view.includes("Chargement des indicateurs de la période"), "Report must show explicit KPI loading state");
 ok(view.includes("Impossible de charger ce rapport, réessayer"), "Section RPC failures must render explicit retry error state");
 ok(view.includes("marginCoverageWarning") && view.includes("Couverture FIFO"), "FIFO coverage warning must be visible at report top level");
-ok(view.includes("Clients en retard · global") && view.includes("Retard total · global"), "Client overdue KPIs must be labelled global");
-ok(view.includes("factures sans client enregistré"), "Client global/detail reconciliation note must be visible");
+ok(clients.includes("Clients en retard · global") && clients.includes("Retard total · global"), "Client overdue KPIs must be labelled global");
+ok(clients.includes("factures sans client enregistré"), "Client global/detail reconciliation note must be visible");
 ok(view.includes("<StockReportSection"), "Active Stock accordion must use the temporality-aware stock section");
 
 ok(stock.includes("Stock actuel · aujourd’hui"), "Current stock metrics must be explicitly separated from historical period data");
