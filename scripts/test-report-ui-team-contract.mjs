@@ -8,7 +8,7 @@ function ok(value, message) { if (!value) throw new Error(message); }
 ok(report.includes('import { TeamReportSection } from "./TeamReportSection"'), "Focused team section must be imported");
 ok(/<TeamReportSection\s+report=\{team\}\s*\/>/.test(report), "Focused team section must be active");
 ok(/section\s*===\s*"team"/.test(report) && report.includes("loadEmployeePerformanceReport"), "Team report must remain lazy-loaded");
-ok(/canSeeMargin\s*&&\s*<Accordion\s+title="Équipe"/.test(report), "Team analytics must remain permission-gated");
+ok(report.includes('...(canSeeMargin?') && report.includes('id:"team"') && /open\s*===?\s*"team"/.test(report) && report.includes('canSeeMargin&&body("team"'), "Team analytics must remain permission-gated");
 ok(team.includes("Contribution au chiffre d’affaires") && team.includes("share.toFixed(1)"), "Employee contribution percentage missing");
 ok(team.includes("Rang") && team.includes("#{rank"), "Explicit employee rank missing");
 ok(team.includes("return_rate") && team.includes("returns_count"), "Return quality indicators missing");

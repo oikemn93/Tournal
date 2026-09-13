@@ -12,7 +12,7 @@ function assert(condition, message) { if (!condition) throw new Error(message); 
 
 assert(api.includes("get_client_report"), "Phase 4 client must call client report RPC");
 assert(report.includes("loadClientReport"), "Rapport must load client report");
-assert(report.includes('title="Clients"') && /section\s*===\s*"clients"/.test(report), "Client section must exist and lazy-load");
+assert(report.includes('id:"clients"') && report.includes('label:"Clients"') && /section\s*===\s*"clients"/.test(report), "Client section must exist and lazy-load");
 assert(client.includes("customer_outstanding_global") || client.includes("outstanding_global"), "Global customer outstanding KPI missing");
 assert(client.includes("invoiced_revenue") && client.includes("sales_count"), "Client ranking metrics missing");
 assert(client.includes("overdue_global"), "Overdue customer detail missing");

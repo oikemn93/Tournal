@@ -12,7 +12,7 @@ function assert(condition, message) { if (!condition) throw new Error(message); 
 
 assert(api.includes("get_stock_inventory_report"), "Phase 3 client must call stock inventory RPC");
 assert(report.includes("loadStockInventoryReport"), "Rapport must load stock inventory report");
-assert(report.includes('title="Stock"') && /section\s*===\s*"stock"/.test(report), "Stock section must exist and lazy-load");
+assert(report.includes('id:"stock"') && report.includes('label:"Stock"') && /section\s*===\s*"stock"/.test(report), "Stock section must exist and lazy-load");
 assert(report.includes("dormantDays") && report.includes("refreshStock"), "Dormant threshold control missing");
 assert(stock.includes("stock_value_fifo"), "FIFO stock valuation missing");
 assert(stock.includes("current_stock") && stock.includes("rotation_class"), "Stock rotation/detail fields missing");
