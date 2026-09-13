@@ -6,7 +6,7 @@ const stock = fs.readFileSync("src/app/screens/StockReportSection.tsx", "utf8");
 
 function ok(value, message) { if (!value) throw new Error(message); }
 
-ok(view.includes("setMetrics(null); setPrevious(null); setMetricsLoading(true)"), "Period changes must clear prior KPI values before reload");
+ok(/setMetrics\(null\);\s*setPrevious\(null\);\s*setMetricsLoading\(true\)/.test(view), "Period changes must clear prior KPI values before reload");
 ok(view.includes("Chargement des indicateurs de la période"), "Report must show explicit KPI loading state");
 ok(view.includes("Impossible de charger ce rapport, réessayer"), "Section RPC failures must render explicit retry error state");
 ok(view.includes("marginCoverageWarning") && view.includes("Couverture FIFO"), "FIFO coverage warning must be visible at report top level");
