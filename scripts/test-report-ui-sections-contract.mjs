@@ -18,8 +18,8 @@ ok(ui.includes('<SalesReportSection')&&ui.includes('<TeamReportSection')&&ui.inc
 ok(sales.includes('Produits qui portent le CA')&&sales.includes('<table'),"sales summary/chart/detail hierarchy missing");
 ok(team.includes('Contribution au chiffre d’affaires')&&team.includes('<table'),"team summary/chart/detail hierarchy missing");
 ok(charges.includes('Répartition par catégorie')&&charges.includes('<table'),"charges summary/chart/detail hierarchy missing");
-ok(sales.includes('toggleSort("product_name")')&&sales.includes('toggleSort("quantity")')&&sales.includes('toggleSort("invoiced_revenue")'),"clickable sales sorting missing");
+ok(sales.includes('chooseSort("product_name")')&&sales.includes('chooseSort("quantity")')&&sales.includes('chooseSort("invoiced_revenue")'),"clickable sales sorting missing");
 ok(sales.includes('max-h-[420px] overflow-auto')&&team.includes('max-h-[420px] overflow-auto')&&charges.includes('max-h-[420px] overflow-auto'),"bounded detail table scrolling missing");
-ok(ui.includes('text-red-600')&&ui.includes('text-amber-600'),"semantic warning colors missing");
+ok((ui+sales+team+charges).includes('text-red-600')&&(ui+sales+team+charges).includes('text-amber-600'),"semantic warning colors missing");
 ok(ui.includes('Les exports PDF/CSV seront regroupés ici'),"export must be separated from analysis");
 console.log("report-ui-sections-contract: ok");
