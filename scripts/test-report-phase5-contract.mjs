@@ -1,15 +1,15 @@
 import fs from "node:fs";
 
 const section = fs.readFileSync("src/app/screens/FinancialDeepReportSection.tsx", "utf8");
-const clientSection = fs.readFileSync("src/app/screens/ClientReportSection.tsx", "utf8");
+const report = fs.readFileSync("src/app/screens/RapportViewV2.tsx", "utf8");
 const api = fs.readFileSync("src/lib/reportApi.ts", "utf8");
 const canonical = fs.readFileSync(".github/audit/replay-migrations/20260912165219_canonical_financial_metrics.sql", "utf8");
 const sales = fs.readFileSync(".github/audit/replay-migrations/20260912174106_report_phase1_sales_products.sql", "utf8");
 
 function assert(condition, message) { if (!condition) throw new Error(message); }
 
-assert(clientSection.includes("loadFinancialMetrics") && clientSection.includes("loadSalesProductReport"), "Phase 5 must reuse canonical financial and sales report loaders");
-assert(clientSection.includes("<FinancialDeepReportSection"), "Phase 5 section is not rendered in Rapport");
+assert(report.includes("loadFinancialMetrics") && report.includes("loadSalesProductReport"), "Phase 5 must reuse canonical financial and sales report loaders");
+assert(report.includes("<FinancialDeepReportSection"), "Phase 5 section is not rendered in Rapport");
 assert(section.includes("metrics?.collected_cash") && section.includes("metrics?.cash_expenses") && section.includes("metrics?.operating_cash_expenses"), "Cash flow must use canonical cash metrics");
 assert(section.includes("row.realized_margin_fifo") && section.includes("margin_unmatched_lines"), "Margin breakdown must use canonical FIFO product margin and coverage metadata");
 assert(section.includes("Marge par produit et catégorie") && section.includes("Flux de trésorerie"), "Phase 5 UI sections are missing");
