@@ -20,9 +20,9 @@ ok(stock.includes("l’état actuel, même si la période du Rapport est histori
 ok(stock.includes("Écarts d’inventaire sur la période") && stock.includes("inventory_variances"), "Inventory variances returned by RPC must be shown");
 ok(stock.includes("Activité sur la période sélectionnée"), "Period stock activity must be visually distinct from current stock");
 
-ok(sales.includes("const filteredRevenue = rows.reduce"), "Sales filtered CA must derive from filtered rows");
-ok(sales.includes('label="CA produits" value={fmt(filteredRevenue)}'), "Sales CA card must use filtered revenue");
-ok(sales.includes("value:rows.filter"), "Category visualization must use the same filtered rows");
-ok(sales.includes('category === "all" && metrics'), "Canonical global reconciliation warning must only compare the unfiltered scope");
+ok(/const\s+filteredRevenue\s*=\s*rows\.reduce/.test(sales), "Sales filtered CA must derive from filtered rows");
+ok(/label="CA produits"\s+value=\{fmt\(filteredRevenue\)\}/.test(sales), "Sales CA card must use filtered revenue");
+ok(/value\s*:\s*rows\.filter/.test(sales), "Category visualization must use the same filtered rows");
+ok(/category\s*===\s*"all"\s*&&\s*metrics/.test(sales), "Canonical global reconciliation warning must only compare the unfiltered scope");
 
 console.log("Report P1 contract passed: loading, errors, stock temporality, inventory variances, sales filter, clients, FIFO warning");
