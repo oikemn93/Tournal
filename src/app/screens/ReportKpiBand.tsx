@@ -71,14 +71,14 @@ export function ReportKpiBand({ metrics, previous, canSeeMargin }: Props) {
     },
   ];
 
-  return <section data-report-ui-stage="1" aria-label="Indicateurs principaux" className="grid grid-cols-2 gap-3 xl:grid-cols-5">
-    {items.map(item => <article key={item.label} className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+  return <section data-report-ui-stage="1" aria-label="Indicateurs principaux" className="flex gap-2 overflow-x-auto xl:grid xl:grid-cols-5">
+    {items.map(item => <article key={item.label} className="rounded-2xl border border-border bg-card p-2 shadow-sm min-w-[150px] xl:min-w-0">
       <div className="flex min-h-5 items-center justify-between gap-2">
         <p className="text-xs font-bold text-muted-foreground">{item.label}</p>
         <VariationBadge value={variation(item.current, item.previous)} />
       </div>
-      <p className="mt-2 text-2xl font-black leading-none tracking-tight text-foreground" style={{ fontFamily: "'Nunito',sans-serif" }}>{item.value}</p>
-      <p className="mt-2 text-[11px] leading-snug text-muted-foreground">{item.hint}</p>
+      <p className="mt-2 text-lg font-black leading-none tracking-tight text-foreground" style={{ fontFamily: "'Nunito',sans-serif" }}>{item.value}</p>
+      <p className="mt-1 hidden xl:block text-[11px] leading-snug text-muted-foreground">{item.hint}</p>
     </article>)}
   </section>;
 }
