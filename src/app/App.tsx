@@ -8949,7 +8949,7 @@ export default function App() {
     try {
       const stored = await loadStoredAuthSettings(boutiqueId);
       if (requestId !== authSettingsRequestId.current) return;
-      const settings = stored ?? { lockMinutes:10, sessionMinutes:720, supplierPaymentTermsDays:30, clientPaymentTermsDays:30 };
+      const settings = stored ?? { lockMinutes:10, sessionMinutes:720, supplierPaymentTermsDays:30, clientPaymentTermsDays:30, caisseControlEnabled:false, caisseDefaultOpeningFloat:0, caisseOpeningReminderTime:null, caisseClosingReminderTime:null };
       setLockTimeoutMs(Math.max(1, Number(settings.lockMinutes ?? 10)) * 60 * 1000);
       setSessionExpiryMs(Math.max(5, Number(settings.sessionMinutes ?? 720)) * 60 * 1000);
       setSupplierPaymentTermsDays(settings.supplierPaymentTermsDays ?? 30);
