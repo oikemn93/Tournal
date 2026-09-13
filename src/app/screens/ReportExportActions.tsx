@@ -31,7 +31,7 @@ export function ReportExportActions({ boutiqueId, boutiqueName, from, to, canSee
       add(); add("Stock","Stock actuel","Vendu net période","Rotation","Valeur FIFO actuelle"); for(const r of b.stock.products)add(r.product_name,r.current_stock,r.net_sold_qty,r.rotation_class,r.fifo_stock_value);
       add(); add("Charges","Catégorie","Date événement","Montant","Mode"); for(const r of b.charges.charges)add(r.label,r.category,r.event_at,r.amount,r.payment_method);
       if(b.team){add();add("Équipe","CA","Ventes","Panier","Retours %");for(const r of b.team.employees)add(r.operator_name,r.invoiced_revenue,r.sales_count,r.average_basket,r.return_rate);}
-      const csv=rows.map(row=>row.map(cell=>`"${cell.replaceAll('"','""')}"`).join(";")).join("\n");
+      const csv=rows.map(row=>row.map(cell=>`"${cell.replace(/"/g,'""')}"`).join(";")).join("\n");
       const blob=new Blob(["\ufeff",csv],{type:"text/csv;charset=utf-8"}); const url=URL.createObjectURL(blob); const a=document.createElement("a"); a.href=url; a.download=`rapport-${safeName(boutiqueName)}-${from.slice(0,10)}-${to.slice(0,10)}.csv`; a.click(); URL.revokeObjectURL(url);
     } catch(cause){setError(cause instanceof Error?cause.message:"Export CSV impossible");} finally{setBusy(null);}
   }
