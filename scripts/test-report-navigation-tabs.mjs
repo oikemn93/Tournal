@@ -3,7 +3,7 @@ import fs from "node:fs";
 const ui=fs.readFileSync("src/app/screens/RapportViewV2.tsx","utf8");
 function ok(value,message){if(!value)throw new Error(message)}
 
-ok(ui.includes('data-screen-source="canonical-report-v9-navigation"'),"v9 report navigation marker missing");
+ok(ui.includes('data-screen-source="canonical-report-v10-filters"')||ui.includes('data-screen-source="canonical-report-v9-navigation"'),"professional report shell marker missing");
 ok(ui.includes('aria-label="Catégories du rapport"')&&ui.includes('role="tablist"'),"fixed category navigation missing");
 ok(ui.includes('role="tab"')&&ui.includes('aria-selected={open===section.id}'),"tabs must expose active state");
 ok(ui.includes('role="tabpanel"')&&ui.includes('data-report-active-section={activeSection.id}'),"single active report panel missing");

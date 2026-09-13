@@ -1,0 +1,29 @@
+name: Report Global Filters
+
+on:
+  pull_request:
+    paths:
+      - "src/app/screens/RapportViewV2.tsx"
+      - "src/app/screens/ReportFilterBar.tsx"
+      - "src/lib/reportApi.ts"
+      - ".github/audit/replay-migrations/20260913133000_report_global_filters_search.sql"
+      - "scripts/test-report-global-filters.mjs"
+      - ".github/workflows/report-global-filters.yml"
+
+jobs:
+  report-global-filters:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: node scripts/test-report-global-filters.mjs
+      - run: node scripts/test-report-navigation-tabs.mjs
+      - run: pnpm exec tsc --noEmit
+      - run: pnpm build
