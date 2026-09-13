@@ -177,7 +177,7 @@ export function loadClientReport(params: { boutiqueId: string; from: string; to:
     p_boutique_id: params.boutiqueId,
     p_from: params.from,
     p_to: params.to,
-  }).then(report => ({ ...report, boutique_id: params.boutiqueId }));
+  }, params.signal).then(report => ({ ...report, boutique_id: params.boutiqueId }));
 }
 
 export function loadChargeReport(params: { boutiqueId: string; from: string; to: string; signal?: AbortSignal }) {
