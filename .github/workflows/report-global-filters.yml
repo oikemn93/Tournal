@@ -6,6 +6,9 @@ on:
       - "src/app/screens/RapportViewV2.tsx"
       - "src/app/screens/ReportFilterBar.tsx"
       - "src/lib/reportApi.ts"
+      - "src/app/screens/ReportPage.tsx"
+      - "scripts/test-report-page-contract.mjs"
+      - "supabase/migrations/*report_paged_sections.sql"
       - ".github/audit/replay-migrations/20260913133000_report_global_filters_search.sql"
       - "scripts/test-report-global-filters.mjs"
       - ".github/workflows/report-global-filters.yml"
@@ -24,6 +27,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: node scripts/test-report-global-filters.mjs
+      - run: node scripts/test-report-page-contract.mjs
       - run: node scripts/test-report-navigation-tabs.mjs
       - run: pnpm exec tsc --noEmit
       - run: pnpm build
