@@ -64,8 +64,9 @@ async function deriveVerifier(pin: string, userId: string, salt: Uint8Array) {
     false,
     ["deriveBits"],
   );
+  const saltBuffer = new Uint8Array(salt).buffer;
   const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", hash: "SHA-256", salt, iterations: PBKDF2_ITERATIONS },
+    { name: "PBKDF2", hash: "SHA-256", salt: saltBuffer, iterations: PBKDF2_ITERATIONS },
     material,
     256,
   );
