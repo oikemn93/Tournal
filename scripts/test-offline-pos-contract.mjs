@@ -10,6 +10,8 @@ assert.match(workerSource, /rpc === 'create_sale'/, "create_sale must be handled
 assert.match(workerSource, /p_idempotency_key/, "offline queue must preserve the server idempotency key");
 assert.match(workerSource, /OFF-\$\{stamp\}/, "offline invoices must use a distinct OFF- temporary prefix");
 assert.match(workerSource, /p_payment_method[\s\S]*espèces/i, "offline payment policy must restrict payments to cash");
+assert.match(workerSource, /open_caisse_session[\s\S]*close_caisse_session/, "cash register lifecycle RPCs must be guarded explicitly");
+assert.match(workerSource, /TOURNAL_CAISSE_SYNC_REQUIRED/, "closing the cash register must be blocked while offline operations remain queued");
 assert.match(workerSource, /retours\/remboursements, droits\/utilisateurs, transferts/, "unsafe offline mutations must be blocked explicitly");
 assert.match(mainSource, /OFFLINE_CONFIRM_MS = 20_000/, "offline mode must use a confirmation delay");
 assert.match(mainSource, /OFFLINE_WARNING_MS = 12 \* 60 \* 60 \* 1000/, "prolonged offline use must warn after 12h");
@@ -84,9 +86,6 @@ function runLostResponseScenario(run) {
   const server = new FakeServer();
   const invoiceMap = new Map();
 
-  // Hardest network case: create_sale commits, but its HTTP response disappears.
-  // The retry MUST carry the exact same idempotency key and therefore resolve to
-  // the same invoice without a second stock deduction.
   const originalKey = queue[0].body.p_idempotency_key;
   const committedButLost = server.createSale(queue[0].body);
   const stockAfterLostResponse = server.stock.get(1);
@@ -115,27 +114,14 @@ function runLostResponseScenario(run) {
   assert.equal(invoiceMap.size, 3, `run ${run}: every temporary invoice must receive one official mapping`);
 }
 
-// A single green retry test can hide accidental state coupling. Run the exact
-// commit-then-lost-response sequence repeatedly with fresh server state and keys.
 for (let run = 1; run <= 50; run += 1) runLostResponseScenario(run);
 
-async function testOnlineCreateSalePassthrough() {
+function workerContext(fetchImpl) {
   const listeners = new Map();
-  let upstreamCalls = 0;
-  const upstreamPayload = {
-    invoice_id: "F-ONLINE-0001",
-    client_id: null,
-    total: 3500,
-    due_date: null,
-  };
-
   const context = {
     self: {
       location: { origin: "https://app.tournal.test" },
-      clients: {
-        claim: async () => undefined,
-        matchAll: async () => [],
-      },
+      clients: { claim: async () => undefined, matchAll: async () => [] },
       skipWaiting: () => undefined,
       addEventListener(type, handler) { listeners.set(type, handler); },
       registration: { showNotification: async () => undefined },
@@ -146,17 +132,8 @@ async function testOnlineCreateSalePassthrough() {
       delete: async () => true,
       match: async () => undefined,
     },
-    indexedDB: {
-      open() { throw new Error("online create_sale must never touch the offline IndexedDB queue"); },
-    },
-    fetch: async (request) => {
-      upstreamCalls += 1;
-      assert.equal(new URL(request.url).pathname, "/rest/v1/rpc/create_sale", "online sale must call the original create_sale endpoint");
-      return new Response(JSON.stringify(upstreamPayload), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    },
+    indexedDB: { open() { throw new Error("unexpected IndexedDB access in this test"); } },
+    fetch: fetchImpl,
     Request,
     Response,
     URL,
@@ -173,38 +150,78 @@ async function testOnlineCreateSalePassthrough() {
     crypto: webcrypto,
     console,
   };
+  vm.createContext(context);
+  vm.runInContext(workerSource, context, { filename: "public/service-worker.js" });
+  return { context, listeners };
+}
 
-  vm.runInNewContext(workerSource, context, { filename: "public/service-worker.js" });
+async function testOnlineCreateSalePassthrough() {
+  let upstreamCalls = 0;
+  const upstreamPayload = { invoice_id: "F-ONLINE-0001", client_id: null, total: 3500, due_date: null };
+  const { listeners } = workerContext(async (request) => {
+    upstreamCalls += 1;
+    assert.equal(new URL(request.url).pathname, "/rest/v1/rpc/create_sale", "online sale must call the original create_sale endpoint");
+    return new Response(JSON.stringify(upstreamPayload), { status: 200, headers: { "Content-Type": "application/json" } });
+  });
+
   const fetchHandler = listeners.get("fetch");
   assert.equal(typeof fetchHandler, "function", "service worker fetch handler must be registered");
-
-  const idempotencyKey = "online-sale-key-001";
   const request = new Request("https://example.supabase.co/rest/v1/rpc/create_sale", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       p_boutique_id: "boutique-online",
-      p_idempotency_key: idempotencyKey,
+      p_idempotency_key: "online-sale-key-001",
       p_client_nom: "Client comptoir",
       p_lines: [{ productId: 1, nom: "Produit", qty: 1, unit: "unité", prixUnit: 3500 }],
     }),
   });
 
   let responsePromise;
-  fetchHandler({
-    request,
-    respondWith(value) { responsePromise = Promise.resolve(value); },
-  });
-  assert.ok(responsePromise, "Supabase create_sale must be intercepted by the service worker handler");
+  fetchHandler({ request, respondWith(value) { responsePromise = Promise.resolve(value); } });
   const response = await responsePromise;
   const body = await response.json();
-
   assert.equal(upstreamCalls, 1, "normal online sale must perform exactly one upstream request");
   assert.equal(response.status, 200, "normal online response status must pass through unchanged");
   assert.deepEqual(body, upstreamPayload, "normal online create_sale response must pass through unchanged");
   assert.equal(body.invoice_id.startsWith("OFF-"), false, "normal online sale must never receive a temporary offline invoice number");
 }
 
-await testOnlineCreateSalePassthrough();
+async function testCaisseLifecycleGuards() {
+  let upstreamCalls = 0;
+  let online = false;
+  const { context } = workerContext(async () => {
+    upstreamCalls += 1;
+    if (!online) throw new TypeError("network offline");
+    return new Response(JSON.stringify({ session_id: "cash-1", closed_at: "2026-09-13T22:00:00Z" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  });
 
-console.log("Offline POS contract OK: 50 reproducible lost-response retries, 3-sale offline replay, coherent stock, and normal online create_sale passthrough.");
+  const openRequest = new Request("https://example.supabase.co/rest/v1/rpc/open_caisse_session", { method: "POST", body: "{}" });
+  const openResponse = await context.handleCaisseLifecycleRequest(openRequest, "open_caisse_session");
+  const openBody = await openResponse.json();
+  assert.equal(openResponse.status, 503, "cash register opening must fail offline");
+  assert.equal(openBody.code, "TOURNAL_OFFLINE_BLOCKED", "offline opening must return an explicit blocked code");
+
+  vm.runInContext("getQueue = async () => [{ id: 'create_sale:pending' }]", context);
+  online = true;
+  const callsBeforeBlockedClose = upstreamCalls;
+  const closeRequest = new Request("https://example.supabase.co/rest/v1/rpc/close_caisse_session", { method: "POST", body: "{}" });
+  const blockedClose = await context.handleCaisseLifecycleRequest(closeRequest, "close_caisse_session");
+  const blockedBody = await blockedClose.json();
+  assert.equal(blockedClose.status, 409, "cash register closing must fail while offline operations are pending");
+  assert.equal(blockedBody.code, "TOURNAL_CAISSE_SYNC_REQUIRED", "pending queue must return a dedicated closing guard code");
+  assert.equal(upstreamCalls, callsBeforeBlockedClose, "blocked closing must not reach Supabase before the queue is empty");
+
+  vm.runInContext("getQueue = async () => []", context);
+  const allowedClose = await context.handleCaisseLifecycleRequest(closeRequest, "close_caisse_session");
+  assert.equal(allowedClose.status, 200, "online closing with an empty queue must pass through");
+  assert.equal(upstreamCalls, callsBeforeBlockedClose + 1, "allowed closing must perform exactly one upstream request");
+}
+
+await testOnlineCreateSalePassthrough();
+await testCaisseLifecycleGuards();
+
+console.log("Offline POS contract OK: 50 reproducible lost-response retries, coherent stock, normal online sale passthrough, offline opening blocked, and closing gated on an empty sync queue.");
