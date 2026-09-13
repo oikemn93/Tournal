@@ -361,6 +361,11 @@ export async function validateServerSession(): Promise<boolean> {
       }),
     );
     if (!response.ok) {
+      // A network outage is surfaced by the service worker as a controlled 503.
+      // Server 5xx responses are availability failures, not proof that the
+      // locally-held authenticated session is invalid. Keep the active session
+      // so Phase 1 can continue queuing safe offline POS operations.
+      if (response.status >= 500) return Boolean(readSession()?.access_token);
       // Do not discard a brand-new local session merely because a second
       // Supabase service is momentarily behind the Auth server's clock.
       if (isJwtIssuedAtFutureError(body)) return true;
