@@ -1,3 +1,4 @@
+import { ReportPage, type ReportPageRequest } from "./ReportPage";
 import React, { useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, AlertTriangle, Users } from "lucide-react";
 import type { ClientReport, ClientReportRow } from "../../lib/reportApi";
@@ -6,9 +7,10 @@ import { fmt } from "../utils/formatting";
 type SortKey = "client_name" | "invoiced_revenue" | "sales_count" | "collected_cash" | "outstanding_global" | "overdue_global" | "credit_available";
 type SortDir = "asc" | "desc";
 
-export function ClientReportSection({ report, color }: { report: ClientReport | null; color: string }) {
+export function ClientReportSection({ report, color, onPage }: { report: ClientReport | null; onPage?: (request:ReportPageRequest)=>void; color: string }) {
   const [sort, setSort] = useState<SortKey>("invoiced_revenue"); const [dir, setDir] = useState<SortDir>("desc");
   const rows = useMemo(() => { const next=[...(report?.clients??[])]; next.sort((a,b)=>{const av=sort==="client_name"?a.client_name:Number(a[sort]??0);const bv=sort==="client_name"?b.client_name:Number(b[sort]??0);const cmp=typeof av==="string"?av.localeCompare(String(bv),"fr"):av-Number(bv);return dir==="asc"?cmp:-cmp;}); return next; }, [report,sort,dir]);
+  if(report?.page && onPage)return <ReportPage page={report.page} onPage={onPage}/>;
   if(!report)return <div className="py-8 text-center text-xs font-semibold text-muted-foreground">Chargement du détail…</div>;
   const top=[...report.clients].sort((a,b)=>b.invoiced_revenue-a.invoiced_revenue).slice(0,5); const max=Math.max(1,...top.map(row=>Math.abs(row.invoiced_revenue))); const overdue=[...report.clients].filter(row=>row.overdue_global>0.005).sort((a,b)=>b.overdue_global-a.overdue_global).slice(0,8);
   function chooseSort(key:SortKey){if(sort===key)setDir(value=>value==="desc"?"asc":"desc");else{setSort(key);setDir(key==="client_name"?"asc":"desc");}}

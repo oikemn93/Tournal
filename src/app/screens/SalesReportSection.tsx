@@ -1,3 +1,4 @@
+import { ReportPage, type ReportPageRequest } from "./ReportPage";
 import React, { useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, BadgeEuro, CreditCard, Layers3, PackageCheck, Trophy } from "lucide-react";
 import { fmt } from "../utils/formatting";
@@ -7,9 +8,10 @@ import type { SalesProductReport, SalesProductReportRow } from "../../lib/report
 type SortKey = "invoiced_revenue" | "quantity" | "product_name" | "realized_margin_fifo";
 type SortDirection = "asc" | "desc";
 
-export function SalesReportSection({ report, metrics, canSeeMargin }: { report: SalesProductReport | null; metrics: FinancialMetrics | null; canSeeMargin: boolean }) {
+export function SalesReportSection({ report, metrics, canSeeMargin, onPage }: { report: SalesProductReport | null; metrics: FinancialMetrics | null; onPage?: (request:ReportPageRequest)=>void; canSeeMargin: boolean }) {
   const [category, setCategory] = useState("all"); const [sort, setSort] = useState<SortKey>("invoiced_revenue"); const [direction, setDirection] = useState<SortDirection>("desc");
   const rows = useMemo(() => { const filtered=(report?.products??[]).filter(row=>category==="all"||(row.category_id||"")===category); return [...filtered].sort((a,b)=>{const sign=direction==="asc"?1:-1;if(sort==="product_name")return sign*a.product_name.localeCompare(b.product_name,"fr");return sign*(Number(a[sort]??0)-Number(b[sort]??0));}); }, [report,category,sort,direction]);
+  if(report?.page && onPage)return <ReportPage page={report.page} onPage={onPage}/>;
   if (!report) return <div className="py-8 text-center text-xs font-semibold text-muted-foreground">Chargement du détail…</div>;
   const byRevenue=[...rows].sort((a,b)=>b.invoiced_revenue-a.invoiced_revenue); const top=byRevenue.slice(0,5); const bottom=[...byRevenue].filter(r=>Math.abs(r.invoiced_revenue)>0.005).slice(-3).reverse();
   const maxRevenue=Math.max(1,...top.map(r=>Math.abs(r.invoiced_revenue))); const filteredRevenue=rows.reduce((sum,row)=>sum+row.invoiced_revenue,0); const productQty=rows.reduce((sum,row)=>sum+row.quantity,0);

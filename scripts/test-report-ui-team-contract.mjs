@@ -6,7 +6,7 @@ const team = fs.readFileSync("src/app/screens/TeamReportSection.tsx", "utf8");
 function ok(value, message) { if (!value) throw new Error(message); }
 
 ok(report.includes('import { TeamReportSection } from "./TeamReportSection"'), "Focused team section must be imported");
-ok(/<TeamReportSection\s+report=\{team\}\s*\/>/.test(report), "Focused team section must be active");
+ok(/<TeamReportSection\s+report=\{team\}[^>]*\/>/.test(report), "Focused team section must be active");
 ok(/section\s*===\s*"team"/.test(report) && report.includes("loadEmployeePerformanceReport"), "Team report must remain lazy-loaded");
 ok(report.includes('...(canSeeMargin?') && report.includes('id:"team"') && /open\s*===?\s*"team"/.test(report) && report.includes('canSeeMargin&&body("team"'), "Team analytics must remain permission-gated");
 ok(team.includes("Contribution au chiffre d’affaires") && team.includes("share.toFixed(1)"), "Employee contribution percentage missing");
