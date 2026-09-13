@@ -21,7 +21,7 @@ assert(kpis.includes("metrics?.average_basket"), "Average basket must use canoni
 assert(sales.includes("Toutes catégories"), "Product ranking must be filterable by category");
 assert(screen.includes('title="Ventes"') && screen.includes("<SalesReportSection"), "Active report must wire the focused sales section");
 assert(sales.includes("Produits qui portent le CA") && sales.includes("<table"), "Sales report must keep summary, visualization and detailed product ranking");
-assert(sales.includes('toggleSort("product_name")') && sales.includes('toggleSort("quantity")') && sales.includes('toggleSort("invoiced_revenue")'), "Product detail must remain sortable");
+assert(sales.includes('chooseSort("product_name")') && sales.includes('chooseSort("quantity")') && sales.includes('chooseSort("invoiced_revenue")'), "Product detail must remain sortable");
 assert(!screen.includes("const caTotal") && !screen.includes("filtInv.reduce"), "Report screen must not recompute canonical CA locally");
 
 assert(client.includes("get_sales_product_report"), "Report client must call get_sales_product_report");
