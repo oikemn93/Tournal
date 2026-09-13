@@ -14,7 +14,8 @@ assert(activeView.includes("previousBounds") || activeView.includes("previousPer
 assert(activeView.includes("loadFinancialMetrics({ boutiqueId: boutique.id, ...prevBounds })") || activeView.includes("loadFinancialMetrics({ boutiqueId: boutique.id, ...comparisonBounds })"), "Previous-period comparison must reuse canonical financial metrics RPC");
 assert(activeView.includes("<ReportKpiBand metrics={metrics} previous={previous}") || activeView.includes("<ReportKpiBand metrics={metrics} previous={previousMetrics}"), "Summary KPI band is not rendered");
 assert(band.includes("CA encaissé") && band.includes("CA facturé") && band.includes("Nombre de ventes") && band.includes("Panier moyen"), "Primary KPI set incomplete");
-assert(band.includes("Marge nette") && band.includes("canSeeMargin"), "Margin KPI must stay permission-gated");
+assert(band.includes("Marge opérationnelle") && band.includes("canSeeMargin") && band.includes("Marge FIFO réalisée moins charges d'exploitation décaissées"), "Operational margin KPI must stay permission-gated and semantically explicit");
+assert(!band.includes('label: "Marge nette"'), "Report must not label the simplified operational metric as net accounting margin");
 assert(band.includes("ArrowUpRight") && band.includes("ArrowDownRight") && band.includes("text-emerald-600") && band.includes("text-red-600"), "Semantic variation indicators missing");
 assert(!band.includes("invoice_payments") && !band.includes("public.invoices") && !band.includes("stock_entries"), "Presentation layer must not recalculate canonical financials from raw tables");
 
