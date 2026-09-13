@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tournal-shell-v5';
+const CACHE_NAME = 'tournal-shell-v6';
 const APP_SHELL = ['/', '/manifest.webmanifest', '/favicon-16.png', '/favicon-32.png', '/apple-touch-icon.png', '/icon-192.png', '/icon-512.png', '/icon-maskable-192.png', '/icon-maskable-512.png'];
 const OFFLINE_DB = 'tournal-offline-v1';
 const OFFLINE_DB_VERSION = 1;
@@ -254,12 +254,44 @@ async function enqueueCashPayment(request, body) {
   });
 }
 
+async function handleCaisseLifecycleRequest(request, rpc) {
+  if (rpc === 'open_caisse_session') {
+    try {
+      return await timedFetch(request);
+    } catch {
+      return offlineError('Mode hors-ligne : impossible d’ouvrir une caisse. Reconnectez-vous pour valider l’ouverture auprès du serveur.');
+    }
+  }
+
+  const records = await getQueue().catch(() => null);
+  if (!records) {
+    return offlineError('Fermeture de caisse bloquée : impossible de vérifier les ventes hors ligne en attente.');
+  }
+  if (records.length > 0) {
+    return jsonResponse({
+      message: `Fermeture de caisse bloquée : ${records.length} opération(s) hors ligne doivent être synchronisées avant la clôture.`,
+      code: 'TOURNAL_CAISSE_SYNC_REQUIRED',
+      pending: records.length,
+    }, 409);
+  }
+
+  try {
+    return await timedFetch(request);
+  } catch {
+    return offlineError('Mode hors-ligne : impossible de fermer la caisse. La clôture nécessite une connexion serveur et une file de synchronisation vide.');
+  }
+}
+
 async function handleSupabaseRequest(request) {
   if (isReplayRequest(request)) return timedFetch(request);
 
   const url = new URL(request.url);
   const rpc = rpcName(url);
   const isMutation = request.method !== 'GET' && request.method !== 'HEAD';
+
+  if (request.method === 'POST' && (rpc === 'open_caisse_session' || rpc === 'close_caisse_session')) {
+    return handleCaisseLifecycleRequest(request, rpc);
+  }
 
   if (request.method === 'POST' && rpc === 'create_sale') {
     const clone = request.clone();
