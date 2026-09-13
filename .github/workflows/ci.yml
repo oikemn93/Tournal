@@ -59,6 +59,9 @@ jobs:
       - name: Offline POS cut/reconnect contract
         run: node scripts/test-offline-pos-contract.mjs
 
+      - name: Offline auth and PIN contract
+        run: node scripts/test-offline-auth-session-contract.mjs
+
       - name: Client invoice and express receipt regressions
         run: node scripts/test-client-invoice-actions.mjs
 
