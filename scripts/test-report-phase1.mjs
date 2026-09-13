@@ -19,7 +19,7 @@ assert(screen.includes("loadSalesProductReport"), "Phase 1 product ranking must 
 assert(kpis.includes("metrics?.sales_count"), "Transaction count must use canonical sales_count");
 assert(kpis.includes("metrics?.average_basket"), "Average basket must use canonical average_basket");
 assert(sales.includes("Toutes catégories"), "Product ranking must be filterable by category");
-assert(screen.includes('title="Ventes"') && screen.includes("<SalesReportSection"), "Active report must wire the focused sales section");
+assert(screen.includes('id:"sales"') && screen.includes('label:"Ventes"') && screen.includes("<SalesReportSection"), "Active report must wire the focused sales section");
 assert(sales.includes("Produits qui portent le CA") && sales.includes("<table"), "Sales report must keep summary, visualization and detailed product ranking");
 assert(sales.includes('chooseSort("product_name")') && sales.includes('chooseSort("quantity")') && sales.includes('chooseSort("invoiced_revenue")'), "Product detail must remain sortable");
 assert(!screen.includes("const caTotal") && !screen.includes("filtInv.reduce"), "Report screen must not recompute canonical CA locally");
