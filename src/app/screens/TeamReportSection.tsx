@@ -1,3 +1,4 @@
+import { ReportPage, type ReportPageRequest } from "./ReportPage";
 import React, { useMemo, useState } from "react";
 import type { EmployeePerformanceReport } from "../../lib/reportApi";
 import { fmt } from "../utils/formatting";
@@ -5,7 +6,7 @@ import { fmt } from "../utils/formatting";
 type SortKey = "operator_name" | "invoiced_revenue" | "sales_count" | "average_basket" | "return_rate";
 type SortDir = "asc" | "desc";
 
-export function TeamReportSection({ report }: { report: EmployeePerformanceReport | null }) {
+export function TeamReportSection({ report, onPage }: { onPage?: (request:ReportPageRequest)=>void; report: EmployeePerformanceReport | null }) {
   const [sort, setSort] = useState<SortKey>("invoiced_revenue");
   const [dir, setDir] = useState<SortDir>("desc");
   const rows = useMemo(() => {
@@ -19,6 +20,7 @@ export function TeamReportSection({ report }: { report: EmployeePerformanceRepor
     return next;
   }, [report, sort, dir]);
 
+  if(report?.page && onPage)return <ReportPage page={report.page} onPage={onPage}/>;
   if (!report) return <div className="py-8 text-center text-xs font-semibold text-muted-foreground">Chargement du détail…</div>;
 
   const ranked = [...report.employees].sort((a, b) => b.invoiced_revenue - a.invoiced_revenue);
