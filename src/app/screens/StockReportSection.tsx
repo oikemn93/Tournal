@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { AlertTriangle, CalendarRange, PackageSearch } from "lucide-react";
 import type { StockInventoryReport } from "../../lib/reportApi";
 import { fmt } from "../utils/formatting";
@@ -9,10 +9,18 @@ export function StockReportSection({ report, days, onDays, canSeeMargin }: {
   onDays: (days: number) => void;
   canSeeMargin: boolean;
 }) {
+  const [draftDays, setDraftDays] = useState(days);
+  useEffect(() => { setDraftDays(days); }, [days]);
+  useEffect(() => {
+    if (draftDays === days) return;
+    const timer = window.setTimeout(() => onDays(draftDays), 450);
+    return () => window.clearTimeout(timer);
+  }, [draftDays, days, onDays]);
+
   if (!report) return <div className="py-8 text-center text-xs font-semibold text-muted-foreground">Chargement du détail…</div>;
 
   const dormant = report.products.filter(row => row.dormant && row.current_stock > 0);
-  const lowRotation = report.products.filter(row => row.rotation_class === "lente" || row.rotation_class === "dormant");
+  const lowRotation = report.products.filter(row => row.rotation_class === "lente");
   const variances = report.inventory_variances ?? [];
 
   return <div data-report-stock-temporality="explicit" className="space-y-4">
@@ -23,9 +31,9 @@ export function StockReportSection({ report, days, onDays, canSeeMargin }: {
       </div>
       <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
         <Mini label="Produits dormants actuels" value={`${dormant.length}`} tone={dormant.length ? "text-amber-700" : ""} />
-        <Mini label="Rotation lente / dormante" value={`${lowRotation.length}`} />
+        <Mini label="Rotation lente" value={`${lowRotation.length}`} />
         {canSeeMargin && <Mini label="Valeur stock FIFO actuelle" value={fmt(report.stock_value_fifo ?? 0)} />}
-        <div className="rounded-xl bg-background/80 p-3"><p className="text-[10px] font-bold uppercase text-muted-foreground">Seuil de dormance actuel</p><input aria-label="Seuil produits dormants" type="number" inputMode="numeric" min={1} max={3650} value={days} onChange={event => onDays(Math.max(1, Math.min(3650, Number(event.target.value) || 60)))} className="mt-1 w-20 rounded-lg border border-border bg-background px-2 py-1 text-sm font-black" /></div>
+        <div className="rounded-xl bg-background/80 p-3"><p className="text-[10px] font-bold uppercase text-muted-foreground">Seuil de dormance actuel</p><input aria-label="Seuil produits dormants" type="number" inputMode="numeric" min={1} max={3650} value={draftDays} onChange={event => setDraftDays(Math.max(1, Math.min(3650, Number(event.target.value) || 60)))} className="mt-1 w-20 rounded-lg border border-border bg-background px-2 py-1 text-sm font-black" /><p className="mt-1 text-[10px] text-muted-foreground">Actualisation après 450 ms</p></div>
       </div>
       <div className="mt-3 rounded-xl border border-amber-200 bg-background/70 p-3"><p className="mb-2 text-xs font-black">Stock dormant à traiter aujourd’hui</p>{dormant.length === 0 ? <p className="text-xs text-muted-foreground">Aucun stock dormant.</p> : dormant.slice(0,8).map(row => <div key={row.product_id} className="flex justify-between border-t border-border py-2 text-xs first:border-0"><span className="font-bold">{row.product_name}</span><span>Stock actuel <b>{row.current_stock}</b></span></div>)}</div>
     </section>
