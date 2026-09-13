@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { BarChart3, Boxes, ChevronDown, Download, PackageSearch, ReceiptText, Users, Wallet, WalletCards } from "lucide-react";
 import type { Boutique, DashPeriod } from "../types";
 import { inputCls } from "../constants";
@@ -24,22 +24,75 @@ export function ComptabiliteView({ boutique, canSeeMargin = false }: { boutique:
   const RC = boutique.color; const [period, setPeriod] = useState<DashPeriod>("jour"); const [customFrom, setCustomFrom] = useState(""); const [customTo, setCustomTo] = useState("");
   const [metrics, setMetrics] = useState<FinancialMetrics | null>(null); const [previous, setPrevious] = useState<FinancialMetrics | null>(null); const [error, setError] = useState(""); const [open, setOpen] = useState<Section | null>(null);
   const [sales, setSales] = useState<SalesProductReport | null>(null); const [team, setTeam] = useState<EmployeePerformanceReport | null>(null); const [stock, setStock] = useState<StockInventoryReport | null>(null); const [clients, setClients] = useState<ClientReport | null>(null); const [charges, setCharges] = useState<ChargeReport | null>(null); const [sectionLoading, setSectionLoading] = useState<Section | null>(null); const [dormantDays, setDormantDays] = useState(60);
+  const reportGenerationRef = useRef(0);
+  const sectionControllersRef = useRef<Partial<Record<Section, AbortController>>>({});
   const bounds = useMemo(() => periodBounds(period, customFrom, customTo), [period, customFrom, customTo]); const prevBounds = useMemo(() => previousBounds(bounds), [bounds.from, bounds.to]);
 
-  useEffect(() => { let cancelled = false; setError(""); setOpen(null); setSales(null); setTeam(null); setStock(null); setClients(null); setCharges(null); Promise.all([loadFinancialMetrics({ boutiqueId: boutique.id, ...bounds }), loadFinancialMetrics({ boutiqueId: boutique.id, ...prevBounds })]).then(([a,b]) => { if (!cancelled) { setMetrics(a); setPrevious(b); } }).catch(e => { if (!cancelled) setError(e instanceof Error ? e.message : "Rapport indisponible"); }); return () => { cancelled = true; }; }, [boutique.id, bounds.from, bounds.to, prevBounds.from, prevBounds.to]);
+  useEffect(() => { let cancelled = false; reportGenerationRef.current += 1; for (const controller of Object.values(sectionControllersRef.current)) controller?.abort(); sectionControllersRef.current = {}; setSectionLoading(null); setError(""); setOpen(null); setSales(null); setTeam(null); setStock(null); setClients(null); setCharges(null); Promise.all([loadFinancialMetrics({ boutiqueId: boutique.id, ...bounds }), loadFinancialMetrics({ boutiqueId: boutique.id, ...prevBounds })]).then(([a,b]) => { if (!cancelled) { setMetrics(a); setPrevious(b); } }).catch(e => { if (!cancelled) setError(e instanceof Error ? e.message : "Rapport indisponible"); }); return () => { cancelled = true; for (const controller of Object.values(sectionControllersRef.current)) controller?.abort(); }; }, [boutique.id, bounds.from, bounds.to, prevBounds.from, prevBounds.to]);
+
+  function abortSectionRequests() {
+    for (const controller of Object.values(sectionControllersRef.current)) controller?.abort();
+    sectionControllersRef.current = {};
+  }
 
   async function toggle(section: Section) {
-    if (open === section) { setOpen(null); return; } setOpen(section);
-    try { setSectionLoading(section); setError("");
-      if (section === "sales" && !sales) setSales(await loadSalesProductReport({ boutiqueId: boutique.id, ...bounds }));
-      if (section === "team" && !team) setTeam(await loadEmployeePerformanceReport({ boutiqueId: boutique.id, ...bounds }));
-      if (section === "stock" && !stock) setStock(await loadStockInventoryReport({ boutiqueId: boutique.id, ...bounds, dormantDays }));
-      if (section === "clients" && !clients) setClients(await loadClientReport({ boutiqueId: boutique.id, ...bounds }));
-      if (section === "charges" && !charges) setCharges(await loadChargeReport({ boutiqueId: boutique.id, ...bounds }));
-      if (section === "finance" && !sales) setSales(await loadSalesProductReport({ boutiqueId: boutique.id, ...bounds }));
-    } catch (e) { setError(e instanceof Error ? e.message : "Détail indisponible"); } finally { setSectionLoading(null); }
+    if (open === section) { abortSectionRequests(); setOpen(null); setSectionLoading(null); return; }
+    abortSectionRequests();
+    setOpen(section);
+    const generation = reportGenerationRef.current;
+    const controller = new AbortController();
+    sectionControllersRef.current[section] = controller;
+    try {
+      setSectionLoading(section); setError("");
+      if (section === "sales" && !sales) {
+        const result = await loadSalesProductReport({ boutiqueId: boutique.id, ...bounds, signal: controller.signal });
+        if (!controller.signal.aborted && generation === reportGenerationRef.current) setSales(result);
+      }
+      if (section === "team" && !team) {
+        const result = await loadEmployeePerformanceReport({ boutiqueId: boutique.id, ...bounds, signal: controller.signal });
+        if (!controller.signal.aborted && generation === reportGenerationRef.current) setTeam(result);
+      }
+      if (section === "stock" && !stock) {
+        const result = await loadStockInventoryReport({ boutiqueId: boutique.id, ...bounds, dormantDays, signal: controller.signal });
+        if (!controller.signal.aborted && generation === reportGenerationRef.current) setStock(result);
+      }
+      if (section === "clients" && !clients) {
+        const result = await loadClientReport({ boutiqueId: boutique.id, ...bounds, signal: controller.signal });
+        if (!controller.signal.aborted && generation === reportGenerationRef.current) setClients(result);
+      }
+      if (section === "charges" && !charges) {
+        const result = await loadChargeReport({ boutiqueId: boutique.id, ...bounds, signal: controller.signal });
+        if (!controller.signal.aborted && generation === reportGenerationRef.current) setCharges(result);
+      }
+      if (section === "finance" && !sales) {
+        const result = await loadSalesProductReport({ boutiqueId: boutique.id, ...bounds, signal: controller.signal });
+        if (!controller.signal.aborted && generation === reportGenerationRef.current) setSales(result);
+      }
+    } catch (e) {
+      if (!(e instanceof DOMException && e.name === "AbortError") && !controller.signal.aborted && generation === reportGenerationRef.current) setError(e instanceof Error ? e.message : "Détail indisponible");
+    } finally {
+      if (sectionControllersRef.current[section] === controller) delete sectionControllersRef.current[section];
+      if (!controller.signal.aborted && generation === reportGenerationRef.current) setSectionLoading(current => current === section ? null : current);
+    }
   }
-  async function refreshStock(days: number) { setDormantDays(days); if (open !== "stock") return; setSectionLoading("stock"); try { setStock(await loadStockInventoryReport({ boutiqueId: boutique.id, ...bounds, dormantDays: days })); } finally { setSectionLoading(null); } }
+
+  async function refreshStock(days: number) {
+    setDormantDays(days); if (open !== "stock") return;
+    sectionControllersRef.current.stock?.abort();
+    const generation = reportGenerationRef.current;
+    const controller = new AbortController();
+    sectionControllersRef.current.stock = controller;
+    setSectionLoading("stock");
+    try {
+      const result = await loadStockInventoryReport({ boutiqueId: boutique.id, ...bounds, dormantDays: days, signal: controller.signal });
+      if (!controller.signal.aborted && generation === reportGenerationRef.current) setStock(result);
+    } catch (e) {
+      if (!(e instanceof DOMException && e.name === "AbortError") && !controller.signal.aborted && generation === reportGenerationRef.current) setError(e instanceof Error ? e.message : "Détail stock indisponible");
+    } finally {
+      if (sectionControllersRef.current.stock === controller) delete sectionControllersRef.current.stock;
+      if (!controller.signal.aborted && generation === reportGenerationRef.current) setSectionLoading(current => current === "stock" ? null : current);
+    }
+  }
 
   const dormant = (stock?.products ?? []).filter(r => r.dormant && r.current_stock > 0); const lowRotation = (stock?.products ?? []).filter(r => r.rotation_class === "lente" || r.rotation_class === "dormant"); const overdue = (clients?.clients ?? []).filter(r => r.overdue_global > 0);
   const periodBtns: Array<{id: DashPeriod; label: string}> = [{id:"jour",label:"Aujourd'hui"},{id:"semaine",label:"7 jours"},{id:"mois",label:"Mois"},{id:"custom",label:"Personnalisé"}];

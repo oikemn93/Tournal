@@ -130,7 +130,7 @@ function messageFrom(body: unknown) {
     .join(" ");
 }
 
-async function postRpc<T>(name: string, payload: Record<string, unknown>): Promise<T> {
+async function postRpc<T>(name: string, payload: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
   const session = await refreshSessionIfNeeded();
   const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${name}`, {
     method: "POST",
@@ -140,38 +140,39 @@ async function postRpc<T>(name: string, payload: Record<string, unknown>): Promi
       "Content-Type": "application/json",
     },
     body: JSON.stringify(payload),
+    signal,
   });
   const body = await response.json().catch(() => null);
   if (!response.ok) throw new Error(messageFrom(body) || "Rapport indisponible");
   return body as T;
 }
 
-export function loadSalesProductReport(params: { boutiqueId: string; from: string; to: string }) {
+export function loadSalesProductReport(params: { boutiqueId: string; from: string; to: string; signal?: AbortSignal }) {
   return postRpc<SalesProductReport>("get_sales_product_report", {
     p_boutique_id: params.boutiqueId,
     p_from: params.from,
     p_to: params.to,
-  });
+  }, params.signal);
 }
 
-export function loadEmployeePerformanceReport(params: { boutiqueId: string; from: string; to: string }) {
+export function loadEmployeePerformanceReport(params: { boutiqueId: string; from: string; to: string; signal?: AbortSignal }) {
   return postRpc<EmployeePerformanceReport>("get_employee_performance_report", {
     p_boutique_id: params.boutiqueId,
     p_from: params.from,
     p_to: params.to,
-  });
+  }, params.signal);
 }
 
-export function loadStockInventoryReport(params: { boutiqueId: string; from: string; to: string; dormantDays: number }) {
+export function loadStockInventoryReport(params: { boutiqueId: string; from: string; to: string; dormantDays: number; signal?: AbortSignal }) {
   return postRpc<StockInventoryReport>("get_stock_inventory_report", {
     p_boutique_id: params.boutiqueId,
     p_from: params.from,
     p_to: params.to,
     p_dormant_days: params.dormantDays,
-  });
+  }, params.signal);
 }
 
-export function loadClientReport(params: { boutiqueId: string; from: string; to: string }) {
+export function loadClientReport(params: { boutiqueId: string; from: string; to: string; signal?: AbortSignal }) {
   return postRpc<Omit<ClientReport, "boutique_id">>("get_client_report", {
     p_boutique_id: params.boutiqueId,
     p_from: params.from,
@@ -179,10 +180,10 @@ export function loadClientReport(params: { boutiqueId: string; from: string; to:
   }).then(report => ({ ...report, boutique_id: params.boutiqueId }));
 }
 
-export function loadChargeReport(params: { boutiqueId: string; from: string; to: string }) {
+export function loadChargeReport(params: { boutiqueId: string; from: string; to: string; signal?: AbortSignal }) {
   return postRpc<ChargeReport>("get_charge_report", {
     p_boutique_id: params.boutiqueId,
     p_from: params.from,
     p_to: params.to,
-  });
+  }, params.signal);
 }
