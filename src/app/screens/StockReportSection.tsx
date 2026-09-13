@@ -1,55 +1,39 @@
-import React, { useEffect, useState } from "react";
-import { AlertTriangle, CalendarRange, PackageSearch } from "lucide-react";
-import type { StockInventoryReport } from "../../lib/reportApi";
+import React, { useEffect, useMemo, useState } from "react";
+import { AlertTriangle, ArrowDown, ArrowUp, CalendarRange, PackageSearch } from "lucide-react";
+import type { StockInventoryProductRow, StockInventoryReport } from "../../lib/reportApi";
 import { fmt } from "../utils/formatting";
 
-export function StockReportSection({ report, days, onDays, canSeeMargin }: {
-  report: StockInventoryReport | null;
-  days: number;
-  onDays: (days: number) => void;
-  canSeeMargin: boolean;
-}) {
+type SortKey = "product_name" | "current_stock" | "net_sold_qty" | "rotation_class" | "fifo_stock_value";
+type SortDir = "asc" | "desc";
+
+export function StockReportSection({ report, days, onDays, canSeeMargin }: { report: StockInventoryReport | null; days: number; onDays: (days: number) => void; canSeeMargin: boolean }) {
   const [draftDays, setDraftDays] = useState(days);
+  const [sort, setSort] = useState<SortKey>("net_sold_qty");
+  const [dir, setDir] = useState<SortDir>("desc");
   useEffect(() => { setDraftDays(days); }, [days]);
-  useEffect(() => {
-    if (draftDays === days) return;
-    const timer = window.setTimeout(() => onDays(draftDays), 450);
-    return () => window.clearTimeout(timer);
-  }, [draftDays, days, onDays]);
-
+  useEffect(() => { if (draftDays === days) return; const timer = window.setTimeout(() => onDays(draftDays), 450); return () => window.clearTimeout(timer); }, [draftDays, days, onDays]);
+  const rows = useMemo(() => {
+    const next = [...(report?.products ?? [])];
+    next.sort((a,b) => {
+      const av = sort === "product_name" || sort === "rotation_class" ? String(a[sort] ?? "") : Number(a[sort] ?? 0);
+      const bv = sort === "product_name" || sort === "rotation_class" ? String(b[sort] ?? "") : Number(b[sort] ?? 0);
+      const cmp = typeof av === "string" ? av.localeCompare(String(bv), "fr") : av - Number(bv);
+      return dir === "asc" ? cmp : -cmp;
+    });
+    return next;
+  }, [report, sort, dir]);
   if (!report) return <div className="py-8 text-center text-xs font-semibold text-muted-foreground">Chargement du détail…</div>;
-
   const dormant = report.products.filter(row => row.dormant && row.current_stock > 0);
   const lowRotation = report.products.filter(row => row.rotation_class === "lente");
   const variances = report.inventory_variances ?? [];
-
-  return <div data-report-stock-temporality="explicit" className="space-y-4">
-    <section className="rounded-xl border border-amber-200 bg-amber-50/60 p-3">
-      <div className="mb-3 flex items-start gap-2">
-        <PackageSearch size={16} className="mt-0.5 text-amber-700" />
-        <div><p className="text-xs font-black text-amber-900">Stock actuel · aujourd’hui</p><p className="text-[11px] text-amber-800">Les quantités en stock, la valeur FIFO et la dormance reflètent l’état actuel, même si la période du Rapport est historique.</p></div>
-      </div>
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-        <Mini label="Produits dormants actuels" value={`${dormant.length}`} tone={dormant.length ? "text-amber-700" : ""} />
-        <Mini label="Rotation lente" value={`${lowRotation.length}`} />
-        {canSeeMargin && <Mini label="Valeur stock FIFO actuelle" value={fmt(report.stock_value_fifo ?? 0)} />}
-        <div className="rounded-xl bg-background/80 p-3"><p className="text-[10px] font-bold uppercase text-muted-foreground">Seuil de dormance actuel</p><input aria-label="Seuil produits dormants" type="number" inputMode="numeric" min={1} max={3650} value={draftDays} onChange={event => setDraftDays(Math.max(1, Math.min(3650, Number(event.target.value) || 60)))} className="mt-1 w-20 rounded-lg border border-border bg-background px-2 py-1 text-sm font-black" /><p className="mt-1 text-[10px] text-muted-foreground">Actualisation après 450 ms</p></div>
-      </div>
-      <div className="mt-3 rounded-xl border border-amber-200 bg-background/70 p-3"><p className="mb-2 text-xs font-black">Stock dormant à traiter aujourd’hui</p>{dormant.length === 0 ? <p className="text-xs text-muted-foreground">Aucun stock dormant.</p> : dormant.slice(0,8).map(row => <div key={row.product_id} className="flex justify-between border-t border-border py-2 text-xs first:border-0"><span className="font-bold">{row.product_name}</span><span>Stock actuel <b>{row.current_stock}</b></span></div>)}</div>
-    </section>
-
-    <section className="rounded-xl border border-border p-3">
-      <div className="mb-3 flex items-start gap-2"><CalendarRange size={16} className="mt-0.5 text-muted-foreground"/><div><p className="text-xs font-black">Activité sur la période sélectionnée</p><p className="text-[11px] text-muted-foreground">Ventes nettes et inventaires finalisés uniquement dans la période du Rapport.</p></div></div>
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-3"><Mini label="Produits vendus sur période" value={`${report.products.filter(row => row.net_sold_qty > 0).length}`} /><Mini label="Unités nettes vendues" value={`${report.products.reduce((sum,row)=>sum+Number(row.net_sold_qty||0),0)}`} /><Mini label="Inventaires finalisés" value={`${variances.length}`} /></div>
-    </section>
-
-    <section className="rounded-xl border border-border p-3">
-      <div className="mb-3 flex items-start gap-2"><AlertTriangle size={16} className="mt-0.5 text-amber-600"/><div><p className="text-xs font-black">Écarts d’inventaire sur la période</p><p className="text-[11px] text-muted-foreground">Sessions d’inventaire finalisées entre les bornes sélectionnées.</p></div></div>
-      {variances.length === 0 ? <p className="text-xs text-muted-foreground">Aucun inventaire finalisé sur la période.</p> : <div className="max-h-72 overflow-auto rounded-lg border border-border"><table className="w-full text-xs"><thead className="sticky top-0 bg-muted"><tr><th className="px-3 py-2 text-left">Date</th><th className="px-3 py-2 text-left">Périmètre</th><th className="px-3 py-2 text-right">Écart unités</th>{canSeeMargin && <th className="px-3 py-2 text-right">Écart coût</th>}</tr></thead><tbody>{variances.map((row,index)=><tr key={row.session_id} className={index%2?"bg-muted/20":""}><td className="whitespace-nowrap px-3 py-2">{new Date(row.finalized_at).toLocaleDateString("fr-FR")}</td><td className="px-3 py-2 font-bold">{row.scope_label}</td><td className="px-3 py-2 text-right tabular-nums">{row.variance_qty_abs}</td>{canSeeMargin && <td className="px-3 py-2 text-right tabular-nums">{row.variance_cost == null ? "—" : fmt(row.variance_cost)}</td>}</tr>)}</tbody></table></div>}
-    </section>
+  function chooseSort(key: SortKey) { if (sort === key) setDir(value => value === "desc" ? "asc" : "desc"); else { setSort(key); setDir(key === "product_name" || key === "rotation_class" ? "asc" : "desc"); } }
+  return <div data-report-stock-temporality="explicit" data-report-stock-table="sortable" className="space-y-4">
+    <section className="rounded-xl border border-amber-200 bg-amber-50/60 p-3"><div className="mb-3 flex items-start gap-2"><PackageSearch size={16} className="mt-0.5 text-amber-700"/><div><p className="text-xs font-black text-amber-900">Stock actuel · aujourd’hui</p><p className="text-[11px] text-amber-800">Les quantités en stock, la valeur FIFO et la dormance reflètent l’état actuel, même si la période du Rapport est historique.</p></div></div><div className="grid grid-cols-2 gap-2 md:grid-cols-4"><Mini label="Produits dormants actuels" value={`${dormant.length}`} tone={dormant.length?"text-amber-700":""}/><Mini label="Rotation lente" value={`${lowRotation.length}`}/>{canSeeMargin&&<Mini label="Valeur stock FIFO actuelle" value={fmt(report.stock_value_fifo??0)}/>}<div className="rounded-xl bg-background/80 p-3"><p className="text-[10px] font-bold uppercase text-muted-foreground">Seuil de dormance actuel</p><input aria-label="Seuil produits dormants" type="number" inputMode="numeric" min={1} max={3650} value={draftDays} onChange={event=>setDraftDays(Math.max(1,Math.min(3650,Number(event.target.value)||60)))} className="mt-1 w-20 rounded-lg border border-border bg-background px-2 py-1 text-sm font-black"/><p className="mt-1 text-[10px] text-muted-foreground">Actualisation après 450 ms</p></div></div><div className="mt-3 rounded-xl border border-amber-200 bg-background/70 p-3"><p className="mb-2 text-xs font-black">Stock dormant à traiter aujourd’hui</p>{dormant.length===0?<p className="text-xs text-muted-foreground">Aucun stock dormant.</p>:dormant.slice(0,8).map(row=><div key={row.product_id} className="flex justify-between border-t border-border py-2 text-xs first:border-0"><span className="font-bold">{row.product_name}</span><span>Stock actuel <b>{row.current_stock}</b></span></div>)}</div></section>
+    <section className="rounded-xl border border-border p-3"><div className="mb-3 flex items-start gap-2"><CalendarRange size={16} className="mt-0.5 text-muted-foreground"/><div><p className="text-xs font-black">Activité sur la période sélectionnée</p><p className="text-[11px] text-muted-foreground">Ventes nettes et inventaires finalisés uniquement dans la période du Rapport.</p></div></div><div className="grid grid-cols-2 gap-2 md:grid-cols-3"><Mini label="Produits vendus sur période" value={`${report.products.filter(row=>row.net_sold_qty>0).length}`}/><Mini label="Unités nettes vendues" value={`${report.products.reduce((sum,row)=>sum+Number(row.net_sold_qty||0),0)}`}/><Mini label="Inventaires finalisés" value={`${variances.length}`}/></div></section>
+    <section className="rounded-xl border border-border p-3"><div className="mb-3 flex items-start gap-2"><AlertTriangle size={16} className="mt-0.5 text-amber-600"/><div><p className="text-xs font-black">Écarts d’inventaire sur la période</p><p className="text-[11px] text-muted-foreground">Sessions d’inventaire finalisées entre les bornes sélectionnées.</p></div></div>{variances.length===0?<p className="text-xs text-muted-foreground">Aucun inventaire finalisé sur la période.</p>:<div className="max-h-72 overflow-auto rounded-lg border border-border"><table className="w-full text-xs"><thead className="sticky top-0 bg-muted"><tr><th className="px-3 py-2 text-left">Date</th><th className="px-3 py-2 text-left">Périmètre</th><th className="px-3 py-2 text-right">Écart unités</th>{canSeeMargin&&<th className="px-3 py-2 text-right">Écart coût</th>}</tr></thead><tbody>{variances.map((row,index)=><tr key={row.session_id} className={index%2?"bg-muted/20":""}><td className="whitespace-nowrap px-3 py-2">{new Date(row.finalized_at).toLocaleDateString("fr-FR")}</td><td className="px-3 py-2 font-bold">{row.scope_label}</td><td className="px-3 py-2 text-right tabular-nums">{row.variance_qty_abs}</td>{canSeeMargin&&<td className="px-3 py-2 text-right tabular-nums">{row.variance_cost==null?"—":fmt(row.variance_cost)}</td>}</tr>)}</tbody></table></div>}</section>
+    <section><div className="mb-2"><p className="text-xs font-black">Détail produits</p><p className="text-[11px] text-muted-foreground">Stock actuel clairement séparé des ventes nettes de la période · tri cliquable</p></div><div className="max-h-[440px] overflow-auto rounded-xl border border-border"><table className="w-full text-xs"><thead className="sticky top-0 z-10 bg-muted"><tr><Head label="Produit" active={sort==="product_name"} dir={dir} onClick={()=>chooseSort("product_name")} left/><Head label="Stock actuel" active={sort==="current_stock"} dir={dir} onClick={()=>chooseSort("current_stock")}/><Head label="Vendu net période" active={sort==="net_sold_qty"} dir={dir} onClick={()=>chooseSort("net_sold_qty")}/><Head label="Rotation" active={sort==="rotation_class"} dir={dir} onClick={()=>chooseSort("rotation_class")}/>{canSeeMargin&&<Head label="Valeur FIFO actuelle" active={sort==="fifo_stock_value"} dir={dir} onClick={()=>chooseSort("fifo_stock_value")}/>}</tr></thead><tbody>{rows.map((row,index)=><StockRow key={row.product_id} row={row} index={index} canSeeMargin={canSeeMargin}/>)}</tbody></table></div></section>
   </div>;
 }
-
-function Mini({ label, value, tone = "" }: { label: string; value: string; tone?: string }) {
-  return <div className="rounded-xl bg-muted/35 p-3"><p className="text-[10px] font-bold uppercase text-muted-foreground">{label}</p><p className={`mt-1 text-lg font-black ${tone}`}>{value}</p></div>;
-}
+function StockRow({row,index,canSeeMargin}:{row:StockInventoryProductRow;index:number;canSeeMargin:boolean}){return <tr className={index%2?"bg-muted/20":""}><td className="px-3 py-2.5"><p className="font-bold">{row.product_name}</p><p className="text-[10px] text-muted-foreground">{row.category_name}</p></td><td className="px-3 py-2.5 text-right font-black tabular-nums">{row.current_stock}</td><td className="px-3 py-2.5 text-right tabular-nums">{row.net_sold_qty}</td><td className={`px-3 py-2.5 text-right font-bold ${row.rotation_class==="dormant"?"text-amber-700":""}`}>{row.rotation_class}</td>{canSeeMargin&&<td className="px-3 py-2.5 text-right tabular-nums">{row.fifo_stock_value==null?"—":fmt(row.fifo_stock_value)}</td>}</tr>}
+function Head({label,active,dir,onClick,left=false}:{label:string;active:boolean;dir:SortDir;onClick:()=>void;left?:boolean}){return <th className={`px-3 py-2 ${left?"text-left":"text-right"}`}><button type="button" onClick={onClick} className={`inline-flex items-center gap-1 font-bold ${left?"":"ml-auto"}`}>{label}{active&&(dir==="desc"?<ArrowDown size={12}/>:<ArrowUp size={12}/>)}</button></th>}
+function Mini({label,value,tone=""}:{label:string;value:string;tone?:string}){return <div className="rounded-xl bg-muted/35 p-3"><p className="text-[10px] font-bold uppercase text-muted-foreground">{label}</p><p className={`mt-1 text-lg font-black ${tone}`}>{value}</p></div>}
