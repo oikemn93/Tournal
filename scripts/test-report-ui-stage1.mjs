@@ -4,7 +4,7 @@ const entry = fs.readFileSync("src/app/screens/RapportView.tsx", "utf8");
 const activeView = entry.includes("RapportViewV2") ? fs.readFileSync("src/app/screens/RapportViewV2.tsx", "utf8") : entry;
 const band = fs.readFileSync("src/app/screens/ReportKpiBand.tsx", "utf8");
 function assert(condition, message) { if (!condition) throw new Error(message); }
-assert(activeView.includes('data-screen-source="canonical-report-v8-ui"') || activeView.includes('data-screen-source="canonical-report-v7-ui"') || activeView.includes('data-screen-source="canonical-report-v6-ui"'), "UI refresh marker missing");
+assert(activeView.includes('data-screen-source="canonical-report-v9-navigation"') || activeView.includes('data-screen-source="canonical-report-v8-ui"') || activeView.includes('data-screen-source="canonical-report-v7-ui"') || activeView.includes('data-screen-source="canonical-report-v6-ui"'), "UI refresh marker missing");
 assert(activeView.includes("sticky top-2") && activeView.includes("Rapport"), "Compact sticky report header missing");
 assert(activeView.includes("previousBounds") || activeView.includes("previousPeriodBounds"), "Previous-period bounds missing");
 assert(activeView.includes("loadFinancialMetrics({boutiqueId:boutique.id,...prevBounds})") || activeView.includes("loadFinancialMetrics({ boutiqueId: boutique.id, ...prevBounds })") || activeView.includes("loadFinancialMetrics({ boutiqueId: boutique.id, ...comparisonBounds })"), "Previous-period comparison must reuse canonical financial metrics RPC");
