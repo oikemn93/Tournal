@@ -27,10 +27,11 @@ export function SalesReportSection({ report, metrics, canSeeMargin }: { report: 
   const top = byRevenue.slice(0,5);
   const bottom = [...byRevenue].filter(r=>Math.abs(r.invoiced_revenue)>0.005).slice(-3).reverse();
   const maxRevenue = Math.max(1, ...top.map(r => Math.abs(r.invoiced_revenue)));
+  const filteredRevenue = rows.reduce((sum,row)=>sum+row.invoiced_revenue,0);
   const productQty = rows.reduce((sum,row)=>sum+row.quantity,0);
-  const categoryTotals = report.categories.map(c=>({ name:c.name, value:(report.products ?? []).filter(r=>r.category_id===c.id).reduce((sum,r)=>sum+r.invoiced_revenue,0) })).filter(x=>Math.abs(x.value)>0.005).sort((a,b)=>b.value-a.value).slice(0,5);
+  const categoryTotals = report.categories.map(c=>({ name:c.name, value:rows.filter(r=>(r.category_id||"")===c.id).reduce((sum,r)=>sum+r.invoiced_revenue,0) })).filter(x=>Math.abs(x.value)>0.005).sort((a,b)=>b.value-a.value).slice(0,5);
   const maxCategory = Math.max(1, ...categoryTotals.map(x=>Math.abs(x.value)));
-  const gap = metrics ? Math.abs(report.invoiced_revenue - metrics.invoiced_revenue) : 0;
+  const gap = category === "all" && metrics ? Math.abs(report.invoiced_revenue - metrics.invoiced_revenue) : 0;
   const marginRows = rows.filter(r=>r.realized_margin_fifo != null);
   const realizedMargin = marginRows.reduce((sum,r)=>sum+(r.realized_margin_fifo ?? 0),0);
 
@@ -43,7 +44,7 @@ export function SalesReportSection({ report, metrics, canSeeMargin }: { report: 
     {gap > 0.5 && <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">Écart de rapprochement produit : {fmt(gap)}. Le KPI principal reste issu du calcul financier canonique.</div>}
 
     <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-      <Mini icon={<BadgeEuro size={14}/>} label="CA produits" value={fmt(report.invoiced_revenue)} />
+      <Mini icon={<BadgeEuro size={14}/>} label="CA produits" value={fmt(filteredRevenue)} />
       <Mini icon={<PackageCheck size={14}/>} label="Unités nettes" value={`${productQty}`} />
       <Mini icon={<Layers3 size={14}/>} label="Produits actifs" value={`${rows.length}`} />
       <Mini icon={<Trophy size={14}/>} label="Top produit" value={top[0]?.product_name ?? "—"} />
@@ -53,7 +54,7 @@ export function SalesReportSection({ report, metrics, canSeeMargin }: { report: 
       <VisualBlock title="Produits qui portent le CA" subtitle="Top 5 sur la sélection">
         <Bars items={top.map(r=>({name:r.product_name,value:r.invoiced_revenue}))} max={maxRevenue}/>
       </VisualBlock>
-      <VisualBlock title="Répartition par catégorie" subtitle="Top 5 catégories par CA">
+      <VisualBlock title="Répartition par catégorie" subtitle={category === "all" ? "Top 5 catégories par CA" : "Catégorie sélectionnée"}>
         {categoryTotals.length ? <Bars items={categoryTotals} max={maxCategory}/> : <Empty />}
       </VisualBlock>
     </div>
