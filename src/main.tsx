@@ -75,6 +75,7 @@ function OfflineCoordinator({ children }: { children: React.ReactNode }) {
   const [syncSummary, setSyncSummary] = React.useState<string | null>(() => sessionStorage.getItem(SYNC_SUMMARY_KEY));
   const [clock, setClock] = React.useState(() => Date.now());
   const syncInFlight = React.useRef(false);
+  const reloadWhenQueueEmpty = React.useRef(false);
 
   React.useEffect(() => {
     if (syncSummary) sessionStorage.removeItem(SYNC_SUMMARY_KEY);
@@ -137,6 +138,7 @@ function OfflineCoordinator({ children }: { children: React.ReactNode }) {
     syncInFlight.current = true;
     setSyncing(true);
     const invoiceMap = new Map(Object.entries(initialMap));
+    const errorMessages: string[] = [];
     let success = 0;
     let errors = 0;
     let networkInterrupted = false;
@@ -148,8 +150,10 @@ function OfflineCoordinator({ children }: { children: React.ReactNode }) {
         if (record.kind === "record_payment" && typeof body.p_invoice_id === "string" && body.p_invoice_id.startsWith("OFF-")) {
           const officialId = invoiceMap.get(body.p_invoice_id);
           if (!officialId) {
+            const message = "La vente temporaire liée n’a pas encore de numéro officiel.";
             errors += 1;
-            workerPost({ type: "TOURNAL_MARK_OFFLINE_ERROR", id: record.id, error: "La vente temporaire liée n’a pas encore de numéro officiel." });
+            errorMessages.push(message);
+            workerPost({ type: "TOURNAL_MARK_OFFLINE_ERROR", id: record.id, error: message });
             continue;
           }
           body.p_invoice_id = officialId;
@@ -175,6 +179,7 @@ function OfflineCoordinator({ children }: { children: React.ReactNode }) {
                 ? payload.error
                 : `Synchronisation refusée (${response.status})`;
             errors += 1;
+            errorMessages.push(message);
             workerPost({ type: "TOURNAL_MARK_OFFLINE_ERROR", id: record.id, error: message });
             continue;
           }
@@ -182,8 +187,10 @@ function OfflineCoordinator({ children }: { children: React.ReactNode }) {
             const officialId = typeof payload?.invoice_id === "string" ? payload.invoice_id : null;
             if (!officialId) {
               const duplicate = typeof payload?.duplicate_invoice_id === "string" ? ` Vente similaire détectée: ${payload.duplicate_invoice_id}.` : "";
+              const message = `Aucun numéro de facture officiel attribué.${duplicate}`;
               errors += 1;
-              workerPost({ type: "TOURNAL_MARK_OFFLINE_ERROR", id: record.id, error: `Aucun numéro de facture officiel attribué.${duplicate}` });
+              errorMessages.push(message);
+              workerPost({ type: "TOURNAL_MARK_OFFLINE_ERROR", id: record.id, error: message });
               continue;
             }
             if (record.tempInvoiceId) invoiceMap.set(record.tempInvoiceId, officialId);
@@ -207,14 +214,15 @@ function OfflineCoordinator({ children }: { children: React.ReactNode }) {
     }
 
     const pending = Math.max(0, records.length - success);
-    const summary = `${success} vente${success > 1 ? "s" : ""}/opération${success > 1 ? "s" : ""} synchronisée${success > 1 ? "s" : ""} avec succès, ${errors} erreur${errors > 1 ? "s" : ""}${pending ? `, ${pending} en attente` : ""}.`;
+    const firstError = errorMessages[0] ? ` Première erreur : ${errorMessages[0]}` : "";
+    const summary = `${success} vente${success > 1 ? "s" : ""}/opération${success > 1 ? "s" : ""} synchronisée${success > 1 ? "s" : ""} avec succès, ${errors} erreur${errors > 1 ? "s" : ""}${pending ? `, ${pending} en attente` : ""}.${firstError}`;
     setSyncSummary(summary);
-    workerPost({ type: "TOURNAL_GET_QUEUE_STATUS" });
 
     if (!networkInterrupted && pending === 0 && success > 0) {
       sessionStorage.setItem(SYNC_SUMMARY_KEY, summary);
-      window.setTimeout(() => window.location.reload(), 1200);
+      reloadWhenQueueEmpty.current = true;
     }
+    workerPost({ type: "TOURNAL_GET_QUEUE_STATUS" });
   }, [markSuspect]);
 
   React.useEffect(() => {
@@ -236,6 +244,10 @@ function OfflineCoordinator({ children }: { children: React.ReactNode }) {
       if (message.type === "TOURNAL_OFFLINE_QUEUE_STATUS") {
         setQueueCount(message.queueCount);
         setQueueOldestAt(message.oldestCreatedAt ?? null);
+        if (message.queueCount === 0 && reloadWhenQueueEmpty.current) {
+          reloadWhenQueueEmpty.current = false;
+          window.location.reload();
+        }
         return;
       }
       if (message.type === "TOURNAL_OFFLINE_QUEUE") {
