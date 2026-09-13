@@ -16,3 +16,8 @@ ok(ui.includes('sticky top-2 z-30'),"report header and tabs must remain sticky")
 ok(ui.includes('groupBoutiques.length>1')&&ui.includes('id:"group"'),"multi-boutique tab must remain conditional");
 
 console.log("report-navigation-tabs: ok");
+
+ok(ui.indexOf("<ReportKpiBand") < ui.indexOf("</header>"), "KPIs must be inside the sticky header");
+ok(ui.includes("setSectionLoading(null);setOpen(section)"), "Cached tabs must clear aborted loading state");
+ok(ui.includes("if(!sections.some(item=>item.id===section))return"), "Hidden sections must not issue requests");
+ok(ui.includes('event.key==="ArrowRight"') && ui.includes('event.key==="Home"'), "Tabs must support keyboard navigation");
