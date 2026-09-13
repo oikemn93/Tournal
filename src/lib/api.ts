@@ -1134,8 +1134,10 @@ export function subscribeToBoutiqueSync(
         // Realtime exposes the concrete join error on recent clients. If an
         // intermediary hides it, confirm the app-session gate before stopping
         // retries. Network failures leave the channel's normal retry intact.
-        const appSessionIsValid = explicitAuthorizationFailure ? false : await validateAppSession(boutiqueId);
-        if (explicitAuthorizationFailure || !appSessionIsValid) stopAuthorizationRetries(error);
+        // Realtime JWT/channel failures are not proof that the PIN session is
+        // locked. Always ask the authoritative app-session RPC before locking.
+        const appSessionIsValid = await validateAppSession(boutiqueId);
+        if (!appSessionIsValid) stopAuthorizationRetries(error);
       } catch {
         // A failed validation can be an offline connection; do not mistake it
         // for a permission failure and unnecessarily stop a healthy retry.

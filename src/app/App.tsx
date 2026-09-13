@@ -6969,6 +6969,13 @@ function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdat
   const [caisseSaveError, setCaisseSaveError] = useState<string | null>(null);
   const sessMinutes = Math.max(lockMinutes, 5, Math.round(sessValue * (sessUnit === "min" ? 1 : sessUnit === "h" ? 60 : 1440)));
 
+  useEffect(() => { setLockMinutes(lockMinutesInit ?? 10); }, [lockMinutesInit]);
+  useEffect(() => {
+    const next = sessionMinutesInit ?? 720;
+    const unit: SessUnit = next % 1440 === 0 ? "j" : next % 60 === 0 ? "h" : "min";
+    setSessUnit(unit);
+    setSessValue(unit === "j" ? next / 1440 : unit === "h" ? next / 60 : next);
+  }, [sessionMinutesInit]);
   useEffect(() => { setSupplierTermsDays(supplierPaymentTermsDaysInit ?? 30); }, [supplierPaymentTermsDaysInit]);
   useEffect(() => { setClientTermsDays(clientPaymentTermsDaysInit ?? 30); }, [clientPaymentTermsDaysInit]);
   useEffect(() => { setCaisseDefaults(caisseDefaultsInit ?? { enabled:false, openingFloat:0, openingReminderTime:null, closingReminderTime:null }); }, [caisseDefaultsInit]);
@@ -8779,6 +8786,8 @@ export default function App() {
   const endingSessionForInactivity = useRef(false);
   // Auth settings come from the relational auth_settings table.
   const [lockTimeoutMs, setLockTimeoutMs] = useState(10 * 60 * 1000);
+  const [authSettingsBoutiqueId, setAuthSettingsBoutiqueId] = useState<string|null>(null);
+  const authSettingsRequestId = useRef(0);
   const [sessionExpiryMs, setSessionExpiryMs] = useState(SESSION_EXPIRY_MS);
   const [supplierPaymentTermsDays, setSupplierPaymentTermsDays] = useState(30);
   const [clientPaymentTermsDays, setClientPaymentTermsDays] = useState(30);
@@ -8935,21 +8944,27 @@ export default function App() {
 
   // ── Load boutique auth settings on mount ───────────────────────────────────
   const loadAuthSettings = useCallback(async (boutiqueId: string) => {
+    const requestId = ++authSettingsRequestId.current;
+    setAuthSettingsBoutiqueId(null);
     try {
-      const settings = await loadStoredAuthSettings(boutiqueId);
-      if (settings) {
-        if (settings.lockMinutes) setLockTimeoutMs(settings.lockMinutes * 60 * 1000);
-        if (settings.sessionMinutes) setSessionExpiryMs(settings.sessionMinutes * 60 * 1000);
-        setSupplierPaymentTermsDays(settings.supplierPaymentTermsDays ?? 30);
-        setClientPaymentTermsDays(settings.clientPaymentTermsDays ?? 30);
-        setCaisseDefaults({
-          enabled: settings.caisseControlEnabled ?? false,
-          openingFloat: settings.caisseDefaultOpeningFloat ?? 0,
-          openingReminderTime: settings.caisseOpeningReminderTime ?? null,
-          closingReminderTime: settings.caisseClosingReminderTime ?? null,
-        });
-      }
-    } catch { /* use defaults */ }
+      const stored = await loadStoredAuthSettings(boutiqueId);
+      if (requestId !== authSettingsRequestId.current) return;
+      const settings = stored ?? { lockMinutes:10, sessionMinutes:720, supplierPaymentTermsDays:30, clientPaymentTermsDays:30, caisseControlEnabled:false, caisseDefaultOpeningFloat:0, caisseOpeningReminderTime:null, caisseClosingReminderTime:null };
+      setLockTimeoutMs(Math.max(1, Number(settings.lockMinutes ?? 10)) * 60 * 1000);
+      setSessionExpiryMs(Math.max(5, Number(settings.sessionMinutes ?? 720)) * 60 * 1000);
+      setSupplierPaymentTermsDays(settings.supplierPaymentTermsDays ?? 30);
+      setClientPaymentTermsDays(settings.clientPaymentTermsDays ?? 30);
+      setCaisseDefaults({
+        enabled: settings.caisseControlEnabled ?? false,
+        openingFloat: settings.caisseDefaultOpeningFloat ?? 0,
+        openingReminderTime: settings.caisseOpeningReminderTime ?? null,
+        closingReminderTime: settings.caisseClosingReminderTime ?? null,
+      });
+      setAuthSettingsBoutiqueId(boutiqueId);
+    } catch (error) {
+      if (requestId === authSettingsRequestId.current) setAuthSettingsBoutiqueId(null);
+      console.warn("Paramètres auth indisponibles; verrouillage local suspendu jusqu’à leur lecture", error);
+    }
   }, []);
 
   // Reconcile the active boutique after a debounced Realtime event. Account and
@@ -9531,8 +9546,27 @@ export default function App() {
   }, [screen]);
 
   useEffect(() => {
-    if (screen !== "app" || !appSessionReady) return;
+    if (screen !== "app" || !appSessionReady || authSettingsBoutiqueId !== activeBoutiqueId) return;
     const events = ["mousemove", "pointerdown", "keydown", "touchstart", "click", "input", "change", "focusin", "wheel"];
+
+    function lockFromInactivity() {
+      const bid = activeBoutiqueIdRef.current;
+      if (bid) void lockAppSession(bid).catch(() => undefined);
+      try { sessionStorage.setItem(APP_LOCK_KEY, "1"); } catch {}
+      setLocked(true);
+    }
+
+    function armLockFromLastActivity() {
+      if (lockTimer.current) clearTimeout(lockTimer.current);
+      const elapsed = Date.now() - lastUserActivityAt.current;
+      const remaining = LOCK_TIMEOUT_MS - elapsed;
+      if (remaining <= 0) {
+        lockFromInactivity();
+        return false;
+      }
+      lockTimer.current = setTimeout(lockFromInactivity, remaining);
+      return true;
+    }
 
     function armExpiryFromLastActivity() {
       const elapsed = Date.now() - lastUserActivityAt.current;
@@ -9546,7 +9580,7 @@ export default function App() {
       return true;
     }
 
-    function resetTimers() {
+    function registerUserActivity() {
       if (locked) return; // PIN-screen interactions must never extend the business idle session.
       const now = Date.now();
       if (now - lastUserActivityAt.current >= sessionExpiryMs) {
@@ -9555,35 +9589,31 @@ export default function App() {
       }
       lastUserActivityAt.current = now;
       try { sessionStorage.setItem(APP_LAST_ACTIVITY_KEY, String(now)); } catch {}
-      if (lockTimer.current) clearTimeout(lockTimer.current);
-      lockTimer.current = setTimeout(() => {
-        const bid = activeBoutiqueIdRef.current;
-        if (bid) void lockAppSession(bid).catch(() => undefined);
-        try { sessionStorage.setItem(APP_LOCK_KEY, "1"); } catch {}
-        setLocked(true);
-      }, LOCK_TIMEOUT_MS);
+      armLockFromLastActivity();
       armExpiryFromLastActivity();
-      // A live user refreshes the server-side gate at most once per minute.
-      // No interval runs in the background, so inactivity can still expire.
+      // Only a real DOM user event reaches this path. Realtime, renders and
+      // background refreshes can neither extend nor shorten the idle deadline.
       if (now - appSessionHeartbeatAt.current >= 60_000) void renewAppSession();
     }
 
     if (locked) {
-      // Preserve the original idle deadline while the PIN screen is displayed.
+      // Preserve the original full-session deadline while the PIN screen is displayed.
       armExpiryFromLastActivity();
     } else {
-      events.forEach(e => document.addEventListener(e, resetTimers, { passive: true }));
-      document.addEventListener("scroll", resetTimers, { passive: true, capture: true });
-      resetTimers();
+      events.forEach(e => document.addEventListener(e, registerUserActivity, { passive: true }));
+      document.addEventListener("scroll", registerUserActivity, { passive: true, capture: true });
+      // Effect setup is not user activity: re-arm from the last real event.
+      armLockFromLastActivity();
+      armExpiryFromLastActivity();
     }
 
     return () => {
       if (lockTimer.current) clearTimeout(lockTimer.current);
       if (logoutTimer.current) clearTimeout(logoutTimer.current);
-      events.forEach(e => document.removeEventListener(e, resetTimers));
-      document.removeEventListener("scroll", resetTimers, true);
+      events.forEach(e => document.removeEventListener(e, registerUserActivity));
+      document.removeEventListener("scroll", registerUserActivity, true);
     };
-  }, [appSessionReady, endSessionForInactivity, lockTimeoutMs, locked, renewAppSession, screen, sessionExpiryMs]);
+  }, [activeBoutiqueId, appSessionReady, authSettingsBoutiqueId, endSessionForInactivity, lockTimeoutMs, locked, renewAppSession, screen, sessionExpiryMs]);
 
   // Keep stable refs in sync for asynchronous callbacks.
   useEffect(() => { activeBoutiqueIdRef.current = activeBoutiqueId; }, [activeBoutiqueId]);
@@ -9997,6 +10027,7 @@ export default function App() {
               await saveAuthSettings(boutique.id, { lockMinutes, sessionMinutes, supplierPaymentTermsDays:supplierTermsDays, clientPaymentTermsDays:clientTermsDays, caisseControlEnabled:caisseDefaults.enabled, caisseDefaultOpeningFloat:caisseDefaults.openingFloat, caisseOpeningReminderTime:caisseDefaults.openingReminderTime ?? null, caisseClosingReminderTime:caisseDefaults.closingReminderTime ?? null });
               setLockTimeoutMs(lockMinutes * 60 * 1000);
               setSessionExpiryMs(sessionMinutes * 60 * 1000);
+              setAuthSettingsBoutiqueId(boutique.id);
               setSupplierPaymentTermsDays(supplierTermsDays);
               setClientPaymentTermsDays(clientTermsDays);
             }}
