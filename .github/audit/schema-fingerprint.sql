@@ -2,10 +2,10 @@
 
 -- Audit-only structural fingerprint. No table data is read.
 -- Production fingerprint was refreshed read-only on 2026-09-13 before any
--- report-audit production change. The one approved candidate delta below is
--- deliberately limited to the functions aggregate produced by the reviewed
--- FIFO-return migration in PR #65; every other schema category must remain
--- byte-equivalent to production.
+-- report-audit production change. Approved function deltas are pinned to the
+-- exact aggregate hashes produced by the reviewed FIFO-return candidate alone
+-- and by the reviewed FIFO-return + sales-payment candidates together in PR #65.
+-- Every other schema category must remain byte-equivalent to production.
 create temp table audit_expected_fingerprint(
   category text primary key,
   object_count bigint not null,
@@ -114,7 +114,11 @@ select a.category,
        e.md5 as production_md5,
        case
          when a.category='functions' then
-           a.object_count=213 and a.md5 in ('360ebdbaa7346b48143a7c12a21bf6b6','b22d61013eb663621991c277c42c3f70')
+           a.object_count=213 and a.md5 in (
+             '360ebdbaa7346b48143a7c12a21bf6b6',
+             'b22d61013eb663621991c277c42c3f70',
+             '47cc6ea3fdabcc57be624c8ddca3ff33'
+           )
          else a.object_count=e.object_count and a.md5=e.md5
        end as approved
 from audit_actual_fingerprint a
@@ -128,16 +132,22 @@ begin
     from audit_actual_fingerprint a
     join audit_expected_fingerprint e using(category)
     where case
-      when a.category='functions' then not (a.object_count=213 and a.md5 in ('360ebdbaa7346b48143a7c12a21bf6b6','b22d61013eb663621991c277c42c3f70'))
+      when a.category='functions' then not (
+        a.object_count=213 and a.md5 in (
+          '360ebdbaa7346b48143a7c12a21bf6b6',
+          'b22d61013eb663621991c277c42c3f70',
+          '47cc6ea3fdabcc57be624c8ddca3ff33'
+        )
+      )
       else a.object_count <> e.object_count or a.md5 <> e.md5
     end
   ) then
-    raise exception 'schema fingerprint differs from production outside the exact approved FIFO candidate';
+    raise exception 'schema fingerprint differs from production outside the exact approved report function candidates';
   end if;
 end
 $audit$;
 
-\echo schema_fingerprint_matches_production_or_exact_fifo_candidate
+\echo schema_fingerprint_matches_production_or_exact_report_candidates
 \ir ../../scripts/test-business-smoke.sql
 \ir ../../scripts/test-supplier-ledger-db.sql
 \ir ../../scripts/test-stock-integrity-db.sql
