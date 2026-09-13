@@ -39,4 +39,4 @@ const test = `import assert from "node:assert/strict";\nimport fs from "node:fs"
 fs.writeFileSync(testPath, test);
 
 console.log("Applied offline PIN Phase 1 integration.");
-// trigger: app-only retry
+// trigger: app-only retry 2
