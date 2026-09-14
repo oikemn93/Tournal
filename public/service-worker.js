@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tournal-shell-v6';
+const CACHE_NAME = 'tournal-shell-v7';
 const APP_SHELL = ['/', '/manifest.webmanifest', '/favicon-16.png', '/favicon-32.png', '/apple-touch-icon.png', '/icon-192.png', '/icon-512.png', '/icon-maskable-192.png', '/icon-maskable-512.png'];
 const OFFLINE_DB = 'tournal-offline-v1';
 const OFFLINE_DB_VERSION = 1;
@@ -15,7 +15,7 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     Promise.all([
-      caches.keys().then((keys) => Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)))),
+      caches.keys().then((keys) => Promise.all(keys.filter((key) => key.startsWith('tournal-shell-') && key !== CACHE_NAME).map((key) => caches.delete(key)))),
       self.clients.claim(),
     ])
   );
@@ -115,6 +115,22 @@ async function notifyClients(message) {
   const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
   for (const client of clients) {
     try { client.postMessage(message); } catch {}
+  }
+}
+
+async function refreshShellCache() {
+  await caches.delete(CACHE_NAME);
+  const cache = await caches.open(CACHE_NAME);
+  await cache.addAll(APP_SHELL);
+}
+
+async function recoverStaleAssetClient(clientId, assetPath) {
+  try { await refreshShellCache(); } catch { await caches.delete(CACHE_NAME).catch(() => undefined); }
+  await notifyClients({ type: 'TOURNAL_STALE_ASSET', assetPath });
+  if (!clientId) return;
+  const client = await self.clients.get(clientId).catch(() => null);
+  if (client && 'navigate' in client) {
+    try { await client.navigate(client.url); } catch {}
   }
 }
 
@@ -350,18 +366,28 @@ self.addEventListener('fetch', (event) => {
   }
 
   event.respondWith(
-    caches.match(event.request).then((cached) => cached || fetch(event.request).then((response) => {
+    caches.match(event.request).then(async (cached) => {
+      if (cached) return cached;
+      const response = await fetch(event.request);
+      if (response.status === 404 && url.pathname.startsWith('/assets/')) {
+        event.waitUntil(recoverStaleAssetClient(event.clientId, url.pathname));
+        return response;
+      }
       if (response.ok) {
         const copy = response.clone();
         caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
       }
       return response;
-    }))
+    })
   );
 });
 
 self.addEventListener('message', (event) => {
   const message = event.data || {};
+  if (message.type === 'TOURNAL_CLEAR_SHELL_CACHE') {
+    event.waitUntil(refreshShellCache().catch(() => caches.delete(CACHE_NAME)));
+    return;
+  }
   if (message.type === 'TOURNAL_GET_QUEUE_STATUS') {
     event.waitUntil(queueStatusMessage());
     return;
