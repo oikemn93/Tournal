@@ -27,7 +27,8 @@ type WorkerMessage =
   | { type: "TOURNAL_NETWORK_HEALTH"; status: "online" | "suspect"; latencyMs?: number; reason?: string }
   | { type: "TOURNAL_OFFLINE_QUEUED"; queueCount: number; oldestCreatedAt?: number }
   | { type: "TOURNAL_OFFLINE_QUEUE"; records: QueueRecord[]; invoiceMap?: Record<string, string> }
-  | { type: "TOURNAL_OFFLINE_QUEUE_STATUS"; queueCount: number; oldestCreatedAt?: number };
+  | { type: "TOURNAL_OFFLINE_QUEUE_STATUS"; queueCount: number; oldestCreatedAt?: number }
+  | { type: "TOURNAL_STALE_ASSET"; assetPath?: string };
 
 function workerPost(message: Record<string, unknown>) {
   navigator.serviceWorker?.controller?.postMessage(message);
@@ -241,6 +242,10 @@ function OfflineCoordinator({ children }: { children: React.ReactNode }) {
         markSuspect();
         return;
       }
+      if (message.type === "TOURNAL_STALE_ASSET") {
+        void recoverFromStaleModule(`Failed to fetch dynamically imported module: ${message.assetPath ?? "unknown"}`);
+        return;
+      }
       if (message.type === "TOURNAL_OFFLINE_QUEUE_STATUS") {
         setQueueCount(message.queueCount);
         setQueueOldestAt(message.oldestCreatedAt ?? null);
@@ -294,6 +299,39 @@ function OfflineCoordinator({ children }: { children: React.ReactNode }) {
     )}
   </>;
 }
+
+const MODULE_RECOVERY_KEY = "tournal.module-recovery.v1";
+const MODULE_FAILURE_PATTERN = /importing a module script failed|failed to fetch dynamically imported module|failed to load module script|error loading dynamically imported module|loading chunk [^ ]+ failed/i;
+
+function isStaleModuleFailure(value: unknown) {
+  const message = value instanceof Error ? `${value.name}: ${value.message}` : String(value ?? "");
+  return MODULE_FAILURE_PATTERN.test(message);
+}
+
+async function recoverFromStaleModule(value: unknown) {
+  if (!isStaleModuleFailure(value)) return;
+  const lastAttempt = Number(sessionStorage.getItem(MODULE_RECOVERY_KEY) || 0);
+  if (lastAttempt && Date.now() - lastAttempt < 30_000) return;
+  sessionStorage.setItem(MODULE_RECOVERY_KEY, String(Date.now()));
+  try {
+    workerPost({ type: "TOURNAL_CLEAR_SHELL_CACHE" });
+    if ("caches" in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.filter(key => key.startsWith("tournal-shell-")).map(key => caches.delete(key)));
+    }
+    const registrations = await navigator.serviceWorker?.getRegistrations?.() ?? [];
+    await Promise.all(registrations.map(registration => registration.update().catch(() => undefined)));
+  } finally {
+    window.location.reload();
+  }
+}
+
+(window as Window & { __tournalRecoverFromStaleModule?: (error: unknown) => void }).__tournalRecoverFromStaleModule = (error) => {
+  void recoverFromStaleModule(error);
+};
+window.addEventListener("error", event => { void recoverFromStaleModule(event.error ?? event.message); });
+window.addEventListener("unhandledrejection", event => { void recoverFromStaleModule(event.reason); });
+window.setTimeout(() => sessionStorage.removeItem(MODULE_RECOVERY_KEY), 15_000);
 
 createRoot(document.getElementById("root")!).render(<OfflineCoordinator><App /></OfflineCoordinator>);
 

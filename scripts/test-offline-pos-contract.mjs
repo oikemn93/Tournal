@@ -16,6 +16,11 @@ assert.match(workerSource, /retours\/remboursements, droits\/utilisateurs, trans
 assert.match(mainSource, /OFFLINE_CONFIRM_MS = 20_000/, "offline mode must use a confirmation delay");
 assert.match(mainSource, /OFFLINE_WARNING_MS = 12 \* 60 \* 60 \* 1000/, "prolonged offline use must warn after 12h");
 assert.match(mainSource, /sort\(\(a, b\) => a\.createdAt - b\.createdAt\)/, "replay must be chronological");
+assert.match(workerSource, /TOURNAL_STALE_ASSET/, "missing hashed assets must trigger stale-deployment recovery");
+assert.match(workerSource, /recoverStaleAssetClient/, "service worker must repair stale asset clients");
+assert.match(workerSource, /key\.startsWith\('tournal-shell-'\)/, "cache cleanup must be scoped to Tournal shell caches");
+assert.match(mainSource, /MODULE_FAILURE_PATTERN/, "client must detect stale module import failures");
+assert.match(mainSource, /TOURNAL_CLEAR_SHELL_CACHE/, "client recovery must clear the service-worker shell cache before reload");
 
 class FakeServer {
   constructor() {
