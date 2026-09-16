@@ -22,12 +22,13 @@ values
 (991980000001,'report-phase1-ci','Produit A','report-phase1-cat',10,0,10,true),
 (991980000002,'report-phase1-ci','Produit B','report-phase1-cat',10,0,5,true);
 
-insert into public.invoices(id,boutique_id,client_id,montant,invoice_date,status,type,stock_deducted_at)
+insert into public.invoices(id,boutique_id,client_id,montant,invoice_date,status,type,stock_deducted_at,numero)
 values
-('R1-SALE-1','report-phase1-ci',null,100,now()-interval '2 days','payée','Vente',now()-interval '2 days'),
-('R1-RETURN-1','report-phase1-ci',null,20,now()-interval '1 day','payée','Retour',now()-interval '1 day');
+('R1-SALE-1','report-phase1-ci',null,100,now()-interval '2 days','payée','vente',now()-interval '2 days',1),
+('R1-RETURN-1','report-phase1-ci',null,20,now()-interval '1 day','payée','retour',now()-interval '1 day',2);
 
 insert into public.invoice_lines(id,boutique_id,invoice_id,product_id,nom,qty,sell_qty,prix_unit,prix_achat)
+overriding system value
 values
 (991980000001,'report-phase1-ci','R1-SALE-1',991980000001,'Produit A',2,2,30,10),
 (991980000002,'report-phase1-ci','R1-SALE-1',991980000002,'Produit B',2,2,20,5),
@@ -45,6 +46,7 @@ values
 insert into public.products(id,boutique_id,nom,stock,low_stock_threshold,prix_achat,actif)
 select 991980001000+n,'report-phase1-ci','Extra '||n,0,0,1,true from generate_series(1,55) n;
 insert into public.invoice_lines(id,boutique_id,invoice_id,product_id,nom,qty,sell_qty,prix_unit,prix_achat)
+overriding system value
 select 991980001000+n,'report-phase1-ci','R1-SALE-1',991980001000+n,'Extra '||n,1,1,0,1 from generate_series(1,55) n;
 do $test$
 declare a jsonb; b jsonb; c jsonb; before_hash text;
