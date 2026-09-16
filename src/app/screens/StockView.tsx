@@ -303,6 +303,7 @@ export function StockView({ boutique, onUpdate, logAction, canSeeMargin, initial
       });
       logAction("Réception corrigée", `Entrée #${entryId} · ${original.qty} → ${desiredQty} ${original.unit} · ${fmt(original.montantDu)} → ${fmt(desiredAmount)}`, "✏️");
       setEditingEntryId(null);
+      if (original.supplierId) onReceiptSaved?.(original.supplierId);
     } catch (error) {
       alert(error instanceof Error ? error.message : "Modification de la réception impossible");
     } finally {
