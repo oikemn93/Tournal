@@ -8,8 +8,11 @@ on conflict(id) do update set phone=excluded.phone,nom=excluded.nom,is_super_adm
 insert into public.boutiques(id,nom,ville,tel,directory_visible)
 values('report-phase1-ci','Report Phase1 CI','Dakar',null,true);
 insert into public.boutique_assignments(id,boutique_id,user_id,role,droits)
+overriding system value
 values(991980000001,'report-phase1-ci','fbfbfbfb-1111-4111-8111-fbfbfbfbfbfb','owner','{"dashboard":true,"compta":true,"marges":true}'::jsonb);
-select set_config('request.jwt.claims',json_build_object('sub','fbfbfbfb-1111-4111-8111-fbfbfbfbfbfb','role','authenticated')::text,true);
+insert into private.app_sessions(user_id,boutique_id,expires_at,last_seen_at,session_id)
+values('fbfbfbfb-1111-4111-8111-fbfbfbfbfbfb','report-phase1-ci',now()+interval '1 hour',now(),'fbfbfbfb-2222-4222-8222-fbfbfbfbfbfb');
+select set_config('request.jwt.claims',json_build_object('sub','fbfbfbfb-1111-4111-8111-fbfbfbfbfbfb','session_id','fbfbfbfb-2222-4222-8222-fbfbfbfbfbfb','role','authenticated')::text,true);
 
 insert into public.categories(id,boutique_id,nom,color)
 values('report-phase1-cat','report-phase1-ci','Tissus','#999999');
