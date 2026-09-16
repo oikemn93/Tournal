@@ -59,6 +59,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
   const canCreateB2B = currentUser.isSuperAdmin;
   const [tab, setTab] = useState<ClientType>(initialTab ?? "B2C");
   const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState<"name"|"revenue"|"due"|"last">("name");
   const [modal, setModal] = useState(false);
   const [detailClient, setDetailClient] = useState<Client|null>(null);
   const [orderClient, setOrderClient] = useState<Client|null>(null);
@@ -105,7 +106,10 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
     return () => { cancelled = true; };
   }, [boutique.id, viewedInvoice?.id, viewedInvoice?.status, viewedInvoice?.acompte, canSeeMargin]);
   const siblings = getSiblings(boutique.id, allBoutiques, platformUsers);
-  const filtered = clients.filter(c=>c.type===tab&&(c.nom.toLowerCase().includes(search.toLowerCase())||c.tel.includes(search)||c.ville.toLowerCase().includes(search.toLowerCase())));
+  const clientRevenue = (clientId:number) => boutique.invoices.filter(inv=>inv.clientId===clientId&&inv.status!=="annulée"&&inv.type.toLowerCase()!=="retour").reduce((sum,inv)=>sum+Number(inv.montant||0),0);
+  const clientDue = (clientId:number) => boutique.invoices.filter(inv=>inv.clientId===clientId&&inv.status!=="annulée"&&inv.type.toLowerCase()!=="retour").reduce((sum,inv)=>sum+clientInvoiceRemainingAmount(inv),0);
+  const clientLastTransaction = (clientId:number) => Math.max(0,...boutique.invoices.filter(inv=>inv.clientId===clientId).map(inv=>Date.parse(inv.date)||0));
+  const filtered = clients.filter(c=>c.type===tab&&(c.nom.toLowerCase().includes(search.toLowerCase())||c.tel.includes(search)||c.ville.toLowerCase().includes(search.toLowerCase()))).sort((a,b)=>sortBy==="revenue"?clientRevenue(b.id)-clientRevenue(a.id):sortBy==="due"?clientDue(b.id)-clientDue(a.id):sortBy==="last"?clientLastTransaction(b.id)-clientLastTransaction(a.id):a.nom.localeCompare(b.nom,"fr",{sensitivity:"base"}));
   const counts = { "B2C":clients.filter(c=>c.type==="B2C").length, "B2B":clients.filter(c=>c.type==="B2B").length, "Grossiste":clients.filter(c=>c.type==="Grossiste").length };
 
   // Commands created from a client card come back here, not to the general
@@ -887,6 +891,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
   return (
     <div data-screen-source="relational-clients" className="space-y-4 pb-24">
       <div className="relative"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Chercher un client…" className={searchInputCls+" pl-9"}/></div>
+      <div className="flex justify-end"><label className="text-xs font-bold text-muted-foreground flex items-center gap-2">Trier par <select aria-label="Tri des clients" value={sortBy} onChange={e=>setSortBy(e.target.value as typeof sortBy)} className="rounded-xl border border-border bg-card px-3 py-2 text-xs font-bold text-foreground"><option value="name">Nom</option><option value="revenue">CA cumulé</option><option value="due">Montant dû</option><option value="last">Dernière transaction</option></select></label></div>
       <div className="flex bg-card rounded-2xl p-1 border border-border gap-1">
         {tabDefs.map(t=>(
           <button key={t.id} onClick={()=>setTab(t.id)} className="flex-1 py-2.5 rounded-xl text-xs font-bold relative" style={{ background:tab===t.id?t.color:"transparent", color:tab===t.id?"#fff":"#6b7280" }}>

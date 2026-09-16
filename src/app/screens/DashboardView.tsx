@@ -29,7 +29,7 @@ export function DashboardView({ boutiqueId, canSeeMargin, onNavigate }: {
   canSeeMargin: boolean;
   onNavigate: (tab: Tab, filter?: Record<string, string>) => void;
 }) {
-  const [period, setPeriod] = useState<Period>("7d");
+  const [period, setPeriod] = useState<Period>("day");
   const [summary, setSummary] = useState<FinancialMetrics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -58,7 +58,7 @@ export function DashboardView({ boutiqueId, canSeeMargin, onNavigate }: {
 
   const marginCoverageWarning = canSeeMargin && summary.realized_margin_fifo != null
     && ((summary.margin_coverage_rate ?? 100) < 99.99 || (summary.margin_unmatched_lines ?? 0) > 0)
-      ? `Couverture FIFO ${new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 }).format(summary.margin_coverage_rate ?? 0)} % · ${summary.margin_unmatched_lines ?? 0} ligne(s) sans coût fiable`
+      ? `Couverture FIFO ${new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 }).format(summary.margin_coverage_rate ?? 0)} % · ${summary.margin_unmatched_lines ?? 0} ligne(s) sans traçabilité stock exploitable`
       : null;
 
   const cards = [

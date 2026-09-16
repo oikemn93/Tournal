@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { checkBackend, signQZ, sendInvoiceEmail, storePDFForSMS, getCurrentAuthUser, hasAuthenticatedSession, validateServerSession, refreshSessionIfNeeded, getAuthBootstrap, signInWithPhone, changeOwnPassword, getPinStatus, setQuickPin, verifyQuickPin, startAppSession, validateAppSession, lockAppSession, setAppSessionRecoveryHandler, signOut as signOutFromSupabase, createBoutique, createUser, resetUserPassword, subscribeToBoutiqueChanges, subscribeToBoutiqueSync, isBoutiqueSyncV2Enabled, assignUserToBoutique, unassignUserFromBoutique, upsertAssignmentDirect, deleteAssignmentDirect, recordAuditLog, loadBoutiqueSnapshot, FULL_BOOTSTRAP_HISTORY_DAYS, BOUNDED_BOOTSTRAP_HISTORY_DAYS, loadBoutiqueSyncPatch, loadBoutiquePlatformUsers, loadPlatformUsers, loadGroupes, saveGroupes, loadAuthSettings as loadStoredAuthSettings, saveAuthSettings, updateBoutiqueProfile, createCategory, updateCategory, deleteCategory, updateProductCategory, type BoutiqueSyncEvent, type BoutiqueSyncPatch, type LegacyBoutiqueChange } from "../lib/api";
+import { checkBackend, signQZ, sendInvoiceEmail, storePDFForSMS, getCurrentAuthUser, hasAuthenticatedSession, validateServerSession, refreshSessionIfNeeded, getAuthBootstrap, signInWithPhone, changeOwnPassword, getPinStatus, setQuickPin, verifyQuickPin, startAppSession, validateAppSession, lockAppSession, setAppSessionRecoveryHandler, signOut as signOutFromSupabase, createBoutique, createUser, resetUserPassword, subscribeToBoutiqueChanges, subscribeToBoutiqueSync, isBoutiqueSyncV2Enabled, assignUserToBoutique, unassignUserFromBoutique, upsertAssignmentDirect, deleteAssignmentDirect, recordAuditLog, loadBoutiqueSnapshot, FULL_BOOTSTRAP_HISTORY_DAYS, BOUNDED_BOOTSTRAP_HISTORY_DAYS, loadBoutiqueSyncPatch, loadBoutiquePlatformUsers, loadPlatformUsers, loadGroupes, saveGroupes, loadAuthSettings as loadStoredAuthSettings, saveAuthSettings, updateBoutiqueProfile, createCategory, updateCategory, deleteCategory, updateProductCategory, type BoutiqueSyncEvent, type BoutiqueSyncPatch, type LegacyBoutiqueChange, recordTechLog, loadTechLogs } from "../lib/api";
 import { getNotifications, markNotificationRead, markAllNotificationsRead, dismissAllNotifications, subscribeToNotifications, getPushState, enableWebPush, disableWebPush, syncWebPushBoutique, type PushState } from "../lib/notifications";
 import { toast, Toaster } from "sonner";
 import {
@@ -217,16 +217,13 @@ function readLastActivityAt() {
 function clearSession() { try { sessionStorage.removeItem(SESSION_KEY); sessionStorage.removeItem(APP_LOCK_KEY); sessionStorage.removeItem(APP_LAST_ACTIVITY_KEY); } catch {} }
 
 // ─── TECHNICAL LOGGING ───────────────────────────────────────────────────────
-type TechLogCat   = "sync"|"email"|"pdf"|"qz"|"session"|"backend";
+type TechLogCat   = "sync"|"email"|"pdf"|"qz"|"session"|"backend"|"rpc"|"loading"|"printing"|"network"|"other";
 type TechLogLevel = "error"|"warn"|"info";
 type TechLog = { id:string; ts:number; level:TechLogLevel; cat:TechLogCat; msg:string; detail?:string; };
 async function logTech(boutiqueId: string, entry: Omit<TechLog,"id"|"ts">) {
-  // Browser diagnostics must not become a hidden second persistence system.
-  // Durable user-visible activity is written to public.audit_log instead.
-  console[entry.level === "error" ? "error" : entry.level === "warn" ? "warn" : "info"](
-    `[${boutiqueId}] ${entry.cat}: ${entry.msg}`,
-    entry.detail,
-  );
+  console[entry.level === "error" ? "error" : entry.level === "warn" ? "warn" : "info"](`[${boutiqueId}] ${entry.cat}: ${entry.msg}`, entry.detail);
+  const category = entry.cat === "sync" ? "sync" : entry.cat === "session" ? "session" : entry.cat === "pdf" || entry.cat === "qz" ? "printing" : entry.cat === "backend" ? "rpc" : "other";
+  try { await recordTechLog({ boutiqueId, level:entry.level, category, message:entry.msg, detail:entry.detail }); } catch (error) { console.warn("Journal technique distant indisponible", error); }
 }
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
@@ -6735,10 +6732,9 @@ function SupervisionSection({ boutique, allBoutiques, backendOk, lastSyncAt }: {
   const [netLoading, setNetLoading]   = useState(false);
 
   useEffect(() => {
-    // Legacy diagnostic events were intentionally removed. Operational logs
-    // live server-side; this panel only reflects the current client health.
-    setLogs([]);
-    setLoading(false);
+    let cancelled=false; setLoading(true);
+    void loadTechLogs(boutique.id,200).then(rows=>{if(cancelled)return;setLogs(rows.map(row=>({id:String(row.id),ts:Date.parse(row.created_at),level:row.level,cat:(row.category as TechLogCat),msg:row.message,detail:row.detail??undefined})));}).catch(error=>{console.warn("Supervision technique indisponible",error);if(!cancelled)setLogs([]);}).finally(()=>{if(!cancelled)setLoading(false);});
+    return()=>{cancelled=true;};
   }, [boutique.id]);
 
   useEffect(() => {
@@ -6887,7 +6883,7 @@ function SupervisionSection({ boutique, allBoutiques, backendOk, lastSyncAt }: {
                     {idx < filtered.length-1 && <div className="w-0.5 flex-1 mt-1 mb-1" style={{ background:"rgba(0,0,0,0.08)" }}/>}
                   </div>
                   <div className="flex-1 pb-3">
-                    <div className="bg-card rounded-2xl px-3 py-3 border border-border">
+                    <div className="bg-card rounded-2xl px-3 py-3 border" style={{borderColor:auditType(e.action)==="sensitive"?"#ef4444":"var(--border)"}}>
                       <div className="flex items-start justify-between gap-2 mb-1.5">
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap mb-0.5">
@@ -6950,6 +6946,8 @@ function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdat
   const [editingRole, setEditingRole] = useState<string|null>(null);
   const [addModal, setAddModal]   = useState(false);
   const [auditFilter, setAuditFilter] = useState("all");
+  const [auditTypeFilter,setAuditTypeFilter]=useState("all");
+  const [auditPeriodDays,setAuditPeriodDays]=useState("30");
   const [pwdModal, setPwdModal]   = useState<{userId:string;nom:string}|null>(null);
   const [pwdVal, setPwdVal]       = useState("");
   const [pwdBusy, setPwdBusy]     = useState(false);
@@ -7068,7 +7066,8 @@ function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdat
   }
 
   const auditLog=[...boutique.auditLog].sort((a,b)=>b.timestamp-a.timestamp);
-  const filteredAudit=auditFilter==="all"?auditLog:auditLog.filter(e=>e.userId===auditFilter);
+  const auditType=(action:string)=>/annul|supprim|droit|permission|rôle|mot de passe|code/i.test(action)?"sensitive":/stock|réception|inventaire|transfert/i.test(action)?"stock":/encaisse|versement|paiement|règlement/i.test(action)?"payment":/vente|commande|facture|retour/i.test(action)?"sales":"other";
+  const filteredAudit=auditLog.filter(e=>(auditFilter==="all"||e.userId===auditFilter)&&(auditTypeFilter==="all"||auditType(e.action)===auditTypeFilter)&&(auditPeriodDays==="all"||e.timestamp>=Date.now()-Number(auditPeriodDays)*86400000));
   const userStats=boutiqueUsers.map(u=>({ user:u, count:auditLog.filter(e=>e.userId===u.id).length, last:auditLog.find(e=>e.userId===u.id) })).sort((a,b)=>b.count-a.count);
   const found = uPhone.length>5 ? platformUsers.find(u=>cleanPhone(u.phone)===cleanPhone(uPhone)) : null;
 
@@ -7228,13 +7227,13 @@ function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdat
             <Field label="NOUVEAU MOT DE PASSE">
               <input value={pwdVal} onChange={e=>setPwdVal(e.target.value)} type="password"
                 placeholder="12 caractères minimum" className={inputCls} autoFocus
-                onKeyDown={async e=>{ if(e.key==="Enter"&&pwdVal.length>=12){ setPwdBusy(true); try{ await resetUserPassword(pwdModal.userId,pwdVal); toast.success("Mot de passe mis à jour"); setPwdModal(null); }catch(err){ toast.error(err instanceof Error?err.message:"Erreur"); } finally{ setPwdBusy(false); } } }}/>
+                onKeyDown={async e=>{ if(e.key==="Enter"&&pwdVal.length>=12){ setPwdBusy(true); try{ await resetUserPassword(pwdModal.userId,pwdVal); logAction("Réinitialisation mot de passe",pwdModal.nom,"🔐"); toast.success("Mot de passe mis à jour"); setPwdModal(null); }catch(err){ toast.error(err instanceof Error?err.message:"Erreur"); } finally{ setPwdBusy(false); } } }}/>
               {pwdVal.length>0&&pwdVal.length<12&&<p className="text-xs mt-1" style={{color:"#ef4444"}}>12 caractères minimum ({12-pwdVal.length} restants)</p>}
             </Field>
             <SubmitBtn color="#374151" label={pwdBusy?"Enregistrement…":"Mettre à jour"} onClick={async()=>{
               if(pwdVal.length<12) return;
               setPwdBusy(true);
-              try{ await resetUserPassword(pwdModal.userId,pwdVal); toast.success("Mot de passe mis à jour"); setPwdModal(null); }
+              try{ await resetUserPassword(pwdModal.userId,pwdVal); logAction("Réinitialisation mot de passe",pwdModal.nom,"🔐"); toast.success("Mot de passe mis à jour"); setPwdModal(null); }
               catch(err){ toast.error(err instanceof Error?err.message:"Erreur"); }
               finally{ setPwdBusy(false); }
             }} disabled={pwdBusy||pwdVal.length<12}/>
@@ -7473,6 +7472,7 @@ function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdat
               </div>
             ))}
           </div>}
+          <div className="grid grid-cols-2 gap-2"><select aria-label="Type d’action" value={auditTypeFilter} onChange={e=>setAuditTypeFilter(e.target.value)} className={inputCls}><option value="all">Toutes les actions</option><option value="sales">Ventes et retours</option><option value="payment">Encaissements</option><option value="stock">Stock et transferts</option><option value="sensitive">Actions sensibles</option><option value="other">Autres</option></select><select aria-label="Période du journal" value={auditPeriodDays} onChange={e=>setAuditPeriodDays(e.target.value)} className={inputCls}><option value="7">7 jours</option><option value="30">30 jours</option><option value="90">90 jours</option><option value="all">Toute la période</option></select></div>
           <div className="flex gap-2" style={{ overflowX:"auto", scrollbarWidth:"none" }}>
             <button onClick={()=>setAuditFilter("all")} className="px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap flex-shrink-0" style={{ background:auditFilter==="all"?"#a855f7":"#a855f722",color:auditFilter==="all"?"#fff":"#a855f7" }}>Tous</button>
             {boutiqueUsers.map(u=><button key={u.id} onClick={()=>setAuditFilter(u.id)} className="px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap flex-shrink-0" style={{ background:auditFilter===u.id?u.color:u.color+"22",color:auditFilter===u.id?"#fff":u.color }}>{u.nom.split(" ")[0]}</button>)}
@@ -7488,7 +7488,7 @@ function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdat
                   <div className="flex items-start justify-between gap-2">
                     <div>
                       <div className="flex items-center gap-2 flex-wrap">
-                        <p className="text-sm font-bold">{e.action}</p>
+                        <p className="text-sm font-bold">{e.userNom} · {e.action}</p>
                         {currentUser?.isSuperAdmin && e.source && (
                           <span className="text-[10px] px-1.5 py-0.5 rounded-md font-black uppercase tracking-wide" style={{ background:"#16a34a15", color:"#16a34a" }}>
                             Natif
@@ -7497,7 +7497,7 @@ function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdat
                       </div>
                       <p className="text-xs text-muted-foreground mt-0.5">{e.detail}</p>
                     </div>
-                    <p className="text-xs text-muted-foreground text-right whitespace-nowrap flex-shrink-0">{e.date}</p>
+                    <p className="text-xs text-muted-foreground text-right whitespace-nowrap flex-shrink-0">{fmtDateTime(e.timestamp)}</p>
                   </div>
                   <div className="flex items-center gap-1.5 mt-2">
                     <div className="w-4 h-4 rounded-full flex items-center justify-center" style={{ background:e.userColor+"22",color:e.userColor,fontSize:"9px",fontWeight:900 }}>{e.userNom[0]}</div>
@@ -10001,7 +10001,7 @@ export default function App() {
       {isReadOnly && <div className="flex items-center gap-2 px-4 py-2 text-xs font-bold text-amber-800 bg-amber-50 border-b border-amber-200"><Lock size={12}/> Mode lecture seule — aucune modification possible</div>}
       <main className="flex-1 overflow-y-auto px-4 py-4 pb-20" style={{ scrollbarWidth:"none" }}>
         {safeTab==="dashboard"    && canAccess("dashboard") && <RelationalDashboardView boutiqueId={boutique.id} canSeeMargin={canSeeMargin} onNavigate={(t:Tab,f?:Record<string,string>)=>{setNavFilter(f??{});setTab(t);}}/>}
-        {safeTab==="stock"        && canAccess("stock")        && <RelationalStockView boutique={boutique} canSeeMargin={canSeeMargin} onUpdate={updateBoutique} logAction={logAction} initialFilter={navFilter.stockFilter} initialSupplierId={navFilter.supplierId?Number(navFilter.supplierId):undefined} initialEntryId={navFilter.stockEntryId?Number(navFilter.stockEntryId):undefined} onInitialRoutePrepared={()=>setNavFilter({})} onReceiptSaved={(supplierId:number)=>{setNavFilter({supplierDetailId:String(supplierId)});setTab("fournisseurs");}}/>}
+        {safeTab==="stock"        && canAccess("stock")        && <RelationalStockView boutique={boutique} canSeeMargin={canSeeMargin} canManageReferenceCosts={isOwner || !!currentUser?.isSuperAdmin} onUpdate={updateBoutique} logAction={logAction} initialFilter={navFilter.stockFilter} initialSupplierId={navFilter.supplierId?Number(navFilter.supplierId):undefined} initialEntryId={navFilter.stockEntryId?Number(navFilter.stockEntryId):undefined} onInitialRoutePrepared={()=>setNavFilter({})} onReceiptSaved={(supplierId:number)=>{setNavFilter({supplierDetailId:String(supplierId)});setTab("fournisseurs");}}/>}
         {safeTab==="fournisseurs" && canAccess("fournisseurs") && <RelationalFournisseursView boutique={boutique} onUpdate={updateBoutique} logAction={logAction} canPaySupplier={(isOwner || !!currentUser?.isSuperAdmin || !!droits?.decaissement) && canAccess("charges")} canManageReceipts={canAccess("stock")} onStartReceipt={(supplierId:number)=>{setNavFilter({supplierId:String(supplierId)});setTab("stock");}} onCorrectReceipt={(entry:StockEntry,supplierId:number)=>{setNavFilter({supplierId:String(supplierId),stockEntryId:String(entry.id)});setTab("stock");}} initialSupplierId={navFilter.supplierDetailId?Number(navFilter.supplierDetailId):undefined} onInitialSupplierOpened={()=>setNavFilter({})} defaultPaymentTermsDays={supplierPaymentTermsDays}/>}
         {safeTab==="clients"      && canAccess("clients")      && <RelationalClientsView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} currentUser={currentUser!} onUpdate={updateBoutique} logAction={logAction} initialTab={navFilter.clientTab as ClientType|undefined} initialClientId={navFilter.clientId?Number(navFilter.clientId):undefined} initialInvoiceId={navFilter.invoiceId} initialInvoiceNotice={navFilter.invoiceNotice === "payment" ? "payment" : "order"} onInitialClientOpened={()=>setNavFilter({})} canCreateOrder={isOwner || !!currentUser?.isSuperAdmin || !!(droits?.vente)} canCollectPayment={isOwner || !!currentUser?.isSuperAdmin || !!(droits?.encaissement_vente)} canDisburse={isOwner || !!currentUser?.isSuperAdmin || !!droits?.decaissement} canCancelPendingOrder={isOwner || !!currentUser?.isSuperAdmin || !!(droits?.annulation_commande)} canOpenInvoice={canAccess("factures")} defaultPaymentTermsDays={clientPaymentTermsDays} onOpenInvoice={(invoiceId:string)=>{setNavFilter({invoiceId});setTab("factures");}} onCreateOrder={(client:Client)=>{if (!(isOwner || currentUser?.isSuperAdmin || droits?.vente)) return;setNavFilter({clientId:String(client.id),orderOrigin:"client_profile"});setTab("pos");}}/>}
         {safeTab==="factures"     && canAccess("factures")     && <RelationalFacturesView boutique={boutique} allBoutiques={boutiques} platformUsers={platformUsers} currentUser={currentUser} canReturn={canAccess("remboursement")} canCollectPayment={isOwner || !!(droits?.encaissement_vente)} canSeeMargin={canSeeMargin} caisseDefaults={caisseDefaults} onUpdate={updateBoutique} onUpdateOtherBoutique={updateOtherBoutique} logAction={logAction} initialStatus={navFilter.statusFilter as InvoiceStatus|"all"|undefined} initialInvoiceId={navFilter.invoiceId} initialClientId={navFilter.clientId?Number(navFilter.clientId):undefined} onPaymentRecorded={canAccess("clients") ? (clientId:number,invoiceId:string)=>{setNavFilter({clientId:String(clientId),invoiceId,invoiceNotice:"payment"});setTab("clients");} : undefined}/>}

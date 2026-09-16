@@ -232,6 +232,18 @@ async function dataRpc<T>(name: string, params: Record<string, unknown>): Promis
   });
 }
 
+export type TechnicalLog = { id:number; user_id?:string|null; level:"error"|"warn"|"info"; category:string; message:string; detail?:string|null; context?:Record<string,unknown>; created_at:string };
+export async function recordTechLog(params:{boutiqueId:string;level:"error"|"warn"|"info";category:"rpc"|"loading"|"sync"|"printing"|"network"|"session"|"other";message:string;detail?:string;context?:Record<string,unknown>}) {
+  return dataRpc<number>("record_tech_log",{p_boutique_id:params.boutiqueId,p_level:params.level,p_category:params.category,p_message:params.message,p_detail:params.detail??null,p_context:params.context??{}});
+}
+export async function loadTechLogs(boutiqueId:string, limit=200) {
+  return dataRpc<TechnicalLog[]>("get_tech_logs",{p_boutique_id:boutiqueId,p_limit:limit});
+}
+
+export type MissingStockCost = { entry_id:number; product_id:number; product_name:string; qty:number; entry_date:string; supplier_name?:string|null; reference?:string|null };
+export async function loadMissingStockCosts(boutiqueId:string) { return dataRpc<MissingStockCost[]>("get_missing_stock_costs",{p_boutique_id:boutiqueId}); }
+export async function setStockEntryReferenceCost(boutiqueId:string,entryId:number,unitCost:number) { return dataRpc<void>("set_stock_entry_reference_cost",{p_boutique_id:boutiqueId,p_entry_id:entryId,p_unit_cost:unitCost}); }
+
 export async function loadInvoiceLines(boutiqueId: string, invoiceId: string) {
   if (!boutiqueId || !invoiceId) return [];
   const rows = await dataRpc<any[]>("read_invoice_lines", { p_boutique_id:boutiqueId, p_invoice_ids:[invoiceId] });
