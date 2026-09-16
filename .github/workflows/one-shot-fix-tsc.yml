@@ -14,16 +14,18 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-          p=Path('src/app/screens/ClientsView.tsx');s=p.read_text().replace('Date.parse(inv.dateRaw??inv.date)','Date.parse(inv.date)')
-          needle='<div className="relative"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Chercher un client…" className={searchInputCls+" pl-9"}/></div>'
-          if 'aria-label="Tri des clients"' not in s and needle in s:s=s.replace(needle,needle+'\n      <div className="flex justify-end"><label className="text-xs font-bold text-muted-foreground flex items-center gap-2">Trier par <select aria-label="Tri des clients" value={sortBy} onChange={e=>setSortBy(e.target.value as typeof sortBy)} className="rounded-xl border border-border bg-card px-3 py-2 text-xs font-bold text-foreground"><option value="name">Nom</option><option value="revenue">CA cumulé</option><option value="due">Montant dû</option><option value="last">Dernière transaction</option></select></label></div>')
+          p=Path('src/app/screens/ClientsView.tsx')
+          s=p.read_text().replace('Date.parse(inv.dateRaw??inv.date)','Date.parse(inv.date)')
           p.write_text(s)
-          p=Path('src/app/screens/StockView.tsx');s=p.read_text();root='<div data-screen-source="relational-stock" className="space-y-4 pb-24">'
-          card='''<div data-screen-source="relational-stock" className="space-y-4 pb-24">\n      {canManageReferenceCosts&&missingCosts.length>0&&<div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 space-y-3"><div><p className="text-sm font-black text-amber-900">Prix d’achat à compléter · {missingCosts.length}</p><p className="text-xs text-amber-800 mt-1">Saisissez uniquement le coût réel de la réception. Tournal ne calcule ni moyenne ni estimation.</p></div>{missingCosts.slice(0,12).map(row=><div key={row.entry_id} className="grid grid-cols-[1fr_110px_auto] gap-2 items-center"><div className="min-w-0"><p className="text-xs font-black truncate">{row.product_name}</p><p className="text-[10px] text-muted-foreground">{new Date(row.entry_date).toLocaleDateString("fr-FR")} · {row.qty} · #{row.entry_id}</p></div><input aria-label={`Prix d'achat ${row.product_name}`} inputMode="decimal" value={costDrafts[row.entry_id]??""} onChange={e=>setCostDrafts(current=>({...current,[row.entry_id]:e.target.value}))} placeholder="F / unité" className="rounded-lg border border-amber-300 bg-white px-2 py-2 text-xs"/><button type="button" disabled={costSaving===row.entry_id} onClick={()=>void saveMissingCost(row)} className="rounded-lg bg-amber-700 px-3 py-2 text-xs font-black text-white disabled:opacity-50">Valider</button></div>)}</div>}'''
-          if 'Prix d’achat à compléter' not in s:s=s.replace(root,card,1)
+          p=Path('src/app/screens/StockView.tsx')
+          s=p.read_text()
+          root='<div data-screen-source="relational-stock" className="space-y-4 pb-24">'
+          card="""<div data-screen-source=\"relational-stock\" className=\"space-y-4 pb-24\">\n      {canManageReferenceCosts && missingCosts.length > 0 && <div className=\"rounded-2xl border border-amber-300 bg-amber-50 p-4 space-y-3\"><p className=\"text-sm font-black text-amber-900\">Prix d’achat à compléter · {missingCosts.length}</p><p className=\"text-xs text-amber-800\">Saisissez uniquement le coût réel de chaque réception. Aucune estimation automatique.</p>{missingCosts.map(row=><div key={row.entry_id} className=\"flex gap-2 items-center\"><span className=\"flex-1 text-xs font-bold\">{row.product_name} · {row.qty}</span><input inputMode=\"decimal\" value={costDrafts[row.entry_id]??\"\"} onChange={e=>setCostDrafts(v=>({...v,[row.entry_id]:e.target.value}))} className=\"w-24 rounded-lg border px-2 py-1 text-xs\" placeholder=\"F/unité\"/><button type=\"button\" disabled={costSaving===row.entry_id} onClick={()=>void saveMissingCost(row)} className=\"rounded-lg bg-amber-700 px-2 py-1 text-xs font-black text-white\">Valider</button></div>)}</div>}"""
+          if 'Prix d’achat à compléter' not in s:
+              s=s.replace(root,card,1)
           p.write_text(s)
           PY
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add src
-          git diff --cached --quiet || (git commit -m 'fix: complete client sorting and cost remediation UI' && git push origin HEAD:feat/ux-fifo-audit-supervision)
+          git diff --cached --quiet || (git commit -m 'fix: complete sorting and missing-cost UI' && git push origin HEAD:feat/ux-fifo-audit-supervision)
