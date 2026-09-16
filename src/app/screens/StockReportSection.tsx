@@ -23,7 +23,7 @@ export function StockReportSection({ report, days, onDays, canSeeMargin, onPage 
     });
     return next;
   }, [report, sort, dir]);
-  if(report?.page && onPage)return <div className="space-y-4"><label className="flex items-center gap-2 text-xs">Seuil de dormance actuel (jours)<input aria-label="Seuil produits dormants" type="number" min={1} max={3650} value={draftDays} onChange={event=>setDraftDays(Math.max(1,Math.min(3650,Number(event.target.value)||60)))} className="w-20 rounded border p-2"/></label><ReportPage page={report.page} onPage={onPage}/></div>;
+  if(report?.page && onPage)return <div className="space-y-4"><label className="flex items-center gap-2 text-xs">Seuil de dormance actuel (jours)<input aria-label="Seuil produits dormants" type="number" inputMode="numeric" min={1} max={3650} value={draftDays} onChange={event=>setDraftDays(Math.max(1,Math.min(3650,Number(event.target.value)||60)))} className="w-20 rounded border p-2"/></label><ReportPage page={report.page} onPage={onPage}/></div>;
   if (!report) return <div className="py-8 text-center text-xs font-semibold text-muted-foreground">Chargement du détail…</div>;
   const dormant = report.products.filter(row => row.dormant && row.current_stock > 0);
   const lowRotation = report.products.filter(row => row.rotation_class === "lente");
