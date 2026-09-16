@@ -1,3 +1,5 @@
+import vm from "node:vm";
+import ts from "typescript";
 import fs from "node:fs";
 
 const api = fs.readFileSync("src/lib/dashboardApi.ts", "utf8");
@@ -24,7 +26,19 @@ assert(!report.includes("getFifoRealizedMargin"), "Rapport must not call a separ
 assert(migrationCompact.includes("'cash_expenses',v_cash_expenses") && migrationCompact.includes("'operating_cash_expenses',v_operating_cash_expenses"), "Canonical server metrics must retain charge fields");
 
 assert(dashboard.includes('const days = period === "30d" ? 30 : 7'), "Dashboard rolling windows must use true 7/30-day bounds");
-assert(!dashboard.includes("from.setHours(0, 0, 0, 0)"), "Dashboard 7-day period must not truncate to calendar-day midnight");
+const boundsSource = dashboard.slice(dashboard.indexOf("function periodBounds"), dashboard.indexOf("export function DashboardView"));
+const boundsCode = ts.transpileModule(boundsSource, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+for (const instant of ["2026-09-16T14:30:00Z", "2026-10-01T00:00:00Z"]) {
+  class FixedDate extends Date { constructor(...args) { super(...(args.length ? args : [instant])); } }
+  const getBounds = vm.runInNewContext(boundsCode + ";periodBounds", { Date: FixedDate });
+  for (const [period, days] of [["7d", 7], ["30d", 30]]) {
+    const expected = new Date(instant); expected.setDate(expected.getDate() - days);
+    assert(getBounds(period).from === expected.toISOString(), "Rolling windows must preserve time of day");
+  }
+  const midnight = new Date(instant); midnight.setHours(0, 0, 0, 0);
+  assert(getBounds("day").from === midnight.toISOString(), "Today must start at local midnight");
+  assert(new Date(getBounds("day").to).getTime() === new Date(instant).getTime() + 1000, "Today must end at the current instant");
+}
 assert(/period\s*===\s*"semaine"/.test(report) && /from\.setDate\(from\.getDate\(\)\s*-\s*7\)/.test(report), "Rapport Semaine must remain a rolling 7-day bound matching Dashboard");
 
 assert(migrationCompact.includes("c.sourcenotin('supplier_receipt','transfer')"), "Canonical direct-charge logic must exclude supplier receipts and transfer shells");
