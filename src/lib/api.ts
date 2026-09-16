@@ -1,4 +1,5 @@
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+import { armOfflinePin, clearOfflinePin, isOfflineAvailabilityError, verifyOfflinePin } from "./offlinePin";
 
 /**
  * Small browser-only client for the Tournal Supabase project.
@@ -338,6 +339,7 @@ export async function signOut() {
       await authRequest("/logout", { method: "POST", headers: { Authorization: `Bearer ${session.access_token}` } });
     }
   } finally {
+    clearOfflinePin();
     storeSession(null);
   }
 }
@@ -361,6 +363,11 @@ export async function validateServerSession(): Promise<boolean> {
       }),
     );
     if (!response.ok) {
+      // A network outage is surfaced by the service worker as a controlled 503.
+      // Server 5xx responses are availability failures, not proof that the
+      // locally-held authenticated session is invalid. Keep the active session
+      // so Phase 1 can continue queuing safe offline POS operations.
+      if (response.status >= 500) return Boolean(readSession()?.access_token);
       // Do not discard a brand-new local session merely because a second
       // Supabase service is momentarily behind the Auth server's clock.
       if (isJwtIssuedAtFutureError(body)) return true;
@@ -451,16 +458,37 @@ export async function getPinStatus() {
 
 export async function setQuickPin(pin: string) {
   if (!/^\d{6}$/.test(pin)) throw new Error("Le PIN doit contenir exactement 6 chiffres");
-  return dataRequest<void>(
+  await dataRequest<void>(
     "rpc/set_quick_pin", { method:"POST", body:JSON.stringify({ p_pin:pin }) },
   );
+  const userId = getCurrentAuthUser()?.id;
+  if (userId) await armOfflinePin(pin, userId);
 }
 
 export async function verifyQuickPin(pin: string, boutiqueId: string) {
   if (!/^\d{6}$/.test(pin)) return { ok:false, configured:true, attemptsRemaining:0, lockedUntil:null, sessionExpired:false } as const;
-  return dataRequest<{ ok:boolean; configured:boolean; attemptsRemaining?:number; lockedUntil?:string|null; sessionExpired?:boolean }>(
-    "rpc/verify_quick_pin", { method:"POST", body:JSON.stringify({ p_pin:pin, p_boutique_id:boutiqueId }) },
-  );
+  const userId = getCurrentAuthUser()?.id;
+  try {
+    const result = await dataRequest<{ ok:boolean; configured:boolean; attemptsRemaining?:number; lockedUntil?:string|null; sessionExpired?:boolean }>(
+      "rpc/verify_quick_pin", { method:"POST", body:JSON.stringify({ p_pin:pin, p_boutique_id:boutiqueId }) },
+    );
+    if (result.ok && userId) await armOfflinePin(pin, userId);
+    return result;
+  } catch (error) {
+    if (!userId || !isOfflineAvailabilityError(error)) throw error;
+    const local = await verifyOfflinePin(pin, userId);
+    if (!local.configured || local.expired) {
+      throw new Error("Déverrouillage hors ligne indisponible ou expiré. Reconnectez-vous une fois à Internet et validez votre PIN pour réactiver l’accès hors ligne sur cet appareil.");
+    }
+    return {
+      ok:local.ok,
+      configured:true,
+      attemptsRemaining:local.attemptsRemaining,
+      lockedUntil:local.lockedUntil ?? null,
+      sessionExpired:false,
+      offline:true,
+    };
+  }
 }
 
 export async function lockAppSession(boutiqueId: string) {

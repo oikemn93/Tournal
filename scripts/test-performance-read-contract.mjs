@@ -66,7 +66,8 @@ for (const screen of lazyScreens) {
   if (!app.includes(`import("./screens/${screen}")`)) throw new Error(`screen is not lazy-loaded: ${screen}`);
   if (app.includes(`from "./screens/${screen}"`)) throw new Error(`static screen import regressed: ${screen}`);
 }
-if (!app.includes('React.lazy(loader)') || !app.includes('<React.Suspense')) {
+const hasLazyBoundary = app.includes('React.lazy(loader)') || app.includes('React.lazy(() => loader().catch');
+if (!hasLazyBoundary || !app.includes('<React.Suspense')) {
   throw new Error('lazy screen boundary is missing');
 }
 

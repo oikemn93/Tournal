@@ -16,7 +16,11 @@ import {
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, Cell, PieChart, Pie } from "recharts";
 const lazyScreen = (loader: () => Promise<{ default: React.ComponentType<any> }>) => {
-  const Component = React.lazy(loader);
+  const Component = React.lazy(() => loader().catch((error) => {
+    const recover = (window as Window & { __tournalRecoverFromStaleModule?: (error: unknown) => void }).__tournalRecoverFromStaleModule;
+    recover?.(error);
+    throw error;
+  }));
   return function TransactionLazyScreen(props: any) {
     return <React.Suspense fallback={<div className="min-h-[45vh] flex items-center justify-center text-sm font-bold text-muted-foreground">Chargement…</div>}><Component {...props}/></React.Suspense>;
   };
@@ -51,7 +55,7 @@ class BoutiqueAppErrorBoundary extends React.Component<{onReset:()=>void;childre
   componentDidCatch(error:Error,info:React.ErrorInfo){console.error('Boutique app render crash',error,info);}
   render(){
     if(this.state.error){
-      return <div className="min-h-screen flex items-center justify-center px-5 bg-background text-foreground"><div className="w-full max-w-md rounded-3xl border bg-card p-6 shadow-sm"><div className="w-12 h-12 rounded-2xl bg-red-50 text-red-600 flex items-center justify-center mb-4"><AlertTriangle size={22}/></div><h1 className="text-xl font-black">Ouverture de la boutique impossible</h1><p className="text-sm text-muted-foreground mt-2">Une erreur de rendu a été interceptée au lieu d’afficher un écran blanc.</p><pre className="mt-4 whitespace-pre-wrap break-words rounded-2xl bg-red-50 p-3 text-xs text-red-800">{this.state.error.message||String(this.state.error)}</pre><button type="button" onClick={()=>{this.setState({error:null});this.props.onReset();}} className="mt-4 w-full rounded-2xl bg-slate-950 py-3 text-sm font-black text-white">Retour à Tournal Ops</button></div></div>;
+      return <div className="min-h-screen flex items-center justify-center px-5 bg-background text-foreground"><div className="w-full max-w-md rounded-3xl border bg-card p-6 shadow-sm"><div className="w-12 h-12 rounded-2xl bg-red-50 text-red-600 flex items-center justify-center mb-4"><AlertTriangle size={22}/></div><h1 className="text-xl font-black">Ouverture de la boutique impossible</h1><p className="text-sm text-muted-foreground mt-2">Une erreur de rendu a été interceptée au lieu d’afficher un écran blanc.</p><pre className="mt-4 whitespace-pre-wrap break-words rounded-2xl bg-red-50 p-3 text-xs text-red-800">{this.state.error.message||String(this.state.error)}</pre><button type="button" onClick={()=>{this.setState({error:null});this.props.onReset();}} className="mt-4 w-full rounded-2xl bg-slate-950 py-3 text-sm font-black text-white">Réessayer</button></div></div>;
     }
     return this.props.children;
   }
@@ -111,6 +115,10 @@ type PlatformUser = {
   groupeId?: string; isCompteMere?: boolean; mustChangePassword?: boolean;
   isSuspended?: boolean; suspensionReason?: string; suspendedAt?: string;
 };
+
+function userCanAccessOps(user: PlatformUser | null | undefined) {
+  return !!user && (user.isSuperAdmin || Boolean((user as PlatformUser & { opsRole?: string }).opsRole));
+}
 type Product    = { id: number; nom: string; img: string; unit: string; fournisseur: string; categorie?: string; couleur?: string; alertOk?: number; alertLow?: number };
 type StockEntry = { id: number; productId: number; qty: number; unit: string; montantDu: number; date: string; fournisseur: string; movementType?: "achat"|"ajustement"|"retour"|"inventaire"|string; invoiceId?: string; nbLots?: number; nbPieces?: number; longueurPiece?: number; sku?: string; isTransfertInterne?: boolean };
 type Supplier   = { id: number; nom: string; ville: string; lastDelivery: string; tel: string; initials: string; color: string; email?: string; contact?: string };
@@ -1302,10 +1310,11 @@ function SuperAdminScreen(props: React.ComponentProps<typeof LegacySuperAdminScr
   const authUserId = getCurrentAuthUser()?.id;
   const currentProfile = props.platformUsers.find(user=>user.id===authUserId);
   const opsRole = (currentProfile as PlatformUser & { opsRole?:string } | undefined)?.opsRole;
-  // Reaching this screen requires either SuperAdmin or an active Ops profile.
-  // Ops users always carry opsRole from the authenticated bootstrap, so a
-  // missing opsRole is the safe SuperAdmin fallback during Ops-shell hydration.
-  const canSystemAdmin = !!currentProfile?.isSuperAdmin || (!!authUserId && !opsRole);
+  const canAccessOps = !!currentProfile?.isSuperAdmin || !!opsRole;
+  if (!canAccessOps) {
+    return <div className="min-h-screen flex items-center justify-center px-5 bg-background text-foreground"><div className="w-full max-w-md rounded-3xl border bg-card p-6 shadow-sm"><ShieldCheck className="mb-4 text-red-600"/><h1 className="text-xl font-black">Accès Tournal Ops refusé</h1><p className="mt-2 text-sm text-muted-foreground">Ce compte n’est ni SuperAdmin ni membre Ops actif. Les données Ops restent protégées côté serveur.</p></div></div>;
+  }
+  const canSystemAdmin = !!currentProfile?.isSuperAdmin;
   if (showSystemAdmin && canSystemAdmin) {
     return <div className="relative">
       <button type="button" onClick={()=>setShowSystemAdmin(false)} className="fixed right-3 top-3 z-[100] rounded-xl bg-slate-950 px-3 py-2 text-xs font-black text-white shadow-lg">← Tournal Ops</button>
@@ -9830,7 +9839,10 @@ export default function App() {
   if (screen==="login") return <LoginScreen onAuthenticated={refreshAuthenticatedFlow}/>;
   if (screen==="password-change"&&currentUser) return <RequiredPasswordChangeScreen onComplete={refreshAuthenticatedFlow}/>;
   if (screen==="pin-setup"&&currentUser) return <PinSetupScreen onComplete={refreshAuthenticatedFlow}/>;
-  if (screen==="superadmin"&&currentUser) return (
+  if (screen==="superadmin"&&currentUser&&!userCanAccessOps(currentUser)) return (
+    <div className="min-h-screen flex items-center justify-center px-5 bg-background text-foreground"><div className="w-full max-w-md rounded-3xl border bg-card p-6 shadow-sm"><ShieldCheck className="mb-4 text-red-600"/><h1 className="text-xl font-black">Accès Tournal Ops refusé</h1><p className="mt-2 text-sm text-muted-foreground">Votre compte n’a pas les droits Ops.</p><button type="button" onClick={()=>setScreen("boutique-select")} className="mt-4 w-full rounded-2xl bg-slate-950 py-3 text-sm font-black text-white">Retour aux boutiques</button></div></div>
+  );
+  if (screen==="superadmin"&&currentUser&&userCanAccessOps(currentUser)) return (
     <SuperAdminScreen boutiques={boutiques} platformUsers={platformUsers} groupes={groupes}
       onEnterBoutique={handleEnterBoutiqueAsAdmin}
       onCreateBoutique={handleCreateBoutique}
@@ -9867,7 +9879,7 @@ export default function App() {
   }
   if (!boutique||!currentUser||!activeAssign) {
     const missing=[!boutique?"boutique":"",!currentUser?"utilisateur":"",!activeAssign?"affectation":""].filter(Boolean).join(", " );
-    return <div className="min-h-screen flex items-center justify-center px-5 bg-background text-foreground"><div className="w-full max-w-md rounded-3xl border bg-card p-6 shadow-sm"><div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-700 flex items-center justify-center mb-4"><AlertTriangle size={22}/></div><h1 className="text-xl font-black">État boutique incomplet</h1><p className="text-sm text-muted-foreground mt-2">Tournal a empêché l’écran blanc. Élément manquant : {missing||"inconnu"}.</p><button type="button" onClick={()=>{activeBoutiqueIdRef.current=null;setActiveBoutiqueId(null);setActiveAssign(null);if(currentUser)saveSession(currentUser.id,null,null);setScreen("superadmin");}} className="mt-4 w-full rounded-2xl bg-slate-950 py-3 text-sm font-black text-white">Retour à Tournal Ops</button></div></div>;
+    return <div className="min-h-screen flex items-center justify-center px-5 bg-background text-foreground"><div className="w-full max-w-md rounded-3xl border bg-card p-6 shadow-sm"><div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-700 flex items-center justify-center mb-4"><AlertTriangle size={22}/></div><h1 className="text-xl font-black">État boutique incomplet</h1><p className="text-sm text-muted-foreground mt-2">Tournal a empêché l’écran blanc. Élément manquant : {missing||"inconnu"}.</p><button type="button" onClick={()=>{if(userCanAccessOps(currentUser)){activeBoutiqueIdRef.current=null;setActiveBoutiqueId(null);setActiveAssign(null);if(currentUser)saveSession(currentUser.id,null,null);setScreen("superadmin");}else{window.location.reload();}}} className="mt-4 w-full rounded-2xl bg-slate-950 py-3 text-sm font-black text-white">{userCanAccessOps(currentUser)?"Retour à Tournal Ops":"Recharger Tournal"}</button></div></div>;
   }
 
   // Lock screen overlay
@@ -9941,7 +9953,7 @@ export default function App() {
   }
 
   return (
-    <BoutiqueAppErrorBoundary onReset={()=>{activeBoutiqueIdRef.current=null;setActiveBoutiqueId(null);setActiveAssign(null);if(currentUser)saveSession(currentUser.id,null,null);setScreen("superadmin");}}>
+    <BoutiqueAppErrorBoundary onReset={()=>{if(userCanAccessOps(currentUser)){activeBoutiqueIdRef.current=null;setActiveBoutiqueId(null);setActiveAssign(null);if(currentUser)saveSession(currentUser.id,null,null);setScreen("superadmin");return;}window.location.reload();}}>
     <NotifCtx.Provider value={sendNotif}>
     <ReadOnlyCtx.Provider value={isReadOnly}>
     <div className="bg-background text-foreground h-screen flex flex-col overflow-hidden" style={{ fontFamily:"'Inter', sans-serif" }}>
