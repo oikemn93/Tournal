@@ -7,7 +7,7 @@ import { productQty, productMontant, productSupplierOutstanding, stockEntrySuppl
 import { Modal } from "../components/Modal";
 import { Field } from "../components/Field";
 import { SubmitBtn } from "../components/SubmitBtn";
-import { correctSupplierReceipt, createCategory, createProduct, loadProductStockHistory, recordStockMovement, setProductActive, updateProduct } from "../../lib/api";
+import { correctSupplierReceipt, createCategory, createProduct, loadProductStockHistory, recordStockMovement, setProductActive, updateProduct, loadMissingStockCosts, setStockEntryReferenceCost, type MissingStockCost } from "../../lib/api";
 import { formatPreciseDateTime } from "../utils/payments";
 
 function sortStockEntriesNewestFirst(a: StockEntry, b: StockEntry) {
@@ -17,10 +17,11 @@ function sortStockEntriesNewestFirst(a: StockEntry, b: StockEntry) {
   return byTimestamp || b.id - a.id;
 }
 
-export function StockView({ boutique, onUpdate, logAction, canSeeMargin, initialFilter, initialSupplierId, initialEntryId, onInitialRoutePrepared, onReceiptSaved }: {
+export function StockView({ boutique, onUpdate, logAction, canSeeMargin, canManageReferenceCosts=false, initialFilter, initialSupplierId, initialEntryId, onInitialRoutePrepared, onReceiptSaved }: {
   boutique: Boutique; onUpdate: (u: Partial<Boutique>) => void;
   logAction: (action: string, detail: string, icon: string) => void;
   canSeeMargin: boolean;
+  canManageReferenceCosts?: boolean;
   initialFilter?: string;
   initialSupplierId?: number;
   initialEntryId?: number;
@@ -35,6 +36,9 @@ export function StockView({ boutique, onUpdate, logAction, canSeeMargin, initial
   const [filter, setFilter]   = useState(initialFilter ?? "all");
   const [catFilter, setCatFilter] = useState("all");
   const [sortBy, setSortBy] = useState<"nom"|"qty"|"valeur">("nom");
+  const [missingCosts,setMissingCosts]=useState<MissingStockCost[]>([]);
+  const [costDrafts,setCostDrafts]=useState<Record<number,string>>({});
+  const [costSaving,setCostSaving]=useState<number|null>(null);
   const [detail, setDetail]   = useState<Product | null>(null);
   const [addMode, setAddMode] = useState(false);
   const [editingProduct, setEditingProduct] = useState(false);
@@ -85,6 +89,9 @@ export function StockView({ boutique, onUpdate, logAction, canSeeMargin, initial
   const nLotQty = nUnit === "pièces"
     ? (Number(nLots) || 1) * (Number(nPieces) || 0)
     : (Number(nLots) || 1) * (Number(nPieces) || 0) * (Number(nLongueur) || 0);
+
+  useEffect(()=>{ if(!canManageReferenceCosts){setMissingCosts([]);return;} let cancelled=false; void loadMissingStockCosts(boutique.id).then(rows=>{if(!cancelled)setMissingCosts(rows);}).catch(()=>{if(!cancelled)setMissingCosts([]);}); return()=>{cancelled=true;}; },[boutique.id,canManageReferenceCosts]);
+  async function saveMissingCost(row:MissingStockCost){const value=Number(costDrafts[row.entry_id]);if(!Number.isFinite(value)||value<=0)return;setCostSaving(row.entry_id);try{await setStockEntryReferenceCost(boutique.id,row.entry_id,value);setMissingCosts(current=>current.filter(item=>item.entry_id!==row.entry_id));logAction("Prix d'achat historique complété",`${row.product_name} · réception #${row.entry_id} · ${fmt(value)}/unité`,"🧾");}catch(error){alert(error instanceof Error?error.message:"Mise à jour impossible");}finally{setCostSaving(null);}}
 
   const supplierById = (supplierId?: number|null) => suppliers.find(s => s.id === supplierId);
 
