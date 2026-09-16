@@ -3,7 +3,8 @@ begin;
 insert into auth.users(id) values ('fbfbfbfb-1111-4111-8111-fbfbfbfbfbfb');
 
 insert into public.platform_users(id,phone,nom,initials,is_super_admin,is_suspended,must_change_password)
-values('fbfbfbfb-1111-4111-8111-fbfbfbfbfbfb','+221700000198','Report Phase1 CI','R1',true,false,false);
+values('fbfbfbfb-1111-4111-8111-fbfbfbfbfbfb','+221700000198','Report Phase1 CI','R1',true,false,false)
+on conflict(id) do update set phone=excluded.phone,nom=excluded.nom,is_super_admin=true,is_suspended=false,must_change_password=false;
 insert into public.boutiques(id,nom,ville,tel,directory_visible)
 values('report-phase1-ci','Report Phase1 CI','Dakar',null,true);
 insert into public.boutique_assignments(id,boutique_id,user_id,role,droits)
