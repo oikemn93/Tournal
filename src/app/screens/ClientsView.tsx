@@ -108,7 +108,7 @@ export function ClientsView({ boutique, allBoutiques, platformUsers, currentUser
   const siblings = getSiblings(boutique.id, allBoutiques, platformUsers);
   const clientRevenue = (clientId:number) => boutique.invoices.filter(inv=>inv.clientId===clientId&&inv.status!=="annulée"&&inv.type.toLowerCase()!=="retour").reduce((sum,inv)=>sum+Number(inv.montant||0),0);
   const clientDue = (clientId:number) => boutique.invoices.filter(inv=>inv.clientId===clientId&&inv.status!=="annulée"&&inv.type.toLowerCase()!=="retour").reduce((sum,inv)=>sum+clientInvoiceRemainingAmount(inv),0);
-  const clientLastTransaction = (clientId:number) => Math.max(0,...boutique.invoices.filter(inv=>inv.clientId===clientId).map(inv=>Date.parse(inv.dateRaw??inv.date)||0));
+  const clientLastTransaction = (clientId:number) => Math.max(0,...boutique.invoices.filter(inv=>inv.clientId===clientId).map(inv=>Date.parse(inv.date)||0));
   const filtered = clients.filter(c=>c.type===tab&&(c.nom.toLowerCase().includes(search.toLowerCase())||c.tel.includes(search)||c.ville.toLowerCase().includes(search.toLowerCase()))).sort((a,b)=>sortBy==="revenue"?clientRevenue(b.id)-clientRevenue(a.id):sortBy==="due"?clientDue(b.id)-clientDue(a.id):sortBy==="last"?clientLastTransaction(b.id)-clientLastTransaction(a.id):a.nom.localeCompare(b.nom,"fr",{sensitivity:"base"}));
   const counts = { "B2C":clients.filter(c=>c.type==="B2C").length, "B2B":clients.filter(c=>c.type==="B2B").length, "Grossiste":clients.filter(c=>c.type==="Grossiste").length };
 
