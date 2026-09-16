@@ -1,0 +1,4 @@
+src/app/App.tsx(6706,7): error TS2739: Type '{ sync: string; email: string; pdf: string; qz: string; session: string; backend: string; }' is missing the following properties from type 'Record<TechLogCat, string>': rpc, loading, printing, network, other
+src/app/App.tsx(6707,7): error TS2739: Type '{ sync: string; email: string; pdf: string; qz: string; session: string; backend: string; }' is missing the following properties from type 'Record<TechLogCat, string>': rpc, loading, printing, network, other
+src/app/App.tsx(6886,95): error TS2304: Cannot find name 'auditType'.
+src/app/App.tsx(6886,105): error TS2304: Cannot find name 'e'.
