@@ -14,12 +14,12 @@ create temp table audit_expected_fingerprint(
 ) on commit preserve rows;
 
 insert into audit_expected_fingerprint(category, object_count, md5) values
-  ('columns',     639, 'c0d9e7b93f5aee43a9920f749653c7cf'),
-  ('constraints', 255, 'e90f367fcc6dd044a41d7f858b9f9ec9'),
-  ('functions',    213, '360ebdbaa7346b48143a7c12a21bf6b6'),
-  ('indexes',      193, '40da4fb6fd61d7158e4803fc3323f732'),
+  ('columns',     648, 'e1d7f8f29160da2601f0d6583ed4d388'),
+  ('constraints', 259, '16aa929ff8426564cc888383d99b63c4'),
+  ('functions',    224, 'c1c65b0fc121572b93c6ce7d28091403'),
+  ('indexes',      195, 'ee3febe063ee17da6e2556b180fd6795'),
   ('policies',      88, '2e88704fe8bd522a1b4edaf602697a64'),
-  ('relations',     77, 'fe47306893a1d143b92e1e3b9f6aa9a2'),
+  ('relations',     79, '374c81e478a41001e2145c8a1d6df764'),
   ('triggers',      88, '1c6cdba569ceaf344f85c39e8fe98cdf'),
   ('types',          0, 'd41d8cd98f00b204e9800998ecf8427e');
 
@@ -121,6 +121,7 @@ select a.category,
              '47cc6ea3fdabcc57be624c8ddca3ff33'
            ))
            or (a.object_count=220 and a.md5='6ad51f8f28f8371ebba69aea5ccbf9bc')
+           or (a.object_count=224 and a.md5='c1c65b0fc121572b93c6ce7d28091403')
          else a.object_count=e.object_count and a.md5=e.md5
        end as approved
 from audit_actual_fingerprint a
@@ -141,6 +142,7 @@ begin
           '47cc6ea3fdabcc57be624c8ddca3ff33'
         ))
         or (a.object_count=220 and a.md5='6ad51f8f28f8371ebba69aea5ccbf9bc')
+        or (a.object_count=224 and a.md5='c1c65b0fc121572b93c6ce7d28091403')
       )
       else a.object_count <> e.object_count or a.md5 <> e.md5
     end

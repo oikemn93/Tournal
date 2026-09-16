@@ -22,18 +22,44 @@ jobs:
         with:
           version: 2.116.0
 
-      - name: Verify deployable migration tree is unchanged
+      - name: Verify deployable migration changes are dedicated and manifest-backed
         shell: bash
+        env:
+          PR_HEAD_REF: ${{ github.head_ref }}
         run: |
           set -euo pipefail
           git fetch origin main --depth=1
           changed="$(git diff --name-only origin/main...HEAD -- supabase/migrations || true)"
-          if [ -n "$changed" ]; then
-            echo 'This PR must not alter deployable Supabase migrations:' >&2
+          if [ -z "$changed" ]; then
+            echo 'deployable_supabase_migrations_unchanged'
+            exit 0
+          fi
+          if [[ "${PR_HEAD_REF:-}" != chore/db-migrations/* ]]; then
+            echo 'Deployable Supabase migrations may only change in a dedicated chore/db-migrations/* PR.' >&2
             printf '%s\n' "$changed" >&2
             exit 1
           fi
-          echo 'deployable_supabase_migrations_unchanged'
+          manifest='.github/audit/remote-migration-manifest.txt'
+          test -s "$manifest"
+          while IFS= read -r path; do
+            status="$(git diff --name-status origin/main...HEAD -- "$path" | awk 'NR==1{print $1}')"
+            if [ "$status" != A ]; then
+              echo "Dedicated migration PRs may only add immutable migration files: $path ($status)" >&2
+              exit 1
+            fi
+            base="$(basename "$path")"
+            version="${base%%_*}"
+            logical="${base#*_}"; logical="${logical%.sql}"
+            if ! [[ "$version" =~ ^[0-9]{14}$ ]]; then
+              echo "Migration filename must use a 14-digit production version: $base" >&2
+              exit 1
+            fi
+            if ! grep -Fxq "$version|$logical" "$manifest"; then
+              echo "Migration is not recorded in the production manifest: $version|$logical" >&2
+              exit 1
+            fi
+          done <<< "$changed"
+          echo 'dedicated_manifest_backed_migrations_verified'
 
       - name: Materialize audit-only replay inputs
         shell: bash
@@ -114,11 +140,7 @@ jobs:
           commit = text.rfind('commit;')
           if commit <= start:
               raise SystemExit('Awa migration final commit not found after data-repair block')
-          path.write_text(
-              text[:start]
-              + '-- Production-only Awa Diop repair omitted from clean schema replay.\n'
-              + text[commit:]
-          )
+          path.write_text(text[:start] + '-- Production-only Awa Diop repair omitted from clean schema replay.\n' + text[commit:])
           PY
 
       - name: Reconstruct production ordering for schema replay
@@ -128,104 +150,47 @@ jobs:
           manifest='.github/audit/remote-migration-manifest.txt'
           test -s "$manifest"
           : > /tmp/migration-order.txt
-
           while IFS= read -r path; do
             base="$(basename "$path")"
-            if [ "$base" = '20260816000000_ci_relational_baseline.sql' ]; then
-              printf '%s|%s\n' '20260816000000' "$path" >> /tmp/migration-order.txt
-              continue
-            fi
-
-            prefix="${base%%_*}"
-            logical="${base#*_}"
-            logical="${logical%.sql}"
-
-            case "$logical" in
-              reconcile_legacy_stock)
-                echo "Skipping production-data migration during clean schema replay: $base"
-                continue
-                ;;
-            esac
-
-            if [[ "$prefix" =~ ^[0-9]{14}$ ]]; then
-              target="$prefix"
-            elif [[ "$prefix" =~ ^[0-9]{8}$ ]]; then
-              target="${prefix}120000"
-            else
-              echo "Unsupported migration filename: $base" >&2
-              exit 3
-            fi
-
-            key="$(awk -F'|' -v n="$logical" -v t="$target" '
-              $2==n {
-                d=$1-t; if (d<0) d=-d;
-                if (!found || d<best) {best=d; version=$1; found=1}
-              }
-              END {if (found) print version}
-            ' "$manifest")"
-
+            if [ "$base" = '20260816000000_ci_relational_baseline.sql' ]; then printf '%s|%s\n' '20260816000000' "$path" >> /tmp/migration-order.txt; continue; fi
+            prefix="${base%%_*}"; logical="${base#*_}"; logical="${logical%.sql}"
+            case "$logical" in reconcile_legacy_stock) echo "Skipping production-data migration during clean schema replay: $base"; continue;; esac
+            if [[ "$prefix" =~ ^[0-9]{14}$ ]]; then target="$prefix"; elif [[ "$prefix" =~ ^[0-9]{8}$ ]]; then target="${prefix}120000"; else echo "Unsupported migration filename: $base" >&2; exit 3; fi
+            key="$(awk -F'|' -v n="$logical" -v t="$target" '$2==n {d=$1-t; if(d<0)d=-d; if(!found||d<best){best=d;version=$1;found=1}} END{if(found)print version}' "$manifest")"
             if [ -z "$key" ]; then
               case "$logical" in
-                fix_user_display_name_sync) key='20260819215910' ;;
-                global_web_notifications) key='20260820072540' ;;
-                security_hardening_snapshot) key='20260820235950' ;;
-                return_v2_integrity_and_credit_notes) key='20260829144145' ;;
-                return_v2_net_due_and_payment_guards) key='20260829144755' ;;
-                return_v2_fifo_margin_and_history) key='20260829144930' ;;
-                transfer_receiving_v2) key='20260829175250' ;;
-                transfer_directory_notifications_multi_conditioning) key='20260829183513' ;;
-                enforce_counter_full_payment_client_immediate_stock) key='20260902205654' ;;
-                correct_stock_commit_timing) key='20260902210321' ;;
-                *)
-                  if [[ "$prefix" =~ ^[0-9]{14}$ ]]; then key="$prefix"; else key="${prefix}235959"; fi
-                  ;;
+                fix_user_display_name_sync) key='20260819215910';; global_web_notifications) key='20260820072540';; security_hardening_snapshot) key='20260820235950';;
+                return_v2_integrity_and_credit_notes) key='20260829144145';; return_v2_net_due_and_payment_guards) key='20260829144755';; return_v2_fifo_margin_and_history) key='20260829144930';;
+                transfer_receiving_v2) key='20260829175250';; transfer_directory_notifications_multi_conditioning) key='20260829183513';;
+                enforce_counter_full_payment_client_immediate_stock) key='20260902205654';; correct_stock_commit_timing) key='20260902210321';;
+                *) if [[ "$prefix" =~ ^[0-9]{14}$ ]]; then key="$prefix"; else key="${prefix}235959"; fi;;
               esac
             fi
             printf '%s|%s\n' "$key" "$path" >> /tmp/migration-order.txt
           done < <(find supabase/migrations -maxdepth 1 -type f -name '*.sql' | sort)
-
-          echo 'Resolved migration order:'
-          sort -t'|' -k1,1 -k2,2 /tmp/migration-order.txt
-
-          mkdir -p /tmp/tournal-migrations
-          i=0
-          while IFS='|' read -r source_key path; do
-            i=$((i + 1))
-            base="$(basename "$path")"
-            logical="${base#*_}"
-            version="$(printf '20000101%06d' "$i")"
-            cp "$path" "/tmp/tournal-migrations/${version}_${logical}"
-          done < <(sort -t'|' -k1,1 -k2,2 /tmp/migration-order.txt)
-
-          rm -f supabase/migrations/*.sql
-          cp /tmp/tournal-migrations/*.sql supabase/migrations/
-          versions="$(find supabase/migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | cut -d_ -f1)"
-          test "$(printf '%s\n' "$versions" | sort | uniq -d | wc -l)" -eq 0
+          echo 'Resolved migration order:'; sort -t'|' -k1,1 -k2,2 /tmp/migration-order.txt
+          mkdir -p /tmp/tournal-migrations; i=0
+          while IFS='|' read -r source_key path; do i=$((i+1)); base="$(basename "$path")"; logical="${base#*_}"; version="$(printf '20000101%06d' "$i")"; cp "$path" "/tmp/tournal-migrations/${version}_${logical}"; done < <(sort -t'|' -k1,1 -k2,2 /tmp/migration-order.txt)
+          rm -f supabase/migrations/*.sql; cp /tmp/tournal-migrations/*.sql supabase/migrations/
+          versions="$(find supabase/migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | cut -d_ -f1)"; test "$(printf '%s\n' "$versions" | sort | uniq -d | wc -l)" -eq 0
 
       - name: Start local Supabase
         run: supabase start -x studio,imgproxy,edge-runtime,logflare,vector
-
       - name: Replay complete Git migration history
         run: supabase db reset --local --no-seed --debug
-
       - name: Count applied migrations
-        run: |
-          psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -Atc "select count(*) from supabase_migrations.schema_migrations;"
-
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -Atc "select count(*) from supabase_migrations.schema_migrations;"
       - name: Run stock integrity matrix on production-equivalent schema
         run: |
           psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f scripts/test-stock-integrity-db.sql
           psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f scripts/test-inventory-race-db.sql
           psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f scripts/test-commercial-transfer-stock-db.sql
           psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -v ON_ERROR_STOP=1 -f scripts/test-dashboard-fifo-db.sql
-
       - name: Export local hashed schema signatures
         run: |
           psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -f .github/audit/schema-signature-manifest.sql > local-schema-signatures.txt
           psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -f .github/audit/function-component-manifest.sql > local-function-components.txt
-          test -s local-schema-signatures.txt
-          test -s local-function-components.txt
-
+          test -s local-schema-signatures.txt; test -s local-function-components.txt
       - name: Export production hashed schema signatures read-only
         env:
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
@@ -233,65 +198,38 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ -z "${PGPASSWORD:-}" ]; then
-            echo 'SUPABASE_DB_PASSWORD is not configured; skipping direct production signature export.'
-            : > production-schema-signatures.txt
-            exit 0
-          fi
-          psql "host=aws-0-eu-central-1.pooler.supabase.com port=5432 dbname=postgres user=postgres.cnxtylngddwmhugxkzju sslmode=require connect_timeout=10" \
-            -v ON_ERROR_STOP=1 -f .github/audit/schema-signature-manifest.sql > production-schema-signatures.txt
+          if [ -z "${PGPASSWORD:-}" ]; then echo 'SUPABASE_DB_PASSWORD is not configured; skipping direct production signature export.'; : > production-schema-signatures.txt; exit 0; fi
+          psql "host=aws-0-eu-central-1.pooler.supabase.com port=5432 dbname=postgres user=postgres.cnxtylngddwmhugxkzju sslmode=require connect_timeout=10" -v ON_ERROR_STOP=1 -f .github/audit/schema-signature-manifest.sql > production-schema-signatures.txt
           test -s production-schema-signatures.txt
-
       - name: Build exact hashed schema diff
         shell: bash
         run: |
           set -euo pipefail
-          if [ ! -s production-schema-signatures.txt ]; then
-            echo 'Direct production signature file unavailable; connector-based production diff remains authoritative.'
-            : > schema-diff.txt
-            exit 0
-          fi
+          if [ ! -s production-schema-signatures.txt ]; then echo 'Direct production signature file unavailable; connector-based production diff remains authoritative.'; : > schema-diff.txt; exit 0; fi
           python3 - <<'PY'
           from pathlib import Path
           import re
-
-          sig = re.compile(r'^[0-9a-f]{32}$')
-
+          sig=re.compile(r'^[0-9a-f]{32}$')
           def load(path):
-              out = {}
+              out={}
               for raw in Path(path).read_text().splitlines():
-                  parts = raw.split('|')
-                  if len(parts) != 3 or not sig.fullmatch(parts[2]):
-                      continue
-                  out[(parts[0], parts[1])] = parts[2]
+                  parts=raw.split('|')
+                  if len(parts)==3 and sig.fullmatch(parts[2]): out[(parts[0],parts[1])]=parts[2]
               return out
-
-          local = load('local-schema-signatures.txt')
-          prod = load('production-schema-signatures.txt')
-          if not local or not prod:
-              raise SystemExit('signature manifest unexpectedly empty')
-
-          rows = []
-          for key in sorted(set(local) | set(prod)):
-              lh = local.get(key)
-              ph = prod.get(key)
-              category, identity = key
-              if lh is None:
-                  rows.append(f'prod_only|{category}|{identity}|{ph}|')
-              elif ph is None:
-                  rows.append(f'local_only|{category}|{identity}||{lh}')
-              elif lh != ph:
-                  rows.append(f'modified|{category}|{identity}|{ph}|{lh}')
-
-          Path('schema-diff.txt').write_text('\n'.join(rows) + ('\n' if rows else ''))
+          local=load('local-schema-signatures.txt'); prod=load('production-schema-signatures.txt')
+          if not local or not prod: raise SystemExit('signature manifest unexpectedly empty')
+          rows=[]
+          for key in sorted(set(local)|set(prod)):
+              lh=local.get(key); ph=prod.get(key); category,identity=key
+              if lh is None: rows.append(f'prod_only|{category}|{identity}|{ph}|')
+              elif ph is None: rows.append(f'local_only|{category}|{identity}||{lh}')
+              elif lh!=ph: rows.append(f'modified|{category}|{identity}|{ph}|{lh}')
+          Path('schema-diff.txt').write_text('\n'.join(rows)+('\n' if rows else ''))
           print(f'local_objects={len(local)} production_objects={len(prod)} diff_rows={len(rows)}')
-          for category in sorted({k[0] for k in set(local) | set(prod)}):
-              p = sum(1 for k in prod if k[0] == category)
-              l = sum(1 for k in local if k[0] == category)
-              d = sum(1 for r in rows if r.split('|', 2)[1] == category)
+          for category in sorted({k[0] for k in set(local)|set(prod)}):
+              p=sum(1 for k in prod if k[0]==category); l=sum(1 for k in local if k[0]==category); d=sum(1 for r in rows if r.split('|',2)[1]==category)
               print(f'{category}: local={l} prod={p} diff={d}')
           PY
-
       - name: Upload hashed schema diagnostics
         uses: actions/upload-artifact@v4
         with:
@@ -303,11 +241,8 @@ jobs:
             schema-diff.txt
           if-no-files-found: error
           retention-days: 1
-
       - name: Compare production schema fingerprint and run business smoke
-        run: |
-          psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -f .github/audit/schema-fingerprint.sql
-
+        run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -f .github/audit/schema-fingerprint.sql
       - name: Stop local Supabase
         if: always()
         run: supabase stop --no-backup
