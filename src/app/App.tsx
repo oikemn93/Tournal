@@ -6703,8 +6703,8 @@ ${PA.printer ? `<div class="c" style="font-size:8pt;margin-top:2mm">Imprimante :
 
 // ─── VIEW: SUPERVISION ───────────────────────────────────────────────────────
 
-const CAT_LABEL: Record<TechLogCat,string>  = { sync:"Sync", email:"Email", pdf:"PDF", qz:"QZ Tray", session:"Session", backend:"Backend" };
-const CAT_COLOR: Record<TechLogCat,string>  = { sync:"#3b82f6", email:"#f59e0b", pdf:"#8b5cf6", qz:"#06b6d4", session:"#10b981", backend:"#ef4444" };
+const CAT_LABEL: Record<TechLogCat,string>  = { sync:"Sync", email:"Email", pdf:"PDF", qz:"QZ Tray", session:"Session", backend:"Backend", rpc:"RPC", loading:"Chargement", printing:"Impression", network:"Réseau", other:"Autre" };
+const CAT_COLOR: Record<TechLogCat,string>  = { sync:"#3b82f6", email:"#f59e0b", pdf:"#8b5cf6", qz:"#06b6d4", session:"#10b981", backend:"#ef4444", rpc:"#6366f1", loading:"#64748b", printing:"#8b5cf6", network:"#0ea5e9", other:"#6b7280" };
 const LEVEL_ICON: Record<TechLogLevel,string>  = { error:"❌", warn:"⚠️", info:"ℹ️" };
 const LEVEL_COLOR: Record<TechLogLevel,string> = { error:"#ef4444", warn:"#f59e0b", info:"#6b7280" };
 
@@ -6883,7 +6883,7 @@ function SupervisionSection({ boutique, allBoutiques, backendOk, lastSyncAt }: {
                     {idx < filtered.length-1 && <div className="w-0.5 flex-1 mt-1 mb-1" style={{ background:"rgba(0,0,0,0.08)" }}/>}
                   </div>
                   <div className="flex-1 pb-3">
-                    <div className="bg-card rounded-2xl px-3 py-3 border" style={{borderColor:auditType(e.action)==="sensitive"?"#ef4444":"var(--border)"}}>
+                    <div className="bg-card rounded-2xl px-3 py-3 border border-border">
                       <div className="flex items-start justify-between gap-2 mb-1.5">
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap mb-0.5">
