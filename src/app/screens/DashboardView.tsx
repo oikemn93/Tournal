@@ -5,11 +5,16 @@ import type { Tab } from "../types";
 
 const fmt = (value: number) => `${new Intl.NumberFormat("fr-FR").format(Math.round(value || 0))} F`;
 
-type Period = "7d" | "30d" | "month";
+type Period = "day" | "7d" | "30d" | "month";
 
 function periodBounds(period: Period) {
   const now = new Date();
   const to = new Date(now.getTime() + 1000);
+  if (period === "day") {
+    const from = new Date(now);
+    from.setHours(0, 0, 0, 0);
+    return { from: from.toISOString(), to: to.toISOString() };
+  }
   if (period === "month") {
     return { from: new Date(now.getFullYear(), now.getMonth(), 1).toISOString(), to: to.toISOString() };
   }
@@ -69,7 +74,8 @@ export function DashboardView({ boutiqueId, canSeeMargin, onNavigate }: {
         <h1 className="text-xl font-black">Tableau de bord</h1>
         <p className="text-xs text-muted-foreground mt-1">Indicateurs financiers canoniques calculés côté serveur.</p>
       </div>
-      <select value={period} onChange={e => setPeriod(e.target.value as Period)} className="rounded-xl bg-muted px-3 py-2 text-sm font-bold outline-none">
+      <select aria-label="Période de l’accueil" value={period} onChange={e => setPeriod(e.target.value as Period)} className="rounded-xl bg-muted px-3 py-2 text-sm font-bold outline-none">
+        <option value="day">Aujourd’hui</option>
         <option value="7d">7 jours</option>
         <option value="30d">30 jours</option>
         <option value="month">Ce mois</option>
