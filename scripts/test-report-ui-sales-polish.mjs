@@ -6,7 +6,7 @@ const sales = fs.readFileSync("src/app/screens/SalesReportSection.tsx", "utf8");
 function ok(value, message) { if (!value) throw new Error(message); }
 
 ok(entry.includes('import { SalesReportSection } from "./SalesReportSection"'), "Focused sales section is not wired into Rapport");
-ok(entry.includes('<SalesReportSection report={sales} metrics={metrics} canSeeMargin={canSeeMargin}/>'), "Rapport must pass canonical metrics to the focused sales section");
+ok(/<SalesReportSection[^>]*report=\{sales\}[^>]*metrics=\{metrics\}[^>]*canSeeMargin=\{canSeeMargin\}/.test(entry), "Rapport must pass canonical metrics to the focused sales section");
 ok(sales.includes('data-report-ui-stage="3-sales"'), "Sales UI stage marker missing");
 ok(sales.includes("Produits qui portent le CA") && sales.includes("Répartition par catégorie"), "Sales visual summaries missing");
 ok(sales.includes("Meilleurs vendeurs") && sales.includes("Plus faibles vendeurs"), "Best/worst product summaries missing");

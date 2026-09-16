@@ -1,3 +1,4 @@
+import { ReportPage, type ReportPageRequest } from "./ReportPage";
 import React, { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ArrowDown, ArrowUp, CalendarRange, PackageSearch } from "lucide-react";
 import type { StockInventoryProductRow, StockInventoryReport } from "../../lib/reportApi";
@@ -6,7 +7,7 @@ import { fmt } from "../utils/formatting";
 type SortKey = "product_name" | "current_stock" | "net_sold_qty" | "rotation_class" | "fifo_stock_value";
 type SortDir = "asc" | "desc";
 
-export function StockReportSection({ report, days, onDays, canSeeMargin }: { report: StockInventoryReport | null; days: number; onDays: (days: number) => void; canSeeMargin: boolean }) {
+export function StockReportSection({ report, days, onDays, canSeeMargin, onPage }: { report: StockInventoryReport | null; onPage?: (request:ReportPageRequest)=>void; days: number; onDays: (days: number) => void; canSeeMargin: boolean }) {
   const [draftDays, setDraftDays] = useState(days);
   const [sort, setSort] = useState<SortKey>("net_sold_qty");
   const [dir, setDir] = useState<SortDir>("desc");
@@ -22,6 +23,7 @@ export function StockReportSection({ report, days, onDays, canSeeMargin }: { rep
     });
     return next;
   }, [report, sort, dir]);
+  if(report?.page && onPage)return <div className="space-y-4"><label className="flex items-center gap-2 text-xs">Seuil de dormance actuel (jours)<input aria-label="Seuil produits dormants" type="number" inputMode="numeric" min={1} max={3650} value={draftDays} onChange={event=>setDraftDays(Math.max(1,Math.min(3650,Number(event.target.value)||60)))} className="w-20 rounded border p-2"/></label><ReportPage page={report.page} onPage={onPage}/></div>;
   if (!report) return <div className="py-8 text-center text-xs font-semibold text-muted-foreground">Chargement du détail…</div>;
   const dormant = report.products.filter(row => row.dormant && row.current_stock > 0);
   const lowRotation = report.products.filter(row => row.rotation_class === "lente");
