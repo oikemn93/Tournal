@@ -83,6 +83,7 @@ jobs:
           psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -X -v ON_ERROR_STOP=1 --single-transaction -f /tmp/access-request-candidate/stage-a.sql
           psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -X -v ON_ERROR_STOP=1 -f .github/audit/access-request-signatures.sql > candidate-access-signatures.txt
           python3 scripts/test-access-request-delta.py
+          python3 scripts/check-access-request-delta.py baseline-access-signatures.txt candidate-access-signatures.txt baseline-access-signatures.txt
           psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -X -v ON_ERROR_STOP=1 -f scripts/test-access-requests-db.sql
           python3 scripts/test-access-requests-race.py
       - name: Count applied migrations
@@ -140,6 +141,7 @@ jobs:
               print(f'{category}: local={l} prod={p} diff={d}')
           PY
       - name: Upload hashed schema diagnostics
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: schema-signatures
