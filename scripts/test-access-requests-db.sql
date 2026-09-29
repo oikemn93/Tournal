@@ -60,7 +60,7 @@ end $$;
 reset role;
 
 select set_config('request.jwt.claims','{"sub":"a1000000-0000-4000-8000-000000000001","role":"authenticated"}',true);
-do $ declare v_id uuid := (select id from access_test_state); v_refused uuid; a jsonb; b jsonb; begin
+do $$ declare v_id uuid := (select id from access_test_state); v_refused uuid; a jsonb; b jsonb; begin
   if public.count_new_access_requests()<1 then raise exception 'badge missing'; end if;
   if not exists(select 1 from public.notifications where user_id=auth.uid() and source_event_key='access_request:'||v_id::text) then raise exception 'notification missing'; end if;
   perform public.route_access_request(v_id,'access-ci-a');
