@@ -9455,6 +9455,16 @@ export default function App() {
 
   useEffect(() => { void refreshAuthenticatedFlow(); }, [refreshAuthenticatedFlow]);
 
+  // Keep the existing in-app screen flow while giving authentication its own URL.
+  useEffect(() => {
+    if (!synced) return;
+    const destination = screen === "login" ? "/login" : "/app";
+    if (window.location.pathname !== destination) {
+      window.history.replaceState({}, "", destination + window.location.search + window.location.hash);
+    }
+    document.title = screen === "login" ? "Connexion | Tournal" : "Tournal | Application";
+  }, [screen, synced]);
+
   // Prevent accidental value changes when scrolling over a focused number input.
   // Blurring on wheel lets the scroll event propagate normally to the page.
   useEffect(() => {
