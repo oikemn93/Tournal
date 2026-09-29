@@ -1,7 +1,8 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import "./styles/index.css";
-import App from "./app/App";
+import PublicSite from "./PublicSite";
+const App = React.lazy(() => import("./app/App"));
 import { refreshSessionIfNeeded } from "./lib/api";
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL ?? "https://cnxtylngddwmhugxkzju.supabase.co";
@@ -333,7 +334,28 @@ window.addEventListener("error", event => { void recoverFromStaleModule(event.er
 window.addEventListener("unhandledrejection", event => { void recoverFromStaleModule(event.reason); });
 window.setTimeout(() => sessionStorage.removeItem(MODULE_RECOVERY_KEY), 15_000);
 
-createRoot(document.getElementById("root")!).render(<OfflineCoordinator><App /></OfflineCoordinator>);
+function route() {
+  const path = window.location.pathname;
+  if (path === "/mentions-legales" || path === "/confidentialite") {
+    document.title = path === "/mentions-legales" ? "Mentions légales | Tournal" : "Politique de confidentialité | Tournal";
+    return <PublicSite page={path === "/mentions-legales" ? "legal" : "privacy"} />;
+  }
+  let hasSession = false;
+  try {
+    hasSession = Boolean(JSON.parse(sessionStorage.getItem("tournal.supabase.session") || "null")?.access_token);
+  } catch { /* Treat an unreadable session as signed out. */ }
+  const legacyLink = path === "/" && ["tab", "boutique", "notification"].some(key => new URLSearchParams(window.location.search).has(key));
+  if (path === "/" && !hasSession && !legacyLink) {
+    document.title = "Tournal | Stocks, ventes et marges pour vos boutiques";
+    return <PublicSite />;
+  }
+  const destination = hasSession ? "/app" : "/login";
+  if (path !== destination) window.history.replaceState({}, "", destination + window.location.search + window.location.hash);
+  document.title = "Connexion | Tournal";
+  return <React.Suspense fallback={<div role="status" style={{ padding: 32 }}>Chargement de Tournal…</div>}><OfflineCoordinator><App /></OfflineCoordinator></React.Suspense>;
+}
+
+createRoot(document.getElementById("root")!).render(route());
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
