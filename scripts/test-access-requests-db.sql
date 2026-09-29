@@ -33,7 +33,9 @@ do $$ declare a jsonb; b jsonb; begin
   a:=public.submit_access_request('Prospect fictif','Fictive','700009099','Commerce','Message fictif');
   b:=public.submit_access_request('Prospect fictif','Fictive','+221700009099','Commerce',null);
   if a<>b or a<>public.submit_access_request('Compte fictif',null,'700009003','Commerce',null) then raise exception 'response enumerates'; end if;
-  begin perform public.submit_access_request('X',null,'abc','Commerce',null); raise exception 'invalid submission accepted'; exception when invalid_parameter_value then null; end;
+  begin perform public.submit_access_request('X',null,'700009099','Commerce',null); raise exception 'invalid name accepted'; exception when invalid_parameter_value then null; end;
+  begin perform public.submit_access_request('Test fictif',null,'abc','Commerce',null); raise exception 'invalid phone accepted'; exception when invalid_parameter_value then null; end;
+  begin perform public.submit_access_request('Test fictif',null,'700009099','Commerce',repeat('x',1001)); raise exception 'oversized message accepted'; exception when invalid_parameter_value then null; end;
 end $$;
 reset role;
 update access_test_state set id=(select id from public.access_requests where telephone='+221700009099');
@@ -58,7 +60,7 @@ end $$;
 reset role;
 
 select set_config('request.jwt.claims','{"sub":"a1000000-0000-4000-8000-000000000001","role":"authenticated"}',true);
-do $$ declare v_id uuid := (select id from access_test_state); a jsonb; b jsonb; begin
+do $ declare v_id uuid := (select id from access_test_state); v_refused uuid; a jsonb; b jsonb; begin
   if public.count_new_access_requests()<1 then raise exception 'badge missing'; end if;
   if not exists(select 1 from public.notifications where user_id=auth.uid() and source_event_key='access_request:'||v_id::text) then raise exception 'notification missing'; end if;
   perform public.route_access_request(v_id,'access-ci-a');
@@ -69,6 +71,11 @@ do $$ declare v_id uuid := (select id from access_test_state); a jsonb; b jsonb;
   if a<>b then raise exception 'double acceptance changed state'; end if;
   if (select count(*) from public.ops_interactions where title='access_request_decision' and detail::jsonb->>'request_id'=v_id::text and detail::jsonb->>'action'='acceptee')<>1 then raise exception 'acceptance logged twice'; end if;
   begin perform public.decide_access_request(v_id,'refusee'); raise exception 'terminal decision reversed'; exception when invalid_parameter_value then null; end;
+  perform public.submit_access_request('Refus fictif',null,'700009055','Commerce',null);
+  select id into v_refused from public.access_requests where telephone='+221700009055';
+  perform public.decide_access_request(v_refused,'refusee');
+  if not exists(select 1 from public.access_requests where id=v_refused and statut='refusee' and refused_at=now() and accepted_at is null and traite_par=auth.uid()) then raise exception 'refusal state incoherent'; end if;
+  if not exists(select 1 from public.ops_interactions where title='access_request_decision' and detail::jsonb->>'request_id'=v_refused::text and detail::jsonb->>'action'='refusee') then raise exception 'refusal not audited'; end if;
 end $$;
 
 select set_config('request.jwt.claims','{"sub":"a1000000-0000-4000-8000-000000000004","role":"authenticated"}',true);
