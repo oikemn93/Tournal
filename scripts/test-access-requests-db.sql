@@ -14,7 +14,7 @@ insert into public.boutiques(id,nom,owner_id) values
   ('access-ci-b','Fictive B','a1000000-0000-4000-8000-000000000004');
 insert into public.boutique_assignments(id,boutique_id,user_id,role,droits) overriding system value values
   (991699000001,'access-ci-a','a1000000-0000-4000-8000-000000000002','owner','{}'),
-  (991699000002,'access-ci-a','a1000000-0000-4000-8000-000000000003','vendor','{}'),
+  (991699000002,'access-ci-a','a1000000-0000-4000-8000-000000000003','employee','{}'),
   (991699000003,'access-ci-b','a1000000-0000-4000-8000-000000000004','owner','{}');
 
 create temp table access_test_state(id uuid,existing_user jsonb);
