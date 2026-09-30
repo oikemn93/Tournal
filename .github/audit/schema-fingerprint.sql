@@ -1,12 +1,8 @@
 \set ON_ERROR_STOP on
 
--- Audit-only structural fingerprint. No table data is read.
--- Production fingerprint was refreshed read-only on 2026-09-13 before any
--- report-audit production change. Approved function deltas are pinned to the
--- exact aggregate hashes produced by the reviewed FIFO-return candidate alone,
--- by FIFO-return + sales-payment together, and by the reviewed global-report
--- filter/search candidate layered on top. Every other schema category must
--- remain byte-equivalent to production.
+-- Audit-only structural fingerprint, including relation privileges.
+-- Exact production snapshot read through the Supabase connector on 2026-09-29.
+-- No application data is read. No historical candidate exceptions are allowed.
 create temp table audit_expected_fingerprint(
   category text primary key,
   object_count bigint not null,
@@ -16,11 +12,12 @@ create temp table audit_expected_fingerprint(
 insert into audit_expected_fingerprint(category, object_count, md5) values
   ('columns',     648, 'e1d7f8f29160da2601f0d6583ed4d388'),
   ('constraints', 259, '16aa929ff8426564cc888383d99b63c4'),
-  ('functions',    224, 'c1c65b0fc121572b93c6ce7d28091403'),
+  ('functions',    226, 'a48193e25eff8ba5ce1c391665d976b7'),
   ('indexes',      195, 'ee3febe063ee17da6e2556b180fd6795'),
   ('policies',      88, '2e88704fe8bd522a1b4edaf602697a64'),
+  ('relation_acls', 79, '02f74ebb1fe464403d90b0dd3b648026'),
   ('relations',     79, '374c81e478a41001e2145c8a1d6df764'),
-  ('triggers',      88, '1c6cdba569ceaf344f85c39e8fe98cdf'),
+  ('triggers',      90, '0342f7f1b6950d6083dd3cfc62193b32'),
   ('types',          0, 'd41d8cd98f00b204e9800998ecf8427e');
 
 create temp table audit_actual_fingerprint as
@@ -90,8 +87,19 @@ types as (
   where n.nspname in ('public','private') and t.typtype in ('e','d')
   group by n.nspname,t.typname,t.typtype
 ),
+relation_acls as (
+  select concat_ws('|', n.nspname||'.'||c.relname,
+    coalesce((select string_agg(concat_ws(':',case when a.grantee=0 then 'PUBLIC' else gr.rolname end,
+      a.privilege_type,a.is_grantable::text,grantor.rolname),',' order by
+      case when a.grantee=0 then 'PUBLIC' else gr.rolname end,a.privilege_type,a.is_grantable,grantor.rolname)
+      from aclexplode(coalesce(c.relacl,acldefault(case when c.relkind='S' then 's'::"char" else 'r'::"char" end,c.relowner))) a
+      left join pg_roles gr on gr.oid=a.grantee left join pg_roles grantor on grantor.oid=a.grantor),'')) as x
+  from pg_class c join pg_namespace n on n.oid=c.relnamespace
+  where n.nspname in ('public','private') and c.relkind in ('r','p','v','m','S')
+),
 objects as (
-  select 'relations' category,x from relations union all
+  select 'relation_acls' category,x from relation_acls union all
+  select 'relations',x from relations union all
   select 'columns',x from columns union all
   select 'constraints',x from constraints union all
   select 'indexes',x from indexes union all
@@ -100,7 +108,7 @@ objects as (
   select 'triggers',x from triggers union all
   select 'types',x from types
 ),
-categories(category) as (values ('relations'),('columns'),('constraints'),('indexes'),('policies'),('functions'),('triggers'),('types'))
+categories(category) as (values ('relation_acls'),('relations'),('columns'),('constraints'),('indexes'),('policies'),('functions'),('triggers'),('types'))
 select c.category,
        count(o.x)::bigint as object_count,
        md5(coalesce(string_agg(o.x,E'\n' order by o.x),'')) as md5
@@ -113,17 +121,7 @@ select a.category,
        e.object_count as production_count,
        a.md5 as actual_md5,
        e.md5 as production_md5,
-       case
-         when a.category='functions' then
-           (a.object_count=213 and a.md5 in (
-             '360ebdbaa7346b48143a7c12a21bf6b6',
-             'b22d61013eb663621991c277c42c3f70',
-             '47cc6ea3fdabcc57be624c8ddca3ff33'
-           ))
-           or (a.object_count=220 and a.md5='6ad51f8f28f8371ebba69aea5ccbf9bc')
-           or (a.object_count=224 and a.md5='c1c65b0fc121572b93c6ce7d28091403')
-         else a.object_count=e.object_count and a.md5=e.md5
-       end as approved
+       a.object_count=e.object_count and a.md5=e.md5 as approved
 from audit_actual_fingerprint a
 join audit_expected_fingerprint e using(category)
 order by a.category;
@@ -134,25 +132,14 @@ begin
     select 1
     from audit_actual_fingerprint a
     join audit_expected_fingerprint e using(category)
-    where case
-      when a.category='functions' then not (
-        (a.object_count=213 and a.md5 in (
-          '360ebdbaa7346b48143a7c12a21bf6b6',
-          'b22d61013eb663621991c277c42c3f70',
-          '47cc6ea3fdabcc57be624c8ddca3ff33'
-        ))
-        or (a.object_count=220 and a.md5='6ad51f8f28f8371ebba69aea5ccbf9bc')
-        or (a.object_count=224 and a.md5='c1c65b0fc121572b93c6ce7d28091403')
-      )
-      else a.object_count <> e.object_count or a.md5 <> e.md5
-    end
+    where a.object_count <> e.object_count or a.md5 <> e.md5
   ) then
-    raise exception 'schema fingerprint differs from production outside the exact approved report function candidates';
+    raise exception 'schema fingerprint differs from the exact production snapshot';
   end if;
 end
 $audit$;
 
-\echo schema_fingerprint_matches_production_or_exact_report_candidates
+\echo schema_fingerprint_matches_exact_production
 \ir ../../scripts/test-business-smoke.sql
 \ir ../../scripts/test-supplier-ledger-db.sql
 \ir ../../scripts/test-stock-integrity-db.sql
