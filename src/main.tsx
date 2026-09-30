@@ -3,7 +3,6 @@ import { createRoot } from "react-dom/client";
 import "./styles/index.css";
 import PublicSite from "./PublicSite";
 const App = React.lazy(() => import("./app/App"));
-import { refreshSessionIfNeeded } from "./lib/api";
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL ?? "https://cnxtylngddwmhugxkzju.supabase.co";
 const PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? "sb_publishable_Jeo4Bx2IsTPCkzsQMYTuFQ_VKPQc9Aq";
@@ -146,6 +145,7 @@ function OfflineCoordinator({ children }: { children: React.ReactNode }) {
     let networkInterrupted = false;
 
     try {
+      const { refreshSessionIfNeeded } = await import("./lib/api");
       const session = await refreshSessionIfNeeded();
       for (const record of [...records].sort((a, b) => a.createdAt - b.createdAt)) {
         const body = { ...record.body };
