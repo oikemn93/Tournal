@@ -95,9 +95,9 @@ export async function dismissAllNotifications() {
   });
 }
 
-export function subscribeToNotifications(boutiqueId: string, onChange: () => void) {
+export function subscribeToNotifications(boutiqueId: string | null, onChange: () => void) {
   const session = readSession();
-  if (!boutiqueId || !session?.access_token || !session.user?.id) return () => undefined;
+  if (!session?.access_token || !session.user?.id) return () => undefined;
   try {
     realtimeClient.realtime.setAuth(session.access_token);
     const refreshRealtimeAuth = () => {
@@ -116,7 +116,7 @@ export function subscribeToNotifications(boutiqueId: string, onChange: () => voi
         event: "*",
         schema: "public",
         table: "notifications",
-        filter: `boutique_id=eq.${boutiqueId}`,
+        filter: boutiqueId ? `boutique_id=eq.${boutiqueId}` : `user_id=eq.${session.user.id}`,
       }, scheduleChange)
       .subscribe((status) => {
         if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") console.warn(`Notifications Realtime ${status.toLowerCase()} pour ${boutiqueId}`);

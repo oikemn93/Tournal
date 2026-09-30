@@ -128,6 +128,12 @@ jobs:
       - name: Ops RLS and foreign-key index contract
         run: node scripts/test-ops-rls-index-contract.mjs
 
+      - name: Access-request Edge handler typecheck
+        run: pnpm exec tsc --noEmit --target ES2022 --module ESNext --lib ES2022,DOM --strict --skipLibCheck supabase/functions/submit-access-request/handler.ts
+
+      - name: Access-request public endpoint security
+        run: node scripts/test-access-request-endpoint.mjs
+
       - name: TypeScript contract
         run: pnpm exec tsc --noEmit
 

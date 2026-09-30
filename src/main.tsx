@@ -1,7 +1,8 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import "./styles/index.css";
-import App from "./app/App";
+const App = React.lazy(() => import("./app/App"));
+const AccessRequestPage = React.lazy(() => import("./public/AccessRequestPage"));
 import { refreshSessionIfNeeded } from "./lib/api";
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL ?? "https://cnxtylngddwmhugxkzju.supabase.co";
@@ -333,7 +334,8 @@ window.addEventListener("error", event => { void recoverFromStaleModule(event.er
 window.addEventListener("unhandledrejection", event => { void recoverFromStaleModule(event.reason); });
 window.setTimeout(() => sessionStorage.removeItem(MODULE_RECOVERY_KEY), 15_000);
 
-createRoot(document.getElementById("root")!).render(<OfflineCoordinator><App /></OfflineCoordinator>);
+const publicRequestRoute = window.location.pathname === "/demande-acces" || window.location.pathname === "/confidentialite";
+createRoot(document.getElementById("root")!).render(<React.Suspense fallback={<div role="status">Chargement…</div>}>{publicRequestRoute ? <AccessRequestPage privacy={window.location.pathname === "/confidentialite"}/> : <OfflineCoordinator><App /></OfflineCoordinator>}</React.Suspense>);
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
