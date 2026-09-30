@@ -5,6 +5,7 @@ Base : main après déploiement de la DB #82 (commit 78e35451), égalité produc
 ## Périmètre
 
 - `/demande-acces` : formulaire public chargé à la demande, sans montage de l’application ni du coordinateur hors ligne. Aucun JWT de session, donnée métier ou appel authentifié n’est envoyé.
+- `/login` et `/app` : aliases explicites Vercel de l’application existante, nécessaires sans fusion préalable de #81 ; `/` conserve le comportement de main jusqu’à la fusion séparée de la vitrine.
 - `/confidentialite` : texte provisoire de collecte/conservation/droits. Identité du responsable, base légale et contact d’exercice des droits à fournir.
 - Propriétaire : demandes explicitement attribuées à sa boutique. SuperAdmin : vue globale depuis Tournal Ops, vue boutique dans l’application. Autres rôles : bouton absent, RPC liste/détail/compteur/notification refusées côté DB.
 - Liste minimale ; téléphone, message et note uniquement au détail. Attribution par SuperAdmin via la RPC existante. Dialog Radix existant (focus, Escape, restauration du focus).
