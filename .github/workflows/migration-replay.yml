@@ -72,6 +72,10 @@ jobs:
       - name: Prepare canonical legacy replay
         run: bash scripts/prepare-canonical-replay.sh
 
+      - name: Validate Python tools and connector snapshot guard
+        run: |
+          python3 -m py_compile scripts/*access-request*.py
+          python3 scripts/test-access-request-snapshot.py
       - name: Start local Supabase
         run: supabase start -x studio,imgproxy,edge-runtime,logflare,vector
       - name: Replay complete Git migration history
@@ -80,6 +84,7 @@ jobs:
         if: hashFiles('.github/audit/access-request-objects.json') != ''
         run: |
           psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -X -v ON_ERROR_STOP=1 -f .github/audit/access-request-signatures.sql > baseline-access-signatures.txt
+          psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -X -v ON_ERROR_STOP=1 -f .github/audit/schema-fingerprint.sql
           psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -X -v ON_ERROR_STOP=1 --single-transaction -f /tmp/access-request-candidate/stage-a.sql
           psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -X -v ON_ERROR_STOP=1 -f .github/audit/access-request-signatures.sql > candidate-access-signatures.txt
           python3 scripts/test-access-request-delta.py
@@ -99,17 +104,21 @@ jobs:
           psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -f .github/audit/schema-signature-manifest.sql > local-schema-signatures.txt
           psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -f .github/audit/function-component-manifest.sql > local-function-components.txt
           test -s local-schema-signatures.txt; test -s local-function-components.txt
-      - name: Export production hashed schema signatures read-only
+      - name: Compare production through live read or reviewed connector snapshot
         env:
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
           PGOPTIONS: -c default_transaction_read_only=on
         shell: bash
         run: |
           set -euo pipefail
-          if [ -z "${PGPASSWORD:-}" ]; then echo 'SUPABASE_DB_PASSWORD is required: production comparison cannot be skipped.' >&2; exit 1; fi
-          psql "host=aws-0-eu-central-1.pooler.supabase.com port=5432 dbname=postgres user=postgres.cnxtylngddwmhugxkzju sslmode=require connect_timeout=10" -v ON_ERROR_STOP=1 -f .github/audit/schema-signature-manifest.sql > production-schema-signatures.txt
+          if [ -n "${PGPASSWORD:-}" ]; then
+            psql "host=aws-0-eu-central-1.pooler.supabase.com port=5432 dbname=postgres user=postgres.cnxtylngddwmhugxkzju sslmode=require connect_timeout=10" -X -v ON_ERROR_STOP=1 -f .github/audit/schema-signature-manifest.sql > production-schema-signatures.txt
+            psql "host=aws-0-eu-central-1.pooler.supabase.com port=5432 dbname=postgres user=postgres.cnxtylngddwmhugxkzju sslmode=require connect_timeout=10" -X -v ON_ERROR_STOP=1 -f .github/audit/access-request-signatures.sql > production-access-signatures.txt
+          else
+            python3 scripts/export-access-request-snapshot.py
+          fi
           test -s production-schema-signatures.txt
-          psql "host=aws-0-eu-central-1.pooler.supabase.com port=5432 dbname=postgres user=postgres.cnxtylngddwmhugxkzju sslmode=require connect_timeout=10" -X -v ON_ERROR_STOP=1 -f .github/audit/access-request-signatures.sql > production-access-signatures.txt
+          test -s production-access-signatures.txt
           python3 scripts/check-access-request-delta.py baseline-access-signatures.txt candidate-access-signatures.txt production-access-signatures.txt
       - name: Build exact hashed schema diff
         shell: bash

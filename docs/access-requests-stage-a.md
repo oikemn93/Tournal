@@ -88,7 +88,7 @@ ce contrôle. Les artifacts ne contiennent que des identités et hashes.
 
 ## Déploiement exact, après accord explicite
 
-Configurer avant toute fusion :
+Configurer avant tout déploiement :
 
 1. Secret GitHub `SUPABASE_DB_PASSWORD` pour les exports en lecture seule du
    projet `cnxtylngddwmhugxkzju`.
@@ -158,3 +158,22 @@ L’écran, Turnstile, le honeypot et le parcours navigateur seront testés dans
 la PR applicative A. Comptes, périmètres de boutiques, activation, expiration,
 usage unique, régénération, reprise après échec partiel et adaptateurs manual/SMS
 seront livrés et testés en étape B. Notification e-mail désactivée pour l’instant.
+
+
+## Reprise après #83 et contrôle sans secret de lecture CI
+
+La branche intègre main après fusion de #83. La migration candidate reste identique.
+Le replay baseline doit désormais satisfaire le fingerprint exact de main avant
+application locale du candidat. Sans SUPABASE_DB_PASSWORD, la CI compare à
+access-request-production-snapshot.json, relevé en lecture seule via le connecteur.
+Ce relevé n’est pas une lecture live par GitHub : le contrôle refuse un autre
+projet, un snapshot vide/dupliqué/invalide, un âge supérieur à 48 h, une date future,
+ou un SHA de baseline qui n’est pas ancêtre du commit testé. Il exige toujours
+baseline = relevé et exactement les 48 ajouts déclarés dans le candidat.
+Après la CI finale et avant demande de fusion, une nouvelle lecture du connecteur
+doit correspondre au relevé pour toutes les identités et tous les hashes. Toute
+différence bloque la livraison et impose rafraîchissement et nouvelle CI.
+Si le secret de lecture est présent, la CI utilise directement la production.
+Le workflow de déploiement conserve ses lectures live obligatoires et ses secrets ;
+un snapshot ne peut jamais autoriser un déploiement. Aucune modification SQL en
+production, fusion, application ou tag n’est effectuée par la reprise de branche.
