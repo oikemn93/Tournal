@@ -1,14 +1,18 @@
 {
-  "description": "Tournal",
+  "description": "Tournal aide les commerçants à suivre leurs stocks, ventes, marges FIFO et transferts entre points de vente.",
   "robots": {
-    "index": false
+    "index": true
   },
   "accessibility": {
     "addBypassLinks": false,
     "ignoreReducedMotion": false
   },
-  "title": "Tournal",
+  "title": "Tournal | Stocks, ventes et marges pour vos boutiques",
   "icons": {
     "icon": "/favicon-32.png"
+  },
+  "language": "fr",
+  "openGraph": {
+    "image": "https://tournal.org/og-tournal.png"
   }
 }
