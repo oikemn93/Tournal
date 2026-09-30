@@ -9,7 +9,7 @@ const benefits = [
 ];
 
 function ContactLink({ children, className = "" }: { children: React.ReactNode; className?: string }) {
-  return <a className={className} href="mailto:?subject=Demande%20d%27acc%C3%A8s%20%C3%A0%20Tournal">{children}</a>;
+  return <a className={className} href="/demande-acces">{children}</a>;
 }
 
 export default function PublicSite({ page = "home" }: { page?: "home" | "legal" | "privacy" }) {
@@ -47,6 +47,6 @@ export default function PublicSite({ page = "home" }: { page?: "home" | "legal" 
       <section className="public-how" aria-labelledby="how-title"><div className="public-wrap"><p className="public-eyebrow">COMMENT ÇA MARCHE</p><h2 id="how-title">Trois gestes pour garder le cap</h2><ol><li><strong>Renseignez vos marchandises</strong><p>Enregistrez les produits et les entrées de stock de chaque boutique.</p></li><li><strong>Suivez les opérations</strong><p>Retrouvez ventes, mouvements de stock et transferts au fil de l’activité.</p></li><li><strong>Consultez votre situation</strong><p>Examinez vos stocks, vos marges et vos indicateurs pour décider de la suite.</p></li></ol></div></section>
       <section className="public-last public-wrap"><h2>Prêt à découvrir Tournal ?</h2><p>Connectez-vous si vous avez déjà un compte ou demandez un accès.</p><div className="public-actions"><a className="public-button public-button-gold" href="/login">Se connecter</a><ContactLink className="public-button public-button-outline">Demander un accès</ContactLink></div></section>
     </main> : <main id="contenu" className="public-wrap public-policy"><p className="public-eyebrow">TOURNAL</p><h1>{page === "legal" ? "Mentions légales" : "Politique de confidentialité"}</h1><p>Cette page est provisoire. Les informations officielles relatives {page === "legal" ? "à l’éditeur, à l’hébergement et au contact légal" : "aux données traitées, aux durées de conservation et à l’exercice des droits"} doivent être fournies et validées avant publication définitive.</p><a href="/">Retour à l’accueil</a></main>}
-    <footer className="public-footer"><div className="public-wrap public-footer-inner"><span>© {new Date().getFullYear()} Tournal</span><div><ContactLink>Contact</ContactLink><a href="/mentions-legales">Mentions légales</a><a href="/confidentialite">Politique de confidentialité</a></div></div></footer>
+    <footer className="public-footer"><div className="public-wrap public-footer-inner"><span>© {new Date().getFullYear()} Tournal</span><div><a href="/demande-acces">Demander un accès</a><a href="/mentions-legales">Mentions légales</a><a href="/confidentialite">Politique de confidentialité</a></div></div></footer>
   </div>;
 }
