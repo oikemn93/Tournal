@@ -1,0 +1,135 @@
+name: Deploy reviewed access-request migration
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Full merged main commit SHA to deploy
+        type: string
+        required: true
+      pr_number:
+        description: Merged DB PR with complete green CI
+        type: string
+        required: true
+      migration_sha256:
+        description: Reviewed SHA-256 of 20260929204856_access_requests_stage_a.sql
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+  checks: read
+  pull-requests: read
+
+concurrency:
+  group: tournal-production-db
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit }}
+          fetch-depth: 0
+      - name: Verify merged commit, reviewed bytes, green checks and protected environment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOY_COMMIT: ${{ inputs.commit }}
+          DB_PR: ${{ inputs.pr_number }}
+          MIGRATION_SHA256: ${{ inputs.migration_sha256 }}
+        run: python3 scripts/check-access-request-deployment.py
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.116.0
+      - name: Prepare baseline with the canonical replay
+        run: |
+          cp supabase/migrations/20260929204856_access_requests_stage_a.sql /tmp/access-requests-stage-a.sql
+          rm supabase/migrations/20260929204856_access_requests_stage_a.sql
+          bash scripts/prepare-canonical-replay.sh
+          supabase start -x studio,imgproxy,edge-runtime,logflare,vector
+          supabase db reset --local --no-seed
+      - name: Verify baseline and the unchanged candidate
+        env:
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$PGPASSWORD"
+          psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -X -v ON_ERROR_STOP=1 -f .github/audit/access-request-signatures.sql > baseline-access-signatures.txt
+          psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -X -v ON_ERROR_STOP=1 --single-transaction -f /tmp/access-requests-stage-a.sql
+          psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -X -v ON_ERROR_STOP=1 -f .github/audit/access-request-signatures.sql > candidate-access-signatures.txt
+          PGOPTIONS='-c default_transaction_read_only=on' psql "host=aws-0-eu-central-1.pooler.supabase.com port=5432 dbname=postgres user=postgres.cnxtylngddwmhugxkzju sslmode=require connect_timeout=10" -X -v ON_ERROR_STOP=1 -f .github/audit/access-request-signatures.sql > production-access-signatures.txt
+          python3 scripts/check-access-request-delta.py baseline-access-signatures.txt candidate-access-signatures.txt production-access-signatures.txt
+          psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -X -v ON_ERROR_STOP=1 -f scripts/test-access-requests-db.sql
+          python3 scripts/test-access-requests-race.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reviewed-access-request-fingerprints
+          path: |
+            baseline-access-signatures.txt
+            candidate-access-signatures.txt
+            production-access-signatures.txt
+          retention-days: 7
+      - name: Stop local replay
+        if: always()
+        run: supabase stop --no-backup
+
+  deploy:
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production-db
+    permissions:
+      contents: write
+      actions: read
+      checks: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: reviewed-access-request-fingerprints
+      - name: Recheck deployment authorization
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOY_COMMIT: ${{ inputs.commit }}
+          DB_PR: ${{ inputs.pr_number }}
+          MIGRATION_SHA256: ${{ inputs.migration_sha256 }}
+        run: python3 scripts/check-access-request-deployment.py
+      - name: Install pinned PostgreSQL driver
+        run: python3 -m pip install 'psycopg[binary]==3.2.10'
+      - name: Apply exact merged file and verify fingerprint atomically
+        env:
+          PRODUCTION_DB_DSN: ${{ secrets.PRODUCTION_DB_DSN }}
+          MIGRATION_SHA256: ${{ inputs.migration_sha256 }}
+        run: python3 scripts/deploy-access-requests.py
+      - name: Verify equality from a new read-only connection
+        env:
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGOPTIONS: -c default_transaction_read_only=on
+        run: |
+          set -euo pipefail
+          test -n "$PGPASSWORD"
+          psql "host=aws-0-eu-central-1.pooler.supabase.com port=5432 dbname=postgres user=postgres.cnxtylngddwmhugxkzju sslmode=require connect_timeout=10" -X -v ON_ERROR_STOP=1 -f .github/audit/access-request-signatures.sql > production-access-signatures.txt
+          python3 scripts/check-access-request-delta.py baseline-access-signatures.txt candidate-access-signatures.txt production-access-signatures.txt --post
+      - name: Tag only the verified deployment
+        env:
+          DEPLOY_COMMIT: ${{ inputs.commit }}
+        run: |
+          set -euo pipefail
+          tag='db/access-requests-A-20260929204856'
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
+            git fetch origin "refs/tags/$tag:refs/tags/$tag"
+            test "$(git rev-list -n 1 "$tag")" = "$DEPLOY_COMMIT"
+          else
+            git config user.name github-actions
+            git config user.email github-actions@users.noreply.github.com
+            git tag -a "$tag" "$DEPLOY_COMMIT" -m 'Exact migration 20260929204856; complete production/replay equality verified'
+            git push origin "refs/tags/$tag"
+          fi

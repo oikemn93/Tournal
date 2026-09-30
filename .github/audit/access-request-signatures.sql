@@ -99,8 +99,11 @@ relation_acls as (
   from pg_class c join pg_namespace n on n.oid=c.relnamespace
   where n.nspname in ('public','private') and c.relkind in ('r','p','v','m','S')
 ),
+access_request_jobs as (
+  select 'cron_jobs'::text,jobname,concat_ws('|',schedule,command,active::text,username,database)
+  from cron.job where jobname='access-requests-retention'
+),
 objects(category,identity,x) as (
-  select * from relation_acls union all
   select * from relations union all
   select * from columns union all
   select * from constraints union all
@@ -108,7 +111,9 @@ objects(category,identity,x) as (
   select * from policies union all
   select * from functions union all
   select * from triggers union all
-  select * from types
+  select * from types union all
+  select * from relation_acls union all
+  select * from access_request_jobs
 )
 select category, identity, md5(x)
 from objects
