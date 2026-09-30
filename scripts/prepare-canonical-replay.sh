@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+set -euo pipefail
+set -euo pipefail
+test -s .github/audit/replay-config.toml
+test -d .github/audit/replay-migrations
+cp .github/audit/replay-config.toml supabase/config.toml
+cp .github/audit/replay-migrations/*.sql supabase/migrations/
+echo "audit_replay_inputs=$(find .github/audit/replay-migrations -maxdepth 1 -type f -name '*.sql' | wc -l)"
+
+set -euo pipefail
+first_line="$(head -n 1 scripts/ci-db-baseline.sql)"
+test "$first_line" = '\set ON_ERROR_STOP on'
+tail -n +2 scripts/ci-db-baseline.sql > supabase/migrations/20260816000000_ci_relational_baseline.sql
+if grep -n '^\\' supabase/migrations/20260816000000_ci_relational_baseline.sql; then
+  echo 'Unexpected psql meta-command remains in audit baseline.' >&2
+  exit 2
+fi
+cat >> supabase/migrations/20260816000000_ci_relational_baseline.sql <<'SQL'
+
+create extension if not exists pg_cron with schema pg_catalog;
+
+create table if not exists public.auth_settings (
+  boutique_id text primary key references public.boutiques(id) on delete cascade,
+  lock_minutes integer not null default 5,
+  session_minutes integer not null default 480,
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.caisse_sessions (
+  id text not null,
+  boutique_id text not null references public.boutiques(id) on delete cascade,
+  opened_at timestamptz not null default now(),
+  closed_at timestamptz,
+  fond_ouverture numeric not null default 0,
+  fond_fermeture numeric,
+  total_ventes numeric,
+  total_charges numeric,
+  operator_id uuid references public.platform_users(id) on delete set null,
+  note text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (boutique_id, id)
+);
+
+do $$
+begin
+  if not exists (select 1 from cron.job where jobname='cleanup-temporary-invoice-pdfs') then
+    perform cron.schedule('cleanup-temporary-invoice-pdfs','0 3 * * *','select 1');
+  end if;
+end;
+$$;
+SQL
+
+set -euo pipefail
+hits="$(grep -Ril 'create policy if not exists' supabase/migrations --include='*.sql' || true)"
+if [ -n "$hits" ]; then
+  printf '%s\n' "$hits"
+  find supabase/migrations -type f -name '*.sql' -print0 | xargs -0 sed -i -E 's/CREATE POLICY IF NOT EXISTS/CREATE POLICY/Ig'
+fi
+
+python3 - <<'PY'
+from pathlib import Path
+
+path = Path('supabase/migrations/20260827200739_prevent_duplicate_sales_and_repair_awa.sql')
+text = path.read_text()
+marker = '-- Confirmed data repair for Awa Diop.'
+if marker not in text:
+    raise SystemExit('Awa data-repair marker not found; refuse to rewrite unknown migration')
+start = text.index(marker)
+commit = text.rfind('commit;')
+if commit <= start:
+    raise SystemExit('Awa migration final commit not found after data-repair block')
+path.write_text(text[:start] + '-- Production-only Awa Diop repair omitted from clean schema replay.\n' + text[commit:])
+PY
+
+set -euo pipefail
+manifest='.github/audit/remote-migration-manifest.txt'
+test -s "$manifest"
+: > /tmp/migration-order.txt
+while IFS= read -r path; do
+  base="$(basename "$path")"
+  if [ "$base" = '20260816000000_ci_relational_baseline.sql' ]; then printf '%s|%s\n' '20260816000000' "$path" >> /tmp/migration-order.txt; continue; fi
+  prefix="${base%%_*}"; logical="${base#*_}"; logical="${logical%.sql}"
+  case "$logical" in reconcile_legacy_stock) echo "Skipping production-data migration during clean schema replay: $base"; continue;; esac
+  if [[ "$prefix" =~ ^[0-9]{14}$ ]]; then target="$prefix"; elif [[ "$prefix" =~ ^[0-9]{8}$ ]]; then target="${prefix}120000"; else echo "Unsupported migration filename: $base" >&2; exit 3; fi
+  key="$(awk -F'|' -v n="$logical" -v t="$target" '$2==n {d=$1-t; if(d<0)d=-d; if(!found||d<best){best=d;version=$1;found=1}} END{if(found)print version}' "$manifest")"
+  if [ -z "$key" ]; then
+    case "$logical" in
+      fix_user_display_name_sync) key='20260819215910';; global_web_notifications) key='20260820072540';; security_hardening_snapshot) key='20260820235950';;
+      return_v2_integrity_and_credit_notes) key='20260829144145';; return_v2_net_due_and_payment_guards) key='20260829144755';; return_v2_fifo_margin_and_history) key='20260829144930';;
+      transfer_receiving_v2) key='20260829175250';; transfer_directory_notifications_multi_conditioning) key='20260829183513';;
+      enforce_counter_full_payment_client_immediate_stock) key='20260902205654';; correct_stock_commit_timing) key='20260902210321';;
+      *) if [[ "$prefix" =~ ^[0-9]{14}$ ]]; then key="$prefix"; else key="${prefix}235959"; fi;;
+    esac
+  fi
+  printf '%s|%s\n' "$key" "$path" >> /tmp/migration-order.txt
+done < <(find supabase/migrations -maxdepth 1 -type f -name '*.sql' | sort)
+echo 'Resolved migration order:'; sort -t'|' -k1,1 -k2,2 /tmp/migration-order.txt
+mkdir -p /tmp/tournal-migrations; i=0
+while IFS='|' read -r source_key path; do i=$((i+1)); base="$(basename "$path")"; logical="${base#*_}"; version="$(printf '20000101%06d' "$i")"; cp "$path" "/tmp/tournal-migrations/${version}_${logical}"; done < <(sort -t'|' -k1,1 -k2,2 /tmp/migration-order.txt)
+rm -f supabase/migrations/*.sql; cp /tmp/tournal-migrations/*.sql supabase/migrations/
+versions="$(find supabase/migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | cut -d_ -f1)"; test "$(printf '%s\n' "$versions" | sort | uniq -d | wc -l)" -eq 0
