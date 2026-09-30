@@ -54,7 +54,7 @@ Deno.serve(async (req) => {
       .eq("enabled", true);
     if (subscriptionsError) return json({ error: "Subscription lookup failed" }, 500);
 
-    webpush.setVapidDetails("https://tournal.vercel.app", String(config.publicKey), String(config.privateKey));
+    webpush.setVapidDetails("https://tournal.org", String(config.publicKey), String(config.privateKey));
 
     const tab = notification.action_tab ? `&tab=${encodeURIComponent(notification.action_tab)}` : "";
     const boutique = `&boutique=${encodeURIComponent(notification.boutique_id)}`;

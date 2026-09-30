@@ -3,7 +3,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2.49.8";
 const BUCKET = "invoice-pdfs";
 const EXPIRES_SECONDS = 48 * 60 * 60;
 const MAX_PDF_BYTES = 12 * 1024 * 1024;
-const PUBLIC_APP_URL = (Deno.env.get("TOURNAL_PUBLIC_URL") ?? "https://tournal.vercel.app").replace(/\/$/, "");
+const PUBLIC_APP_URL = (Deno.env.get("TOURNAL_PUBLIC_URL") ?? "https://tournal.org").replace(/\/$/, "");
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
