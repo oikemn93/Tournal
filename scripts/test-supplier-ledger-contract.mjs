@@ -5,17 +5,19 @@ const suppliers = fs.readFileSync('src/app/screens/FournisseursView.tsx','utf8')
 const stock = fs.readFileSync('src/app/screens/StockView.tsx','utf8');
 const migration = fs.readFileSync('.github/audit/replay-migrations/20260906161544_supplier_ledger_single_source_of_truth.sql','utf8');
 function need(ok,msg){ if(!ok) throw new Error(msg); }
-const balanceFn = inventory.slice(inventory.indexOf('export function supplierBalance'), inventory.indexOf('// ─── MARGIN'));
+const balanceFn = inventory.slice(inventory.indexOf('export function supplierBalance'), inventory.indexOf('export function fifoUnitCost'));
 need(balanceFn.includes('c.source === "supplier_receipt"'),'supplierBalance must use supplier receipts');
-need(balanceFn.includes('Number(c.montant) - Number(c.paidAmount ?? 0)'),'supplierBalance must use receipt outstanding');
-need(!balanceFn.includes('c.source === "transfer"'),'supplierBalance must not mix transfer debt');
+need(balanceFn.includes('c.source === "transfer"'),'supplierBalance must include transfer payables linked to the supplier');
+need(balanceFn.includes('Number(c.montant) - Number(c.paidAmount ?? 0)'),'supplierBalance must use payable outstanding');
+need(inventory.includes('charge.source === "transfer" && charge.transferId === transferId'),'stock receipt outstanding must resolve its transfer payable');
+need(inventory.includes('Number(entry.montantDu)') && inventory.includes('(remaining / total)'),'transfer receipt outstanding must follow the canonical transfer payable balance');
 need(api.includes('params.idempotencyKey ?? crypto.randomUUID()'),'supplier payment must accept a stable retry key');
 need(suppliers.includes('idempotencyKey:requestKey'),'supplier screen must reuse payment retry key');
 need(suppliers.includes('ACHATS · 30 JOURS'),'supplier metrics must state the loaded time window');
 need(suppliers.includes('À régulariser'),'receipt without payable must never be displayed as paid');
 need(!suppliers.includes('period==="365"'),'supplier screen must not claim unloaded 12-month history');
 need(stock.includes('status:Number(dMontant)>0 ? "pending" as const : "paid" as const') && stock.includes('status:Number(nMontant)>0 ? "pending" as const : "paid" as const'),'zero-value receipt optimistic state must be paid');
-need(migration.includes("and c.source = 'supplier_receipt'"),'server supplier balance/payment must use payable ledger');
+need(migration.includes("and c.source = 'supplier_receipt'"),'server supplier payment RPC must use the supplier-receipt payable ledger');
 need(!migration.includes('v_stock_due'),'legacy stock-derived supplier debt must be gone');
 need(migration.includes("c.source not in ('supplier_receipt','transfer')"),'dashboard must exclude payable documents from cash charges');
 need(migration.includes('transfer_charge_payments'),'dashboard must date transfer cash from payment ledger');
