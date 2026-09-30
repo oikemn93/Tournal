@@ -1,7 +1,7 @@
 \set ON_ERROR_STOP on
 
 -- Audit-only structural fingerprint, including relation privileges.
--- Exact production snapshot read through the Supabase connector on 2026-09-29.
+-- Exact production snapshot read through the Supabase connector on 2026-09-30.
 -- No application data is read. No historical candidate exceptions are allowed.
 create temp table audit_expected_fingerprint(
   category text primary key,

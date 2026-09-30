@@ -36,7 +36,7 @@ TRUNCATE/TRIGGER méritent une revue de sécurité séparée ; cette PR ne les c
 pas en production. PostgreSQL 17 est requis pour MAINTAIN.
 
 Les signatures couvrent désormais également les ACL des 79 relations. Le
-fingerprint épingle la production lue le 29 septembre 2026 et refuse tout écart,
+fingerprint épingle la production lue le 30 septembre 2026 et refuse tout écart,
 y compris les anciennes variantes de fonctions auparavant tolérées.
 
 La CI réalise le replay canonique et vérifie ce fingerprint figé. Si le secret
