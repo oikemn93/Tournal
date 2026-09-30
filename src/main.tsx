@@ -344,14 +344,19 @@ function route() {
   try {
     hasSession = Boolean(JSON.parse(sessionStorage.getItem("tournal.supabase.session") || "null")?.access_token);
   } catch { /* Treat an unreadable session as signed out. */ }
-  const legacyLink = path === "/" && ["tab", "boutique", "notification"].some(key => new URLSearchParams(window.location.search).has(key));
+  const query = new URLSearchParams(window.location.search);
+  const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  const legacyLink = path === "/" && (
+    ["tab", "boutique", "notification", "code", "token_hash", "error"].some(key => query.has(key)) ||
+    ["access_token", "refresh_token", "error"].some(key => hash.has(key))
+  );
   if (path === "/" && !hasSession && !legacyLink) {
     document.title = "Tournal | Stocks, ventes et marges pour vos boutiques";
     return <PublicSite />;
   }
   const destination = hasSession ? "/app" : "/login";
   if (path !== destination) window.history.replaceState({}, "", destination + window.location.search + window.location.hash);
-  document.title = "Connexion | Tournal";
+  document.title = hasSession ? "Mon espace | Tournal" : "Connexion | Tournal";
   return <React.Suspense fallback={<div role="status" style={{ padding: 32 }}>Chargement de Tournal…</div>}><OfflineCoordinator><App /></OfflineCoordinator></React.Suspense>;
 }
 
