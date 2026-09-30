@@ -89,7 +89,18 @@ types as (
   where n.nspname in ('public','private') and t.typtype in ('e','d')
   group by n.nspname,t.typname,t.typtype
 ),
+relation_acls as (
+  select 'relation_acls'::text, n.nspname||'.'||c.relname,
+    coalesce((select string_agg(concat_ws(':',case when a.grantee=0 then 'PUBLIC' else gr.rolname end,
+      a.privilege_type,a.is_grantable::text,grantor.rolname),',' order by
+      case when a.grantee=0 then 'PUBLIC' else gr.rolname end,a.privilege_type,a.is_grantable,grantor.rolname)
+      from aclexplode(coalesce(c.relacl,acldefault(case when c.relkind='S' then 's'::"char" else 'r'::"char" end,c.relowner))) a
+      left join pg_roles gr on gr.oid=a.grantee left join pg_roles grantor on grantor.oid=a.grantor),'')
+  from pg_class c join pg_namespace n on n.oid=c.relnamespace
+  where n.nspname in ('public','private') and c.relkind in ('r','p','v','m','S')
+),
 objects(category,identity,x) as (
+  select * from relation_acls union all
   select * from relations union all
   select * from columns union all
   select * from constraints union all

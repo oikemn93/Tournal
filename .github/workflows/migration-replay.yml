@@ -229,6 +229,7 @@ jobs:
           for category in sorted({k[0] for k in set(local)|set(prod)}):
               p=sum(1 for k in prod if k[0]==category); l=sum(1 for k in local if k[0]==category); d=sum(1 for r in rows if r.split('|',2)[1]==category)
               print(f'{category}: local={l} prod={p} diff={d}')
+          if rows: raise SystemExit('production/replay schema mismatch')
           PY
       - name: Upload hashed schema diagnostics
         uses: actions/upload-artifact@v4
