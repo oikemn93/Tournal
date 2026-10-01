@@ -37,7 +37,7 @@ function base64ToBytes(value: string) {
 
 function readRecord(): OfflinePinRecord | null {
   try {
-    const raw = sessionStorage.getItem(OFFLINE_PIN_KEY) ?? localStorage.getItem(OFFLINE_PIN_KEY);
+    const raw = sessionStorage.getItem(OFFLINE_PIN_KEY);
     if (!raw) return null;
     const record = JSON.parse(raw) as OfflinePinRecord;
     if (!record?.userId || !record.salt || !record.verifier || !Number.isFinite(record.expiresAt)) return null;
@@ -49,8 +49,8 @@ function readRecord(): OfflinePinRecord | null {
 
 function writeRecord(record: OfflinePinRecord | null) {
   try {
-    if (record) sessionStorage.setItem(OFFLINE_PIN_KEY, JSON.stringify(record)); localStorage.setItem(OFFLINE_PIN_KEY, JSON.stringify(record));
-    else sessionStorage.removeItem(OFFLINE_PIN_KEY); localStorage.removeItem(OFFLINE_PIN_KEY);
+    if (record) sessionStorage.setItem(OFFLINE_PIN_KEY, JSON.stringify(record));
+    else sessionStorage.removeItem(OFFLINE_PIN_KEY);
   } catch {
     // Session storage can be unavailable in hardened/private browser contexts.
   }
