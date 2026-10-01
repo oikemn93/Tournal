@@ -41,6 +41,7 @@ export function AccessRequestNavigation({ scope, global, boutiques }: Props) {
   const [note, setNote] = useState("")
   const [destination, setDestination] = useState("")
   const [error, setError] = useState("")
+  const [feedback, setFeedback] = useState("")
   const [busy, setBusy] = useState(false)
   const mutation = useRef(false)
   const selection = useRef(0)
@@ -128,16 +129,19 @@ export function AccessRequestNavigation({ scope, global, boutiques }: Props) {
     window.addEventListener("tournal:access-request", navigate)
     return () => window.removeEventListener("tournal:access-request", navigate)
   }, [scope])
-  async function mutate(action: () => Promise<AccessDetail>) {
+  async function mutate(action: () => Promise<AccessDetail>, success = "Modification enregistrée") {
     if (mutation.current) return
     mutation.current = true
     setBusy(true)
     setError("")
+    setFeedback("")
     try {
       const next = await action()
       if (mounted.current) {
         setDetail(next)
         setNote(next.note_interne || "")
+        setDestination(next.boutique_id || "")
+        setFeedback(success)
         await reload()
       }
     } catch {
@@ -183,11 +187,10 @@ export function AccessRequestNavigation({ scope, global, boutiques }: Props) {
           }
         }}
       >
-        <DialogContent className="max-w-4xl max-h-[90dvh] overflow-y-auto">
+        <DialogContent className="inset-0 left-0 top-0 translate-x-0 translate-y-0 h-[100dvh] w-screen max-w-none rounded-none overflow-y-auto p-4 sm:left-[50%] sm:top-[50%] sm:h-auto sm:w-full sm:max-w-4xl sm:max-h-[90dvh] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-lg sm:p-6">
           <DialogTitle>Demandes d’accès</DialogTitle>
-          <DialogDescription>
-            Étudiez les demandes attribuées à votre périmètre. L’acceptation à
-            cette étape ne crée aucun compte.
+          <DialogDescription className="hidden sm:block">
+            Étudiez les demandes attribuées à votre périmètre. L’acceptation à cette étape ne crée aucun compte.
           </DialogDescription>
           <div className="flex flex-wrap gap-3 items-end">
             <label className="text-sm font-bold">
@@ -219,13 +222,10 @@ export function AccessRequestNavigation({ scope, global, boutiques }: Props) {
               Actualiser
             </button>
           </div>
-          {error && (
-            <p role="alert" className="text-red-800">
-              {error}
-            </p>
-          )}
+          {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm font-bold text-red-800">{error}</p>}
+          {feedback && <p role="status" className="rounded-lg bg-emerald-50 p-3 text-sm font-bold text-emerald-800">{feedback}</p>}
           <div className="grid md:grid-cols-2 gap-5">
-            <section aria-label="Liste des demandes">
+            <section aria-label="Liste des demandes" className={detail ? "hidden md:block" : "block"}>
               <ul className="space-y-2">
                 {rows.map((row) => (
                   <li key={row.id}>
@@ -267,9 +267,10 @@ export function AccessRequestNavigation({ scope, global, boutiques }: Props) {
                 </button>
               </div>
             </section>
-            <section aria-label="Détail de la demande">
+            <section aria-label="Détail de la demande" className={detail ? "block" : "hidden md:block"}>
               {detail ? (
                 <>
+                  <button type="button" disabled={busy} onClick={() => { setDetail(null); setFeedback(""); }} className="mb-3 rounded-lg border px-3 py-2 text-sm font-bold md:hidden">← Retour aux demandes</button>
                   <h2 className="text-lg font-black">
                     {detail.nom || "Demande anonymisée"}
                   </h2>
@@ -311,9 +312,11 @@ export function AccessRequestNavigation({ scope, global, boutiques }: Props) {
                         onClick={() =>
                           void mutate(() =>
                             routeRequest(detail.id, destination || null),
-                          )
+                          ),
+                          "Attribution enregistrée",
+                        )
                         }
-                        className="border rounded px-3 py-2"
+                        className="w-full rounded-xl bg-slate-950 px-3 py-3 font-bold text-white disabled:opacity-50"
                       >
                         Enregistrer l’attribution
                       </button>
@@ -332,7 +335,7 @@ export function AccessRequestNavigation({ scope, global, boutiques }: Props) {
                     />
                   </label>
                   {!terminal && (
-                    <div className="flex flex-wrap gap-2">
+                    <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
                       {([
                         "vue",
                         "acceptee",
@@ -346,9 +349,11 @@ export function AccessRequestNavigation({ scope, global, boutiques }: Props) {
                           onClick={() =>
                             void mutate(() =>
                               decideRequest(detail.id, value, note),
-                            )
+                            ),
+                            value === "vue" ? "Demande marquée comme vue" : value === "acceptee" ? "Demande acceptée" : value === "refusee" ? "Demande refusée" : "Complément demandé",
+                          )
                           }
-                          className={`rounded-lg border px-3 py-2 font-bold ${
+                          className={`min-h-11 rounded-lg border px-3 py-2 font-bold disabled:opacity-50 ${
                             value === "acceptee"
                               ? "bg-[#C9A227] text-slate-950"
                               : ""
