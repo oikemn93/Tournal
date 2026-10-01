@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /app
+Disallow: /login
+Disallow: /d/
+Sitemap: https://tournal.org/sitemap.xml

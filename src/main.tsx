@@ -1,8 +1,8 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import "./styles/index.css";
-import App from "./app/App";
-import { refreshSessionIfNeeded } from "./lib/api";
+import PublicSite from "./PublicSite";
+const App = React.lazy(() => import("./app/App"));
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL ?? "https://cnxtylngddwmhugxkzju.supabase.co";
 const PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? "sb_publishable_Jeo4Bx2IsTPCkzsQMYTuFQ_VKPQc9Aq";
@@ -145,6 +145,7 @@ function OfflineCoordinator({ children }: { children: React.ReactNode }) {
     let networkInterrupted = false;
 
     try {
+      const { refreshSessionIfNeeded } = await import("./lib/api");
       const session = await refreshSessionIfNeeded();
       for (const record of [...records].sort((a, b) => a.createdAt - b.createdAt)) {
         const body = { ...record.body };
@@ -333,7 +334,33 @@ window.addEventListener("error", event => { void recoverFromStaleModule(event.er
 window.addEventListener("unhandledrejection", event => { void recoverFromStaleModule(event.reason); });
 window.setTimeout(() => sessionStorage.removeItem(MODULE_RECOVERY_KEY), 15_000);
 
-createRoot(document.getElementById("root")!).render(<OfflineCoordinator><App /></OfflineCoordinator>);
+function route() {
+  const path = window.location.pathname;
+  if (path === "/mentions-legales" || path === "/confidentialite") {
+    document.title = path === "/mentions-legales" ? "Mentions légales | Tournal" : "Politique de confidentialité | Tournal";
+    return <PublicSite page={path === "/mentions-legales" ? "legal" : "privacy"} />;
+  }
+  let hasSession = false;
+  try {
+    hasSession = Boolean(JSON.parse(sessionStorage.getItem("tournal.supabase.session") || "null")?.access_token);
+  } catch { /* Treat an unreadable session as signed out. */ }
+  const query = new URLSearchParams(window.location.search);
+  const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  const legacyLink = path === "/" && (
+    ["tab", "boutique", "notification", "code", "token_hash", "error"].some(key => query.has(key)) ||
+    ["access_token", "refresh_token", "error"].some(key => hash.has(key))
+  );
+  if (path === "/" && !hasSession && !legacyLink) {
+    document.title = "Tournal | Stocks, ventes et marges pour vos boutiques";
+    return <PublicSite />;
+  }
+  const destination = hasSession ? "/app" : "/login";
+  if (path !== destination) window.history.replaceState({}, "", destination + window.location.search + window.location.hash);
+  document.title = hasSession ? "Mon espace | Tournal" : "Connexion | Tournal";
+  return <React.Suspense fallback={<div role="status" style={{ padding: 32 }}>Chargement de Tournal…</div>}><OfflineCoordinator><App /></OfflineCoordinator></React.Suspense>;
+}
+
+createRoot(document.getElementById("root")!).render(route());
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
