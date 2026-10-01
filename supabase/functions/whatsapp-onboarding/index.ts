@@ -131,6 +131,14 @@ Deno.serve(async (req)=>{
       );
       const templatesResult=await templatesResponse.json().catch(()=>null);
       if(!templatesResponse.ok){
+        const metaMessage=String(templatesResult?.error?.message??"");
+        if(/nonexisting field \(message_templates\).*WhatsAppBusinessPhoneNumber/i.test(metaMessage)){
+          return json({
+            error:"WHATSAPP_WABA_ID contient un Phone Number ID. Remplacez-le par le WhatsApp Business Account ID (WABA ID) affiché dans Meta > WhatsApp > API Setup.",
+            meta_code:100,
+            wrong_waba_id:true,
+          },503);
+        }
         return json({
           error:templatesResult?.error?.message??"Lecture des templates WhatsApp impossible",
           meta_code:templatesResult?.error?.code??null,
