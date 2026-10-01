@@ -5,6 +5,7 @@ export const DIAL_CODES = [
   { code: "+225", flag: "🇨🇮", name: "Côte d'Ivoire" },
   { code: "+223", flag: "🇲🇱", name: "Mali" },
   { code: "+224", flag: "🇬🇳", name: "Guinée" },
+  { code: "+220", flag: "🇬🇲", name: "Gambie" },
   { code: "+233", flag: "🇬🇭", name: "Ghana" },
   { code: "+226", flag: "🇧🇫", name: "Burkina Faso" },
   { code: "+228", flag: "🇹🇬", name: "Togo" },
