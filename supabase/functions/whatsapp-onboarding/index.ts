@@ -133,7 +133,6 @@ Deno.serve(async (req)=>{
         example:{body_text:[["Awa Diallo","Boutique GGR","+221781224409"]]},
       }],
     });
-    if(!utility.ready) return json({error:utility.error,template_status:utility.status,template_name:WHATSAPP_UTILITY_TEMPLATE_NAME},409);
 
     const authTemplate=await ensureTemplate({
       name:WHATSAPP_AUTH_TEMPLATE_NAME,
@@ -143,7 +142,15 @@ Deno.serve(async (req)=>{
         {type:"BUTTONS",buttons:[{type:"OTP",otp_type:"COPY_CODE",text:"Copier le code"}]},
       ],
     });
-    if(!authTemplate.ready) return json({error:authTemplate.error,template_status:authTemplate.status,template_name:WHATSAPP_AUTH_TEMPLATE_NAME},409);
+
+    if(!utility.ready||!authTemplate.ready){
+      const waiting=[
+        !utility.ready?`${WHATSAPP_UTILITY_TEMPLATE_NAME}: ${utility.status??"PENDING"}`:null,
+        !authTemplate.ready?`${WHATSAPP_AUTH_TEMPLATE_NAME}: ${authTemplate.status??"PENDING"}`:null,
+      ].filter(Boolean);
+      const errors=[!utility.ready?utility.error:null,!authTemplate.ready?authTemplate.error:null].filter(Boolean);
+      return json({error:errors.join(" "),template_statuses:waiting},409);
+    }
 
     if(!/^[A-Za-z0-9]{12,15}$/.test(temporaryPassword)){
       const {data:target,error:targetError}=await admin.from("platform_users").select("id").eq("phone",rawPhone).maybeSingle();
