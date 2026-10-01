@@ -38,6 +38,7 @@ const RelationalInventoryView = lazyScreen(() => import("./screens/InventoryView
 import { SuperAdminUserActions } from "./components/SuperAdminUserActions";
 import { TournalOpsWorkspace as TournalOps } from "./components/TournalOpsWorkspace";
 import { loadMyOpsStaffProfile, loadOpsShell } from "../lib/ops";
+import { AccessRequestNavigation } from "./components/AccessRequestNavigation";
 import { NotificationCenter } from "./components/NotificationCenter";
 import { ROLE_PRESETS } from "./permissions";
 import type { Permission } from "./types";
@@ -9853,7 +9854,7 @@ export default function App() {
     <div className="min-h-screen flex items-center justify-center px-5 bg-background text-foreground"><div className="w-full max-w-md rounded-3xl border bg-card p-6 shadow-sm"><ShieldCheck className="mb-4 text-red-600"/><h1 className="text-xl font-black">Accès Tournal Ops refusé</h1><p className="mt-2 text-sm text-muted-foreground">Votre compte n’a pas les droits Ops.</p><button type="button" onClick={()=>setScreen("boutique-select")} className="mt-4 w-full rounded-2xl bg-slate-950 py-3 text-sm font-black text-white">Retour aux boutiques</button></div></div>
   );
   if (screen==="superadmin"&&currentUser&&userCanAccessOps(currentUser)) return (
-    <SuperAdminScreen boutiques={boutiques} platformUsers={platformUsers} groupes={groupes}
+    <div><div className="flex justify-end px-4 py-2 bg-white border-b">{currentUser.isSuperAdmin && <AccessRequestNavigation key={currentUser.id} scope={null} global boutiques={boutiques}/>}</div><SuperAdminScreen boutiques={boutiques} platformUsers={platformUsers} groupes={groupes}
       onEnterBoutique={handleEnterBoutiqueAsAdmin}
       onCreateBoutique={handleCreateBoutique}
       onUpdateBoutique={handleUpdateBoutique}
@@ -9866,7 +9867,7 @@ export default function App() {
       onResetPassword={handleResetPassword}
       onLogout={handleLogout}
       backendOk={backendOk}
-      saveState={saveState}/>
+      saveState={saveState}/></div>
   );
   if (screen==="boutique-select"&&currentUser) {
     // SuperAdmin access is global and must not depend on per-boutique assignments.
@@ -9987,6 +9988,7 @@ export default function App() {
           {saveState==="saved"&&<span className="text-xs text-green-600 font-semibold flex items-center gap-1"><span className="inline-block w-1.5 h-1.5 rounded-full bg-green-500"/>Sauvegardé</span>}
           {saveState==="error"&&<span className="text-xs text-red-500 font-semibold flex items-center gap-1"><span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500"/>Erreur sync</span>}
           {saveState==="idle"&&backendOk===false&&<span className="text-xs text-red-400 font-semibold flex items-center gap-1"><span className="inline-block w-1.5 h-1.5 rounded-full bg-red-400"/>Hors ligne</span>}
+          {(isOwner || currentUser.isSuperAdmin) && appSessionReady && !locked && <AccessRequestNavigation key={`${currentUser.id}:${boutique.id}`} scope={boutique.id} global={currentUser.isSuperAdmin} boutiques={boutiques}/>}
           <button onClick={pullRemote} title="Synchroniser maintenant" className="p-2 rounded-xl active:scale-95 transition-transform" style={{ background:"#EEE9D8" }}><RefreshCw size={16} className="text-muted-foreground"/></button>
           <button onClick={()=>setNotifOpen(o=>!o)} className="relative p-2.5 rounded-xl" style={{ background:"#EEE9D8" }}>
             <Bell size={22} className="text-muted-foreground"/>
@@ -10116,7 +10118,7 @@ export default function App() {
                 <button key={n.serverId?`server-${n.serverId}`:`local-${n.id}`} onClick={()=>{
                   setNotifs(prev=>prev.map(x=>x.id===n.id?{...x,read:true}:x));
                   if (n.serverId) void markNotificationRead(n.serverId).catch(()=>undefined);
-                  if (n.tab) { setTab(n.tab); if (n.filter) setNavFilter(n.filter); }
+                  if (String(n.tab) === "access_requests") { window.dispatchEvent(new CustomEvent("tournal:access-request", { detail: { id: n.filter?.request_id } })); } else if (n.tab) { setTab(n.tab); if (n.filter) setNavFilter(n.filter); }
                   setNotifOpen(false);
                 }} className="w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-muted/60 transition-colors border-b border-border/50 last:border-0" style={{background:n.read?"transparent":"#3b82f608"}}>
                   <span className="text-xl leading-none mt-0.5 flex-shrink-0">{n.icon}</span>
@@ -10142,6 +10144,7 @@ export default function App() {
         activeBoutiqueId={activeBoutiqueId!}
         canManageSettings={currentUser.isSuperAdmin || isOwner}
         onNavigate={(targetTab,filter)=>{
+          if (targetTab === "access_requests") { setNotificationCenterOpen(false); window.dispatchEvent(new CustomEvent("tournal:access-request", { detail: { id: filter?.request_id } })); return; }
           const found=ALL_NAV.find(n=>n.id===targetTab);
           if(found){ setTab(found.id); if(filter) setNavFilter(filter); }
         }}

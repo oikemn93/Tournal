@@ -2,6 +2,8 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import "./styles/index.css";
 import PublicSite from "./PublicSite";
+const AccessRequestPage = React.lazy(() => import("./public/AccessRequestPage"));
+import { refreshSessionIfNeeded } from "./lib/api";
 const App = React.lazy(() => import("./app/App"));
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL ?? "https://cnxtylngddwmhugxkzju.supabase.co";
@@ -336,6 +338,10 @@ window.setTimeout(() => sessionStorage.removeItem(MODULE_RECOVERY_KEY), 15_000);
 
 function route() {
   const path = window.location.pathname;
+  if (path === "/demande-acces") {
+    document.title = "Demander un accès | Tournal";
+    return <React.Suspense fallback={<div role="status" style={{ padding: 32 }}>Chargement…</div>}><AccessRequestPage /></React.Suspense>;
+  }
   if (path === "/mentions-legales" || path === "/confidentialite") {
     document.title = path === "/mentions-legales" ? "Mentions légales | Tournal" : "Politique de confidentialité | Tournal";
     return <PublicSite page={path === "/mentions-legales" ? "legal" : "privacy"} />;
