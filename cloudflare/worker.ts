@@ -8,7 +8,9 @@ async function documentShare(token: string, request: Request): Promise<Response>
   // Preserve only the existing document format selector, never credentials.
   if (incoming.searchParams.has('format')) upstream.searchParams.set('format', incoming.searchParams.get('format')!);
   try {
-    const response = await fetch(upstream, { redirect: 'error', signal: AbortSignal.timeout(15000) });
+    // document-share returns a signed download URL in a 302 response.
+    // Pass it to the browser without following it or rejecting it here.
+    const response = await fetch(upstream, { redirect: 'manual', signal: AbortSignal.timeout(15000) });
     const headers = new Headers(response.headers);
     headers.set('Cache-Control', 'no-store, max-age=0');
     headers.set('X-Content-Type-Options', 'nosniff');
