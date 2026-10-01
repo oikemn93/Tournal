@@ -9456,15 +9456,21 @@ export default function App() {
 
   useEffect(() => { void refreshAuthenticatedFlow(); }, [refreshAuthenticatedFlow]);
 
-  // Keep the existing in-app screen flow while giving authentication its own URL.
+  // Keep Ops on its dedicated host while preserving the customer application URL.
   useEffect(() => {
     if (!synced) return;
-    const destination = screen === "login" ? "/login" : "/app";
+    const isOpsHost = window.location.hostname === "ops.tournal.org" || window.location.hostname.startsWith("ops.");
+    const canOps = Boolean(currentUser && userCanAccessOps(currentUser));
+    if (screen === "superadmin" && canOps && !isOpsHost && window.location.hostname === "tournal.org") {
+      window.location.replace("https://ops.tournal.org/" + window.location.search + window.location.hash);
+      return;
+    }
+    const destination = screen === "login" ? "/login" : screen === "superadmin" ? "/" : "/app";
     if (window.location.pathname !== destination) {
       window.history.replaceState({}, "", destination + window.location.search + window.location.hash);
     }
-    document.title = screen === "login" ? "Connexion | Tournal" : "Tournal | Application";
-  }, [screen, synced]);
+    document.title = screen === "login" ? "Connexion | Tournal" : screen === "superadmin" ? "Tournal Ops | Support & administration" : "Tournal | Application";
+  }, [screen, synced, currentUser]);
 
   // Prevent accidental value changes when scrolling over a focused number input.
   // Blurring on wheel lets the scroll event propagate normally to the page.
@@ -9854,7 +9860,19 @@ export default function App() {
     <div className="min-h-screen flex items-center justify-center px-5 bg-background text-foreground"><div className="w-full max-w-md rounded-3xl border bg-card p-6 shadow-sm"><ShieldCheck className="mb-4 text-red-600"/><h1 className="text-xl font-black">Accès Tournal Ops refusé</h1><p className="mt-2 text-sm text-muted-foreground">Votre compte n’a pas les droits Ops.</p><button type="button" onClick={()=>setScreen("boutique-select")} className="mt-4 w-full rounded-2xl bg-slate-950 py-3 text-sm font-black text-white">Retour aux boutiques</button></div></div>
   );
   if (screen==="superadmin"&&currentUser&&userCanAccessOps(currentUser)) return (
-    <div><div className="flex justify-end px-4 py-2 bg-white border-b">{currentUser.isSuperAdmin && <AccessRequestNavigation key={currentUser.id} scope={null} global boutiques={boutiques}/>}</div><SuperAdminScreen boutiques={boutiques} platformUsers={platformUsers} groupes={groupes}
+    <TournalOps
+      boutiques={boutiques}
+      users={platformUsers}
+      onOpenBoutique={id=>{const target=boutiques.find(b=>b.id===id);if(target)handleEnterBoutiqueAsAdmin(target);}}
+      onSystem={()=>setScreen("system-admin")}
+      onLogout={handleLogout}
+      canSystemAdmin={Boolean(currentUser.isSuperAdmin)}
+      canEnterBoutique={Boolean(currentUser.isSuperAdmin)}
+      opsRole={(currentUser as PlatformUser & {opsRole?:string}).opsRole}
+    />
+  );
+  if (screen==="system-admin"&&currentUser?.isSuperAdmin) return (
+    <div><div className="flex items-center justify-between px-4 py-2 bg-white border-b"><button type="button" onClick={()=>setScreen("superadmin")} className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-black">← Tournal Ops</button><AccessRequestNavigation key={currentUser.id} scope={null} global boutiques={boutiques}/></div><SuperAdminScreen boutiques={boutiques} platformUsers={platformUsers} groupes={groupes}
       onEnterBoutique={handleEnterBoutiqueAsAdmin}
       onCreateBoutique={handleCreateBoutique}
       onUpdateBoutique={handleUpdateBoutique}
