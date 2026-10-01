@@ -126,6 +126,12 @@ from audit_actual_fingerprint a
 join audit_expected_fingerprint e using(category)
 order by a.category;
 
+-- Temporary reconciliation diagnostics: identities only, no function bodies or application data.
+select 'LOCAL_FUNCTION|'||n.nspname||'.'||p.proname||'('||pg_get_function_identity_arguments(p.oid)||')'
+from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+where n.nspname in ('public','private') and p.prokind in ('f','p') order by 1;
+select 'LOCAL_POLICY|'||schemaname||'.'||tablename||'.'||policyname from pg_policies where schemaname in ('public','private') order by 1;
+
 do $audit$
 begin
   if exists (
