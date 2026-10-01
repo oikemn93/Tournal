@@ -9847,7 +9847,7 @@ export default function App() {
     return true;
   });
   // Primary tabs always shown; secondary tabs hidden under "..."
-  const PRIMARY_TABS: Tab[] = ["dashboard", "pos", "clients", "factures", "support"];
+  const PRIMARY_TABS: Tab[] = ["dashboard", "pos", "clients", "factures"];
   const navPrimary = NAV.filter(n => PRIMARY_TABS.includes(n.id));
   const navSecondary = NAV.filter(n => !PRIMARY_TABS.includes(n.id));
   const safeTab = NAV.find(n=>n.id===tab) ? tab : (NAV[0]?.id ?? "dashboard");
