@@ -74,6 +74,10 @@ Deno.serve(async (req)=>{
       const result=await response.json().catch(()=>null);
       if(!response.ok){
         const metaMessage=String(result?.error?.message??"");
+        const metaCode=Number(result?.error?.code??0);
+        if(metaCode===10){
+          throw new Error("Le token Meta n’a pas la permission de gérer les templates WhatsApp. Générez un token avec whatsapp_business_management + whatsapp_business_messaging et donnez au System User un accès complet au compte WhatsApp Business.");
+        }
         if(/nonexisting field \(message_templates\).*WhatsAppBusinessPhoneNumber/i.test(metaMessage)){
           throw new Error("WHATSAPP_WABA_ID contient un Phone Number ID. Utilisez le vrai WhatsApp Business Account ID.");
         }
@@ -113,7 +117,12 @@ Deno.serve(async (req)=>{
         },
       );
       const createResult=await createResponse.json().catch(()=>null);
-      if(!createResponse.ok) throw new Error(createResult?.error?.message??`Création du template ${params.name} impossible`);
+      if(!createResponse.ok){
+        if(Number(createResult?.error?.code??0)===10){
+          throw new Error("Le token Meta n’a pas la permission de créer les templates WhatsApp. Ajoutez whatsapp_business_management au token et donnez au System User un accès complet au WABA.");
+        }
+        throw new Error(createResult?.error?.message??`Création du template ${params.name} impossible`);
+      }
       return {
         ready:createResult?.status==="APPROVED",
         status:String(createResult?.status??"PENDING"),
