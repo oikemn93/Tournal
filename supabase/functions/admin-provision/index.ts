@@ -22,6 +22,19 @@ function initialsOf(name: string): string {
   return String(name ?? "").trim().split(/\s+/).filter(Boolean).map(w=>w[0]).join("").slice(0,2).toUpperCase();
 }
 const passwordOk=(v:unknown)=>String(v??"").length>=12;
+function generateTemporaryPassword(): string {
+  const upper="ABCDEFGHJKLMNPQRSTUVWXYZ";
+  const lower="abcdefghijkmnopqrstuvwxyz";
+  const digits="23456789";
+  const symbols="!@#$%*_+-";
+  const all=upper+lower+digits+symbols;
+  const pick=(chars:string)=>{const n=new Uint32Array(1);crypto.getRandomValues(n);return chars[n[0]%chars.length];};
+  const chars=[pick(upper),pick(lower),pick(digits),pick(symbols)];
+  const random=new Uint32Array(12);crypto.getRandomValues(random);
+  for(const n of random) chars.push(all[n%all.length]);
+  for(let i=chars.length-1;i>0;i--){const n=new Uint32Array(1);crypto.getRandomValues(n);const j=n[0]%(i+1);[chars[i],chars[j]]=[chars[j],chars[i]];}
+  return chars.join("");
+}
 function normalizeRights(value: unknown): Record<string, boolean> {
   const source = value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -65,6 +78,59 @@ Deno.serve(async (req) => {
     }
     function requireSuperAdmin() {
       if (!isSuperAdmin) throw new Error("SuperAdmin requis");
+    }
+
+    if (action === "create_boutique_with_new_owner") {
+      if (!isSuperAdmin) return json({ error:"SuperAdmin requis" },403);
+      const { nom,ville,ownerName,ownerPhone } = body;
+      if (!nom || !ownerName || !ownerPhone) return json({ error:"Nom boutique, nom propriétaire et téléphone requis" },400);
+      const temporaryPassword=generateTemporaryPassword();
+      const email=phoneToEmail(String(ownerPhone));
+      const { data:created,error:authErrorCreate }=await admin.auth.admin.createUser({
+        email,
+        password:temporaryPassword,
+        email_confirm:true,
+        user_metadata:{nom:String(ownerName).trim(),phone:String(ownerPhone).trim()},
+      });
+      if (authErrorCreate || !created.user) return json({error:authErrorCreate?.message ?? "Création utilisateur impossible"},400);
+      const uid=created.user.id;
+      let boutiqueId:string|null=null;
+      try {
+        const colors=["#C9A227","#2563eb","#16a34a","#dc2626","#9333ea","#0891b2","#ea580c"];
+        const { count }=await admin.from("platform_users").select("*",{count:"exact",head:true});
+        const profile={
+          id:uid,
+          phone:String(ownerPhone).trim(),
+          nom:String(ownerName).trim(),
+          initials:initialsOf(String(ownerName)),
+          color:colors[(count ?? 0)%colors.length],
+          is_super_admin:false,
+          is_suspended:false,
+          must_change_password:true,
+        };
+        const { error:profileError }=await admin.from("platform_users").insert(profile);
+        if (profileError) throw new Error(profileError.message);
+        const { data:b,error:boutiqueError }=await admin.from("boutiques")
+          .insert({nom:String(nom).trim(),ville:String(ville ?? "").trim(),color:"#C9A227",initials:String(nom).slice(0,2).toUpperCase(),owner_id:uid})
+          .select("id").single();
+        if (boutiqueError || !b) throw new Error(boutiqueError?.message ?? "Création boutique impossible");
+        boutiqueId=b.id;
+        const { error:assignError }=await admin.from("boutique_assignments").upsert(
+          {boutique_id:b.id,user_id:uid,role:"owner",droits:{}},{onConflict:"boutique_id,user_id"});
+        if (assignError) throw new Error(assignError.message);
+        return json({
+          boutiqueId:b.id,
+          userId:uid,
+          temporaryPassword,
+          ownerName:String(ownerName).trim(),
+          ownerPhone:String(ownerPhone).trim(),
+        });
+      } catch (error) {
+        if (boutiqueId) await admin.from("boutiques").delete().eq("id",boutiqueId);
+        await admin.from("platform_users").delete().eq("id",uid);
+        await admin.auth.admin.deleteUser(uid);
+        return json({error:error instanceof Error?error.message:"Création du propriétaire impossible"},400);
+      }
     }
 
     if (action === "create_boutique") {
