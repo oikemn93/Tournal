@@ -103,8 +103,12 @@ export function AccessRequestNavigation({ scope, global, boutiques }: Props) {
     try {
       const next = await requestDetail(id)
       if (!mounted.current || current !== selection.current) return
-      setDetail(next)
-      setNote(next.note_interne || "")
+      let selected = next
+      if (next.statut === "nouvelle") {
+        try { selected = await decideRequest(id, "vue", next.note_interne || "") } catch { /* garder la demande consultable si le marquage échoue */ }
+      }
+      setDetail(selected)
+      setNote(selected.note_interne || "")
       const notifications = await requestNotifications(scope)
       await Promise.all(
         notifications
@@ -185,9 +189,7 @@ export function AccessRequestNavigation({ scope, global, boutiques }: Props) {
       >
         <DialogContent className="inset-0 left-0 top-0 translate-x-0 translate-y-0 h-[100dvh] w-screen max-w-none rounded-none overflow-y-auto p-4 sm:left-[50%] sm:top-[50%] sm:h-auto sm:w-full sm:max-w-4xl sm:max-h-[90dvh] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-lg sm:p-6">
           <DialogTitle>Demandes d’accès</DialogTitle>
-          <DialogDescription className="hidden sm:block">
-            Étudiez les demandes attribuées à votre périmètre. L’acceptation à cette étape ne crée aucun compte.
-          </DialogDescription>
+          <DialogDescription className="hidden sm:block">Étudiez les demandes de création de boutique et choisissez la suite à donner.</DialogDescription>
           <div className="flex flex-wrap gap-3 items-end">
             <label className="text-sm font-bold">
               Statut
@@ -328,8 +330,7 @@ export function AccessRequestNavigation({ scope, global, boutiques }: Props) {
                   )}
                   {detail.statut === "acceptee" && (
                     <p className="text-sm mt-3">
-                      Demande approuvée. La création du compte et son activation
-                      seront disponibles à l’étape B.
+                      Demande acceptée.
                     </p>
                   )}
                 </>
