@@ -64,7 +64,7 @@ class BoutiqueAppErrorBoundary extends React.Component<{onReset:()=>void;childre
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 
-type Screen     = "login" | "password-change" | "pin-setup" | "superadmin" | "boutique-select" | "app";
+type Screen     = "login" | "password-change" | "pin-setup" | "superadmin" | "system-admin" | "boutique-select" | "app";
 type Tab        = "dashboard" | "stock" | "fournisseurs" | "clients" | "factures" | "pos" | "charges" | "compta" | "admin" | "inventaire" | "transferts";
 type Notif      = { id: number; icon: string; title: string; body: string; dateRaw: string; read: boolean; tab?: Tab; filter?: Record<string,string>; serverId?: number };
 type TransferStatus = "en_attente" | "accepté" | "refusé" | "annulé";
