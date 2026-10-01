@@ -13,6 +13,8 @@ const PROBE_TIMEOUT_MS = 8_000;
 const OFFLINE_WARNING_MS = 12 * 60 * 60 * 1000;
 const OFFLINE_SINCE_KEY = "tournal.offline.since";
 const SYNC_SUMMARY_KEY = "tournal.offline.lastSyncSummary";
+const SESSION_STORAGE_KEY = "tournal.supabase.session";
+const OFFLINE_SESSION_KEY = "tournal.offline.session.v1";
 
 type NetworkMode = "online" | "suspect" | "offline";
 type QueueRecord = {
@@ -336,13 +338,25 @@ window.addEventListener("error", event => { void recoverFromStaleModule(event.er
 window.addEventListener("unhandledrejection", event => { void recoverFromStaleModule(event.reason); });
 window.setTimeout(() => sessionStorage.removeItem(MODULE_RECOVERY_KEY), 15_000);
 
+function readPersistedSession() {
+  try {
+    const session = JSON.parse(sessionStorage.getItem(SESSION_STORAGE_KEY) || localStorage.getItem(OFFLINE_SESSION_KEY) || "null");
+    if (session?.access_token && session?.user?.id) {
+      sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+      localStorage.setItem(OFFLINE_SESSION_KEY, JSON.stringify(session));
+      return session;
+    }
+  } catch {}
+  return null;
+}
+
 function route() {
   const path = window.location.pathname;
   const isOpsHost = window.location.hostname === "ops.tournal.org" || window.location.hostname.startsWith("ops.");
   // Ops is an authenticated product surface, never a public landing page.
   if (isOpsHost && (path === "/" || path === "/app")) {
     let hasOpsSession = false;
-    try { hasOpsSession = Boolean(JSON.parse(sessionStorage.getItem("tournal.supabase.session") || "null")?.access_token); } catch {}
+    try { hasOpsSession = Boolean(readPersistedSession()?.access_token); } catch {}
     const destination = hasOpsSession ? "/" : "/login";
     if (path !== destination) window.history.replaceState({}, "", destination + window.location.search + window.location.hash);
     document.title = hasOpsSession ? "Tournal Ops | Support & administration" : "Connexion | Tournal Ops";
@@ -358,7 +372,7 @@ function route() {
   }
   let hasSession = false;
   try {
-    hasSession = Boolean(JSON.parse(sessionStorage.getItem("tournal.supabase.session") || "null")?.access_token);
+    hasSession = Boolean(readPersistedSession()?.access_token);
   } catch { /* Treat an unreadable session as signed out. */ }
   const query = new URLSearchParams(window.location.search);
   const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
