@@ -4,6 +4,7 @@ const SUPABASE_URL=Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY=Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const WHATSAPP_ACCESS_TOKEN=Deno.env.get("WHATSAPP_ACCESS_TOKEN") ?? "";
 const WHATSAPP_PHONE_NUMBER_ID=Deno.env.get("WHATSAPP_PHONE_NUMBER_ID") ?? "";
+const WHATSAPP_WABA_ID=Deno.env.get("WHATSAPP_WABA_ID") ?? "";
 const WHATSAPP_TEMPLATE_NAME=Deno.env.get("WHATSAPP_TEMPLATE_NAME") ?? "tournal_onboarding_credentials";
 const WHATSAPP_TEMPLATE_LANGUAGE_CODE=Deno.env.get("WHATSAPP_TEMPLATE_LANGUAGE_CODE") ?? "fr";
 const WHATSAPP_REGISTRATION_PIN=Deno.env.get("WHATSAPP_REGISTRATION_PIN") ?? "";
@@ -113,6 +114,77 @@ Deno.serve(async (req)=>{
         },502);
       }
       attempt=await sendMessage();
+    }
+
+    if(!attempt.response.ok && Number(attempt.result?.error?.code)===132001){
+      if(!WHATSAPP_WABA_ID){
+        return json({
+          error:"Template WhatsApp introuvable. Ajoutez le secret Supabase WHATSAPP_WABA_ID pour que Tournal vérifie ou crée automatiquement le template.",
+          meta_code:132001,
+          needs_waba_id:true,
+        },503);
+      }
+
+      const templatesResponse=await fetch(
+        `https://graph.facebook.com/${WHATSAPP_GRAPH_VERSION}/${WHATSAPP_WABA_ID}/message_templates?name=${encodeURIComponent(WHATSAPP_TEMPLATE_NAME)}`,
+        {headers:graphHeaders},
+      );
+      const templatesResult=await templatesResponse.json().catch(()=>null);
+      if(!templatesResponse.ok){
+        return json({
+          error:templatesResult?.error?.message??"Lecture des templates WhatsApp impossible",
+          meta_code:templatesResult?.error?.code??null,
+        },502);
+      }
+
+      const templates=Array.isArray(templatesResult?.data)?templatesResult.data:[];
+      const approved=templates.find((item:any)=>item?.status==="APPROVED");
+      if(approved?.language){
+        payload.template.language.code=String(approved.language);
+        attempt=await sendMessage();
+      }else if(templates.length>0){
+        const current=templates[0];
+        return json({
+          error:`Le template WhatsApp "${WHATSAPP_TEMPLATE_NAME}" existe mais son statut Meta est ${current?.status??"inconnu"}. Attendez son approbation avant l’envoi.`,
+          meta_code:132001,
+          template_status:current?.status??null,
+          template_language:current?.language??null,
+        },409);
+      }else{
+        const createResponse=await fetch(
+          `https://graph.facebook.com/${WHATSAPP_GRAPH_VERSION}/${WHATSAPP_WABA_ID}/message_templates`,
+          {
+            method:"POST",
+            headers:graphHeaders,
+            body:JSON.stringify({
+              name:WHATSAPP_TEMPLATE_NAME,
+              language:WHATSAPP_TEMPLATE_LANGUAGE_CODE,
+              category:"UTILITY",
+              components:[{
+                type:"BODY",
+                text:"Bonjour {{1}}, votre accès Tournal pour {{2}} est prêt. Téléphone de connexion : {{3}}. Mot de passe temporaire : {{4}}. Connectez-vous sur {{5}} et changez votre mot de passe à la première connexion.",
+                example:{
+                  body_text:[["Awa Diallo","Boutique GGR","+221781224409","TempPass123!","https://tournal.org"]],
+                },
+              }],
+            }),
+          },
+        );
+        const createResult=await createResponse.json().catch(()=>null);
+        if(!createResponse.ok){
+          return json({
+            error:createResult?.error?.message??"Création du template WhatsApp impossible",
+            meta_code:createResult?.error?.code??null,
+          },502);
+        }
+        return json({
+          error:`Le template WhatsApp "${WHATSAPP_TEMPLATE_NAME}" vient d’être créé chez Meta et attend son approbation. Réessayez l’envoi lorsqu’il sera APPROVED.`,
+          meta_code:132001,
+          template_status:createResult?.status??"PENDING",
+          template_id:createResult?.id??null,
+          template_created:true,
+        },409);
+      }
     }
 
     if(!attempt.response.ok){
