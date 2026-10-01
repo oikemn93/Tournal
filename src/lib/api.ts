@@ -683,6 +683,32 @@ export async function createBoutique(nom: string, ville: string, ownerId: string
   return adminProvision<{ boutiqueId: string }>("create_boutique", { nom, ville, ownerId });
 }
 
+export async function createBoutiqueWithNewOwner(params:{nom:string;ville:string;ownerName:string;ownerPhone:string}) {
+  return adminProvision<{
+    boutiqueId:string;
+    userId:string;
+    temporaryPassword:string;
+    ownerName:string;
+    ownerPhone:string;
+  }>("create_boutique_with_new_owner", params);
+}
+
+export async function sendWhatsAppOnboarding(params:{phone:string;fullName:string;boutiqueName:string;temporaryPassword:string}) {
+  const session=await refreshSessionIfNeeded();
+  const response=await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-onboarding`,{
+    method:"POST",
+    headers:{
+      apikey:PUBLISHABLE_KEY,
+      Authorization:`Bearer ${session.access_token}`,
+      "Content-Type":"application/json",
+    },
+    body:JSON.stringify(params),
+  });
+  const body=await response.json().catch(()=>null);
+  if(!response.ok) throw new Error(body?.error ?? "Envoi WhatsApp impossible");
+  return body as {ok:true;messageId?:string|null};
+}
+
 export async function createUser(phone: string, fullName: string, password: string, boutiqueId?: string) {
   const requestId = `${Date.now()}-${crypto.randomUUID()}`;
   const payload = { phone, fullName, password, boutiqueId, requestId };
