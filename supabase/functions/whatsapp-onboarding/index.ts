@@ -126,7 +126,7 @@ Deno.serve(async (req)=>{
       }
 
       const templatesResponse=await fetch(
-        `https://graph.facebook.com/${WHATSAPP_GRAPH_VERSION}/${WHATSAPP_WABA_ID}/message_templates?name=${encodeURIComponent(WHATSAPP_TEMPLATE_NAME)}`,
+        `https://graph.facebook.com/${WHATSAPP_GRAPH_VERSION}/${WHATSAPP_WABA_ID}/message_templates?name=${encodeURIComponent(WHATSAPP_TEMPLATE_NAME)}&fields=id,name,status,language,category,rejected_reason,components`,
         {headers:graphHeaders},
       );
       const templatesResult=await templatesResponse.json().catch(()=>null);
@@ -152,11 +152,24 @@ Deno.serve(async (req)=>{
         attempt=await sendMessage();
       }else if(templates.length>0){
         const current=templates[0];
+        const rejectedReason=String(current?.rejected_reason??"").trim();
+        if(current?.status==="REJECTED"){
+          return json({
+            error:`Le template WhatsApp "${WHATSAPP_TEMPLATE_NAME}" a été rejeté par Meta${rejectedReason?` : ${rejectedReason}`:"."} Une nouvelle version doit être soumise.`,
+            meta_code:132001,
+            template_status:"REJECTED",
+            template_language:current?.language??null,
+            template_category:current?.category??null,
+            rejected_reason:rejectedReason||null,
+            template_id:current?.id??null,
+          },409);
+        }
         return json({
           error:`Le template WhatsApp "${WHATSAPP_TEMPLATE_NAME}" existe mais son statut Meta est ${current?.status??"inconnu"}. Attendez son approbation avant l’envoi.`,
           meta_code:132001,
           template_status:current?.status??null,
           template_language:current?.language??null,
+          template_category:current?.category??null,
         },409);
       }else{
         const createResponse=await fetch(
