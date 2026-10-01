@@ -23,17 +23,10 @@ function initialsOf(name: string): string {
 }
 const passwordOk=(v:unknown)=>String(v??"").length>=12;
 function generateTemporaryPassword(): string {
-  const upper="ABCDEFGHJKLMNPQRSTUVWXYZ";
-  const lower="abcdefghijkmnopqrstuvwxyz";
-  const digits="23456789";
-  const symbols="!@#$%*_+-";
-  const all=upper+lower+digits+symbols;
-  const pick=(chars:string)=>{const n=new Uint32Array(1);crypto.getRandomValues(n);return chars[n[0]%chars.length];};
-  const chars=[pick(upper),pick(lower),pick(digits),pick(symbols)];
-  const random=new Uint32Array(12);crypto.getRandomValues(random);
-  for(const n of random) chars.push(all[n%all.length]);
-  for(let i=chars.length-1;i>0;i--){const n=new Uint32Array(1);crypto.getRandomValues(n);const j=n[0]%(i+1);[chars[i],chars[j]]=[chars[j],chars[i]];}
-  return chars.join("");
+  const chars="ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+  const random=new Uint32Array(14);
+  crypto.getRandomValues(random);
+  return Array.from(random,n=>chars[n%chars.length]).join("");
 }
 function normalizeRights(value: unknown): Record<string, boolean> {
   const source = value && typeof value === "object" && !Array.isArray(value)
