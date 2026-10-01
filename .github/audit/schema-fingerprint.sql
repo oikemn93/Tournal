@@ -14,7 +14,7 @@ insert into audit_expected_fingerprint(category, object_count, md5) values
   ('constraints', 259, '16aa929ff8426564cc888383d99b63c4'),
   ('functions',    226, 'a48193e25eff8ba5ce1c391665d976b7'),
   ('indexes',      195, 'ee3febe063ee17da6e2556b180fd6795'),
-  ('policies',      88, '2e88704fe8bd522a1b4edaf602697a64'),
+  ('policies',      88, 'dbcec41222138676f7b171a2aedd1305'),
   ('relation_acls', 79, '02f74ebb1fe464403d90b0dd3b648026'),
   ('relations',     79, '374c81e478a41001e2145c8a1d6df764'),
   ('triggers',      90, '0342f7f1b6950d6083dd3cfc62193b32'),
