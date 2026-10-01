@@ -247,3 +247,5 @@
 20260916195927|repair_transfer_receipt_payable_trace
 20260929204856|access_requests_stage_a
 20261001074346|customer_support_tickets
+20261001172144|client_approved_ops_access
+20261001175022|exclude_uncommitted_sales_from_fifo_margin

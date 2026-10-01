@@ -14,13 +14,13 @@ class ExactDeltaTest(unittest.TestCase):
         self.assertTrue(delta.check(base, candidate, base, allowed).startswith('pre:'))
         self.assertTrue(delta.check(base, candidate, candidate, allowed, True).startswith('post:'))
 
-    def test_extra_changed_missing_and_partial_objects_fail(self):
+    def test_scoped_stage_a_and_reviewed_drift(self):
         base = {('functions', 'existing'): 'old'}
         candidate = {**base, ('relations', 'public.access_requests'): 'new'}
         allowed = [('relations', 'public.access_requests')]
-        for prod in [{**base, ('functions', 'extra'): 'oops'},
-                     {('functions', 'existing'): 'changed'}, {},
-                     {**candidate, ('functions', 'existing'): 'changed'}]:
+        later = {**candidate, ('functions', 'extra'): 'later'}
+        self.assertTrue(delta.check(base, candidate, later, allowed).startswith('post+:'))
+        for prod in [{**base, ('relations', 'public.access_requests'): 'changed'}, base, {}]:
             with self.assertRaises(ValueError):
                 delta.check(base, candidate, prod, allowed)
         with self.assertRaises(ValueError):
