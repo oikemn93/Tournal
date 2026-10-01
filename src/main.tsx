@@ -338,6 +338,16 @@ window.setTimeout(() => sessionStorage.removeItem(MODULE_RECOVERY_KEY), 15_000);
 
 function route() {
   const path = window.location.pathname;
+  const isOpsHost = window.location.hostname === "ops.tournal.org" || window.location.hostname.startsWith("ops.");
+  // Ops is an authenticated product surface, never a public landing page.
+  if (isOpsHost && (path === "/" || path === "/app")) {
+    let hasOpsSession = false;
+    try { hasOpsSession = Boolean(JSON.parse(sessionStorage.getItem("tournal.supabase.session") || "null")?.access_token); } catch {}
+    const destination = hasOpsSession ? "/" : "/login";
+    if (path !== destination) window.history.replaceState({}, "", destination + window.location.search + window.location.hash);
+    document.title = hasOpsSession ? "Tournal Ops | Support & administration" : "Connexion | Tournal Ops";
+    return <React.Suspense fallback={<div role="status" style={{ padding: 32 }}>Chargement de Tournal Ops…</div>}><App /></React.Suspense>;
+  }
   if (path === "/demande-acces") {
     document.title = "Demander un accès | Tournal";
     return <React.Suspense fallback={<div role="status" style={{ padding: 32 }}>Chargement…</div>}><AccessRequestPage /></React.Suspense>;
