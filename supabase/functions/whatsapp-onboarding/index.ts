@@ -81,8 +81,8 @@ Deno.serve(async (req)=>{
         if(/unsupported get request|does not exist|cannot be loaded due to missing permissions/i.test(metaMessage)){
           throw new Error("Le WHATSAPP_WABA_ID configuré n’est pas accessible avec ce token Meta. Vérifiez que l’ID est bien le WhatsApp Business Account ID et que le System User du token a un accès complet à ce WABA.");
         }
-        if(/nonexisting field \(message_templates\).*WhatsAppBusinessPhoneNumber/i.test(metaMessage)){
-          throw new Error("WHATSAPP_WABA_ID contient un Phone Number ID. Utilisez le vrai WhatsApp Business Account ID.");
+        if(/nonexisting field \(message_templates\)/i.test(metaMessage)){
+          throw new Error("WHATSAPP_WABA_ID n’est pas un WhatsApp Business Account ID valide pour ce token. Remplacez-le par le vrai WABA ID depuis Meta > WhatsApp > API Setup, et non par le Phone Number ID.");
         }
         throw new Error(result?.error?.message??"Lecture des templates WhatsApp impossible");
       }
