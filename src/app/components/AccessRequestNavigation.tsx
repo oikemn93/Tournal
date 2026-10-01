@@ -310,7 +310,10 @@ export function AccessRequestNavigation({ scope, global, boutiques }: Props) {
                         type="button"
                         disabled={busy}
                         onClick={() =>
-                          void mutate(\n                            () => routeRequest(detail.id, destination || null),\n                            "Attribution enregistrée",\n                          )
+                          void mutate(
+                            () => routeRequest(detail.id, destination || null),
+                            "Attribution enregistrée",
+                          )
                         }
                         className="w-full rounded-xl bg-slate-950 px-3 py-3 font-bold text-white disabled:opacity-50"
                       >
@@ -343,7 +346,10 @@ export function AccessRequestNavigation({ scope, global, boutiques }: Props) {
                           type="button"
                           disabled={busy}
                           onClick={() =>
-                            void mutate(\n                            () => decideRequest(detail.id, value, note),\n                            value === "vue" ? "Demande marquée comme vue" : value === "acceptee" ? "Demande acceptée" : value === "refusee" ? "Demande refusée" : "Complément demandé",\n                          )
+                            void mutate(
+                            () => decideRequest(detail.id, value, note),
+                            value === "vue" ? "Demande marquée comme vue" : value === "acceptee" ? "Demande acceptée" : value === "refusee" ? "Demande refusée" : "Complément demandé",
+                          )
                           }
                           className={`min-h-11 rounded-lg border px-3 py-2 font-bold disabled:opacity-50 ${
                             value === "acceptee"
