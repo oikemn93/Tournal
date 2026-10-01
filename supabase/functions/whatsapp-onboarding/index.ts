@@ -78,6 +78,9 @@ Deno.serve(async (req)=>{
         if(metaCode===10){
           throw new Error("Le token Meta n’a pas la permission de gérer les templates WhatsApp. Générez un token avec whatsapp_business_management + whatsapp_business_messaging et donnez au System User un accès complet au compte WhatsApp Business.");
         }
+        if(/unsupported get request|does not exist|cannot be loaded due to missing permissions/i.test(metaMessage)){
+          throw new Error("Le WHATSAPP_WABA_ID configuré n’est pas accessible avec ce token Meta. Vérifiez que l’ID est bien le WhatsApp Business Account ID et que le System User du token a un accès complet à ce WABA.");
+        }
         if(/nonexisting field \(message_templates\).*WhatsAppBusinessPhoneNumber/i.test(metaMessage)){
           throw new Error("WHATSAPP_WABA_ID contient un Phone Number ID. Utilisez le vrai WhatsApp Business Account ID.");
         }
