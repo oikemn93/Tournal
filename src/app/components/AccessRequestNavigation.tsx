@@ -13,7 +13,6 @@ import {
   requestNotifications,
   readRequestNotification,
   decideRequest,
-  routeRequest,
   type AccessSummary,
   type AccessDetail,
   type AccessStatus,
@@ -39,7 +38,6 @@ export function AccessRequestNavigation({ scope, global, boutiques }: Props) {
   const [status, setStatus] = useState("")
   const [offset, setOffset] = useState(0)
   const [note, setNote] = useState("")
-  const [destination, setDestination] = useState("")
   const [error, setError] = useState("")
   const [feedback, setFeedback] = useState("")
   const [busy, setBusy] = useState(false)
@@ -107,7 +105,6 @@ export function AccessRequestNavigation({ scope, global, boutiques }: Props) {
       if (!mounted.current || current !== selection.current) return
       setDetail(next)
       setNote(next.note_interne || "")
-      setDestination(next.boutique_id || "")
       const notifications = await requestNotifications(scope)
       await Promise.all(
         notifications
@@ -140,7 +137,6 @@ export function AccessRequestNavigation({ scope, global, boutiques }: Props) {
       if (mounted.current) {
         setDetail(next)
         setNote(next.note_interne || "")
-        setDestination(next.boutique_id || "")
         setFeedback(success)
         await reload()
       }
@@ -287,41 +283,7 @@ export function AccessRequestNavigation({ scope, global, boutiques }: Props) {
                       {detail.message || "Non renseigné"}
                     </dd>
                   </dl>
-                  {global && !terminal && (
-                    <div className="space-y-2 border rounded-lg p-3">
-                      <label htmlFor="access-destination">
-                        Attribuer à une boutique
-                      </label>
-                      <select
-                        id="access-destination"
-                        value={destination}
-                        onChange={(e) => setDestination(e.target.value)}
-                        disabled={busy}
-                        className="w-full border rounded p-2"
-                      >
-                        <option value="">SuperAdmin uniquement</option>
-                        {boutiques.map((b) => (
-                          <option key={b.id} value={b.id}>
-                            {b.nom}
-                          </option>
-                        ))}
-                      </select>
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() =>
-                          void mutate(
-                            () => routeRequest(detail.id, destination || null),
-                            "Attribution enregistrée",
-                          )
-                        }
-                        className="w-full rounded-xl bg-slate-950 px-3 py-3 font-bold text-white disabled:opacity-50"
-                      >
-                        Enregistrer l’attribution
-                      </button>
-                    </div>
-                  )}
-                  <label className="block my-3">
+                  <details className="my-3 rounded-xl border p-3"><summary className="cursor-pointer font-bold">Note interne (optionnelle)</summary><label className="mt-3 block">
                     Note interne (1 000 caractères maximum, sans donnée
                     sensible)
                     <textarea
@@ -332,15 +294,10 @@ export function AccessRequestNavigation({ scope, global, boutiques }: Props) {
                       className="block w-full border rounded-lg p-2"
                       rows={3}
                     />
-                  </label>
+                  </label></details>
                   {!terminal && (
                     <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-                      {([
-                        "vue",
-                        "acceptee",
-                        "refusee",
-                        "complement_demande",
-                      ] as const).map((value) => (
+                      {(["acceptee", "refusee", "complement_demande"] as const).map((value) => (
                         <button
                           key={value}
                           type="button"
@@ -348,7 +305,7 @@ export function AccessRequestNavigation({ scope, global, boutiques }: Props) {
                           onClick={() =>
                             void mutate(
                             () => decideRequest(detail.id, value, note),
-                            value === "vue" ? "Demande marquée comme vue" : value === "acceptee" ? "Demande acceptée" : value === "refusee" ? "Demande refusée" : "Complément demandé",
+                            value === "acceptee" ? "Demande acceptée" : value === "refusee" ? "Demande refusée" : "Complément demandé",
                           )
                           }
                           className={`min-h-11 rounded-lg border px-3 py-2 font-bold disabled:opacity-50 ${
@@ -357,13 +314,7 @@ export function AccessRequestNavigation({ scope, global, boutiques }: Props) {
                               : ""
                           }`}
                         >
-                          {value === "vue"
-                            ? "Marquer vue"
-                            : value === "acceptee"
-                              ? "Accepter"
-                              : value === "refusee"
-                                ? "Refuser"
-                                : "Demander un complément"}
+                          {value === "acceptee" ? "Accepter & créer la boutique" : value === "refusee" ? "Refuser" : "Demander un complément"}
                         </button>
                       ))}
                     </div>
