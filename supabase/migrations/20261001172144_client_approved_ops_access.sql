@@ -1,3 +1,15 @@
+-- Boutique-owner consent helper mirrored from production.
+create or replace function private.auth_is_boutique_owner(p_boutique_id text)
+returns boolean language sql stable security definer
+set search_path to pg_catalog, public, private
+as $$
+  select private.auth_is_active_user() and (
+    exists(select 1 from public.boutiques b where b.id=p_boutique_id and b.owner_id=auth.uid())
+    or exists(select 1 from public.boutique_assignments a where a.boutique_id=p_boutique_id and a.user_id=auth.uid() and lower(coalesce(a.role,'')) in ('owner','propriétaire','proprietaire'))
+  );
+$$;
+revoke all on function private.auth_is_boutique_owner(text) from public;
+
 -- Mirror the client-approved support-access model already deployed in production.
 create or replace function private.auth_has_active_ops_access(p_boutique_id text)
 returns boolean language sql stable security definer
