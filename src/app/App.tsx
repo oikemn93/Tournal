@@ -12,7 +12,7 @@ import {
   Lock, Smartphone, Shield, MessageSquare, Activity, Trash2,
   ClipboardList, RefreshCw, Tag, Palette, Receipt, ShoppingCart, ShoppingBag, Minus, RotateCcw, AlertCircle, AlertTriangle,
   Wallet, TrendingDown, PieChart as PieChartIcon, BookOpen, Download, Filter, Calendar, Mail,
-  Printer, Settings, Check, ChevronLeft, ClipboardCheck,
+  Printer, Settings, Check, ChevronLeft, ClipboardCheck, Headphones,
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, Cell, PieChart, Pie } from "recharts";
 const lazyScreen = (loader: () => Promise<{ default: React.ComponentType<any> }>) => {
@@ -40,6 +40,7 @@ import { TournalOpsWorkspace as TournalOps } from "./components/TournalOpsWorksp
 import { loadMyOpsStaffProfile, loadOpsShell } from "../lib/ops";
 import { AccessRequestNavigation } from "./components/AccessRequestNavigation";
 import { NotificationCenter } from "./components/NotificationCenter";
+import { CustomerSupportView } from "./screens/CustomerSupportView";
 import { ROLE_PRESETS } from "./permissions";
 import type { Permission } from "./types";
 import { filterPaymentEventsByPeriod, formatPreciseDateTime, invoicePaymentEvents, invoiceRemainingAmount } from "./utils/payments";
@@ -65,7 +66,7 @@ class BoutiqueAppErrorBoundary extends React.Component<{onReset:()=>void;childre
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 
 type Screen     = "login" | "password-change" | "pin-setup" | "superadmin" | "system-admin" | "boutique-select" | "app";
-type Tab        = "dashboard" | "stock" | "fournisseurs" | "clients" | "factures" | "pos" | "charges" | "compta" | "admin" | "inventaire" | "transferts";
+type Tab        = "dashboard" | "stock" | "fournisseurs" | "clients" | "factures" | "pos" | "charges" | "compta" | "admin" | "inventaire" | "transferts" | "support";
 type Notif      = { id: number; icon: string; title: string; body: string; dateRaw: string; read: boolean; tab?: Tab; filter?: Record<string,string>; serverId?: number };
 type TransferStatus = "en_attente" | "accepté" | "refusé" | "annulé";
 type Transfer = {
@@ -1183,7 +1184,7 @@ function TournalLogo({ className = "w-20 h-20", decorative = true, variant = "go
     draggable={false} className={className} style={{ objectFit:"contain" }} />;
 }
 
-function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void | Promise<void> }) {
+function LoginScreen({ onAuthenticated, opsMode=false }: { onAuthenticated: () => void | Promise<void>; opsMode?:boolean }) {
   const [phone, setPhone] = useState("+221 ");
   const [pwd, setPwd] = useState("");
   const [show, setShow] = useState(false);
@@ -1232,7 +1233,7 @@ function LoginScreen({ onAuthenticated }: { onAuthenticated: () => void | Promis
   return <div className="bg-background text-foreground min-h-screen flex items-center justify-center px-6" style={{fontFamily:"'Inter', sans-serif"}}>
     <div className="w-full max-w-md rounded-3xl border bg-card p-6 space-y-5 shadow-sm">
       <div className="flex justify-center"><TournalLogo className="w-24 h-24" decorative={false}/></div>
-      <div className="text-center"><h1 className="text-2xl font-black">Connexion Tournal</h1><p className="text-sm text-muted-foreground mt-2">Utilisez votre mot de passe. Le PIN sert uniquement au déverrouillage rapide d’une session déjà ouverte.</p></div>
+      <div className="text-center">{opsMode&&<div className="mx-auto mb-3 w-fit rounded-full bg-slate-950 px-3 py-1 text-[11px] font-black uppercase tracking-[0.16em] text-white">Tournal Ops</div>}<h1 className="text-2xl font-black">{opsMode?"Connexion Support & administration":"Connexion Tournal"}</h1><p className="text-sm text-muted-foreground mt-2">{opsMode?"Espace réservé aux équipes Tournal autorisées. Connectez-vous avec votre compte Ops.":"Utilisez votre mot de passe. Le PIN sert uniquement au déverrouillage rapide d’une session déjà ouverte."}</p></div>
       <div><label className="text-xs font-black mb-2 block tracking-wider" style={{color:"#C9A227"}}>NUMÉRO DE TÉLÉPHONE</label>
         <div className="relative"><Smartphone size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground"/><input value={phone} onChange={e=>{const v=e.target.value;setPhone(v.startsWith("+221 ")?v:"+221 ");setErr("");}} placeholder="+221 77 000 0000" type="tel" inputMode="tel" autoComplete="tel" enterKeyHint="next" disabled={isLocked||loading} className={inputCls+" pl-11"} onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();passwordRef.current?.focus();}}}/></div>
       </div>
@@ -8753,6 +8754,7 @@ const ALL_NAV: Array<{ id:Tab; label:string; Icon:typeof LayoutDashboard; color:
   { id:"charges",      label:"Charges",   Icon:Wallet,           color:"#ef4444",        perm:"charges" },
   { id:"compta",       label:"Rapport",   Icon:BookOpen,         color:"#10b981",        perm:"compta" },
   { id:"admin",        label:"Admin",     Icon:ShieldCheck,      color:"#ef4444",        adminOnly:true },
+  { id:"support",      label:"Support",   Icon:Headphones,         color:"#0f172a" },
 ];
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
@@ -9469,7 +9471,7 @@ export default function App() {
     if (window.location.pathname !== destination) {
       window.history.replaceState({}, "", destination + window.location.search + window.location.hash);
     }
-    document.title = screen === "login" ? "Connexion | Tournal" : screen === "superadmin" ? "Tournal Ops | Support & administration" : "Tournal | Application";
+    document.title = screen === "login" ? (isOpsHost ? "Connexion | Tournal Ops" : "Connexion | Tournal") : screen === "superadmin" ? "Tournal Ops | Support & administration" : "Tournal | Application";
   }, [screen, synced, currentUser]);
 
   // Prevent accidental value changes when scrolling over a focused number input.
@@ -9845,15 +9847,15 @@ export default function App() {
     return true;
   });
   // Primary tabs always shown; secondary tabs hidden under "..."
-  const PRIMARY_TABS: Tab[] = ["dashboard", "pos", "clients", "factures", "admin"];
+  const PRIMARY_TABS: Tab[] = ["dashboard", "pos", "clients", "factures", "support"];
   const navPrimary = NAV.filter(n => PRIMARY_TABS.includes(n.id));
   const navSecondary = NAV.filter(n => !PRIMARY_TABS.includes(n.id));
   const safeTab = NAV.find(n=>n.id===tab) ? tab : (NAV[0]?.id ?? "dashboard");
   const current = NAV.find(n=>n.id===safeTab)!;
-  const headLabel: Record<Tab,string> = { dashboard:"Accueil", stock:"Stock", fournisseurs:"Fournisseurs", clients:"Clients", factures:"Factures", pos:"Vente", charges:"Charges", compta:"Rapport", admin:"Admin", inventaire:"Inventaire physique", transferts:"Transferts B2B" };
+  const headLabel: Record<Tab,string> = { dashboard:"Accueil", stock:"Stock", fournisseurs:"Fournisseurs", clients:"Clients", factures:"Factures", pos:"Vente", charges:"Charges", compta:"Rapport", admin:"Admin", inventaire:"Inventaire physique", transferts:"Transferts B2B", support:"Aide & support" };
 
 
-  if (screen==="login") return <LoginScreen onAuthenticated={refreshAuthenticatedFlow}/>;
+  if (screen==="login") return <LoginScreen opsMode={window.location.hostname==="ops.tournal.org"||window.location.hostname.startsWith("ops.")} onAuthenticated={refreshAuthenticatedFlow}/>;
   if (screen==="password-change"&&currentUser) return <RequiredPasswordChangeScreen onComplete={refreshAuthenticatedFlow}/>;
   if (screen==="pin-setup"&&currentUser) return <PinSetupScreen onComplete={refreshAuthenticatedFlow}/>;
   if (screen==="superadmin"&&currentUser&&!userCanAccessOps(currentUser)) return (
@@ -10030,6 +10032,7 @@ export default function App() {
       </div>}
       {isReadOnly && <div className="flex items-center gap-2 px-4 py-2 text-xs font-bold text-amber-800 bg-amber-50 border-b border-amber-200"><Lock size={12}/> Mode lecture seule — aucune modification possible</div>}
       <main className="flex-1 overflow-y-auto px-4 py-4 pb-20" style={{ scrollbarWidth:"none" }}>
+        {safeTab==="support" && <CustomerSupportView boutiqueId={boutique.id} boutiqueName={boutique.nom}/>}
         {safeTab==="dashboard"    && canAccess("dashboard") && <RelationalDashboardView boutiqueId={boutique.id} canSeeMargin={canSeeMargin} onNavigate={(t:Tab,f?:Record<string,string>)=>{setNavFilter(f??{});setTab(t);}}/>}
         {safeTab==="stock"        && canAccess("stock")        && <RelationalStockView boutique={boutique} canSeeMargin={canSeeMargin} canManageReferenceCosts={isOwner || !!currentUser?.isSuperAdmin} onUpdate={updateBoutique} logAction={logAction} initialFilter={navFilter.stockFilter} initialSupplierId={navFilter.supplierId?Number(navFilter.supplierId):undefined} initialEntryId={navFilter.stockEntryId?Number(navFilter.stockEntryId):undefined} onInitialRoutePrepared={()=>setNavFilter({})} onReceiptSaved={(supplierId:number)=>{setNavFilter({supplierDetailId:String(supplierId)});setTab("fournisseurs");}}/>}
         {safeTab==="fournisseurs" && canAccess("fournisseurs") && <RelationalFournisseursView boutique={boutique} onUpdate={updateBoutique} logAction={logAction} canPaySupplier={(isOwner || !!currentUser?.isSuperAdmin || !!droits?.decaissement) && canAccess("charges")} canManageReceipts={canAccess("stock")} onStartReceipt={(supplierId:number)=>{setNavFilter({supplierId:String(supplierId)});setTab("stock");}} onCorrectReceipt={(entry:StockEntry,supplierId:number)=>{setNavFilter({supplierId:String(supplierId),stockEntryId:String(entry.id)});setTab("stock");}} initialSupplierId={navFilter.supplierDetailId?Number(navFilter.supplierDetailId):undefined} onInitialSupplierOpened={()=>setNavFilter({})} defaultPaymentTermsDays={supplierPaymentTermsDays}/>}
