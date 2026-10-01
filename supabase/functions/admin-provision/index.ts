@@ -108,7 +108,7 @@ Deno.serve(async (req) => {
           is_suspended:false,
           must_change_password:true,
         };
-        const { error:profileError }=await admin.from("platform_users").insert(profile);
+        const { error:profileError }=await admin.from("platform_users").upsert(profile,{onConflict:"id"});
         if (profileError) throw new Error(profileError.message);
         const { data:b,error:boutiqueError }=await admin.from("boutiques")
           .insert({nom:String(nom).trim(),ville:String(ville ?? "").trim(),color:"#C9A227",initials:String(nom).slice(0,2).toUpperCase(),owner_id:uid})
