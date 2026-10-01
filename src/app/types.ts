@@ -1,7 +1,7 @@
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 
 export type Screen         = "login" | "superadmin" | "boutique-select" | "app";
-export type Tab            = "dashboard" | "stock" | "fournisseurs" | "clients" | "factures" | "pos" | "charges" | "compta" | "admin" | "inventaire" | "transferts";
+export type Tab            = "dashboard" | "stock" | "fournisseurs" | "clients" | "factures" | "pos" | "charges" | "compta" | "admin" | "inventaire" | "transferts" | "support";
 export type CartItem       = { productId: number; nom: string; img: string; unit: string; qty: number; prixUnit: number; sellUnit?: string; sellQty?: number };
 export type InvoiceStatus  = "payé" | "acompte" | "en attente" | "en retard" | "annulée";
 export type PaymentMethod  = "Espèces" | "Wave" | "Orange Money" | "Autre" | "Avoir client";
