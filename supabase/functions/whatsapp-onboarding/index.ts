@@ -6,6 +6,7 @@ const WHATSAPP_ACCESS_TOKEN=Deno.env.get("WHATSAPP_ACCESS_TOKEN") ?? "";
 const WHATSAPP_PHONE_NUMBER_ID=Deno.env.get("WHATSAPP_PHONE_NUMBER_ID") ?? "";
 const WHATSAPP_TEMPLATE_NAME=Deno.env.get("WHATSAPP_TEMPLATE_NAME") ?? "tournal_onboarding_credentials";
 const WHATSAPP_TEMPLATE_LANGUAGE_CODE=Deno.env.get("WHATSAPP_TEMPLATE_LANGUAGE_CODE") ?? "fr";
+const WHATSAPP_REGISTRATION_PIN=Deno.env.get("WHATSAPP_REGISTRATION_PIN") ?? "";
 const WHATSAPP_GRAPH_VERSION=Deno.env.get("WHATSAPP_GRAPH_VERSION") ?? "v23.0";
 const TOURNAL_LOGIN_URL=Deno.env.get("TOURNAL_LOGIN_URL") ?? "https://tournal.org";
 
@@ -75,19 +76,49 @@ Deno.serve(async (req)=>{
       },
     };
 
-    const response=await fetch(`https://graph.facebook.com/${WHATSAPP_GRAPH_VERSION}/${WHATSAPP_PHONE_NUMBER_ID}/messages`,{
-      method:"POST",
-      headers:{
-        Authorization:`Bearer ${WHATSAPP_ACCESS_TOKEN}`,
-        "Content-Type":"application/json",
-      },
-      body:JSON.stringify(payload),
-    });
-    const result=await response.json().catch(()=>null);
-    if(!response.ok){
-      return json({error:result?.error?.message??"Envoi WhatsApp impossible",meta_code:result?.error?.code??null},502);
+    const graphHeaders={
+      Authorization:`Bearer ${WHATSAPP_ACCESS_TOKEN}`,
+      "Content-Type":"application/json",
+    };
+    const sendMessage=async()=>{
+      const response=await fetch(`https://graph.facebook.com/${WHATSAPP_GRAPH_VERSION}/${WHATSAPP_PHONE_NUMBER_ID}/messages`,{
+        method:"POST",
+        headers:graphHeaders,
+        body:JSON.stringify(payload),
+      });
+      const result=await response.json().catch(()=>null);
+      return {response,result};
+    };
+
+    let attempt=await sendMessage();
+    if(!attempt.response.ok && Number(attempt.result?.error?.code)===133010){
+      if(!/^\\d{6}$/.test(WHATSAPP_REGISTRATION_PIN)){
+        return json({
+          error:"Numéro WhatsApp non enregistré dans Cloud API. Ajoutez un secret Supabase WHATSAPP_REGISTRATION_PIN contenant le PIN Meta à 6 chiffres, puis réessayez.",
+          meta_code:133010,
+          needs_registration:true,
+        },503);
+      }
+      const registerResponse=await fetch(`https://graph.facebook.com/${WHATSAPP_GRAPH_VERSION}/${WHATSAPP_PHONE_NUMBER_ID}/register`,{
+        method:"POST",
+        headers:graphHeaders,
+        body:JSON.stringify({messaging_product:"whatsapp",pin:WHATSAPP_REGISTRATION_PIN}),
+      });
+      const registerResult=await registerResponse.json().catch(()=>null);
+      if(!registerResponse.ok){
+        return json({
+          error:registerResult?.error?.message??"Enregistrement du numéro WhatsApp impossible",
+          meta_code:registerResult?.error?.code??null,
+          needs_registration:true,
+        },502);
+      }
+      attempt=await sendMessage();
     }
-    return json({ok:true,messageId:result?.messages?.[0]?.id??null});
+
+    if(!attempt.response.ok){
+      return json({error:attempt.result?.error?.message??"Envoi WhatsApp impossible",meta_code:attempt.result?.error?.code??null},502);
+    }
+    return json({ok:true,messageId:attempt.result?.messages?.[0]?.id??null});
   }catch(error){
     return json({error:error instanceof Error?error.message:"Erreur interne"},500);
   }
