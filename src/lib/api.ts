@@ -706,7 +706,7 @@ export async function sendWhatsAppOnboarding(params:{phone:string;fullName:strin
   });
   const body=await response.json().catch(()=>null);
   if(!response.ok) throw new Error(body?.error ?? "Envoi WhatsApp impossible");
-  return body as {ok:true;messageId?:string|null};
+  return body as {ok:true;messageIds?:string[];temporaryPassword?:string};
 }
 
 export async function createUser(phone: string, fullName: string, password: string, boutiqueId?: string) {
