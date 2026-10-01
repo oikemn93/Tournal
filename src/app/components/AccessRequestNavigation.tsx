@@ -13,7 +13,6 @@ import {
   requestNotifications,
   readRequestNotification,
   decideRequest,
-  routeRequest,
   type AccessSummary,
   type AccessDetail,
   type AccessStatus,
@@ -39,8 +38,8 @@ export function AccessRequestNavigation({ scope, global, boutiques }: Props) {
   const [status, setStatus] = useState("")
   const [offset, setOffset] = useState(0)
   const [note, setNote] = useState("")
-  const [destination, setDestination] = useState("")
   const [error, setError] = useState("")
+  const [feedback, setFeedback] = useState("")
   const [busy, setBusy] = useState(false)
   const mutation = useRef(false)
   const selection = useRef(0)
@@ -104,9 +103,12 @@ export function AccessRequestNavigation({ scope, global, boutiques }: Props) {
     try {
       const next = await requestDetail(id)
       if (!mounted.current || current !== selection.current) return
-      setDetail(next)
-      setNote(next.note_interne || "")
-      setDestination(next.boutique_id || "")
+      let selected = next
+      if (next.statut === "nouvelle") {
+        try { selected = await decideRequest(id, "vue", next.note_interne || "") } catch { /* garder la demande consultable si le marquage échoue */ }
+      }
+      setDetail(selected)
+      setNote(selected.note_interne || "")
       const notifications = await requestNotifications(scope)
       await Promise.all(
         notifications
@@ -128,16 +130,18 @@ export function AccessRequestNavigation({ scope, global, boutiques }: Props) {
     window.addEventListener("tournal:access-request", navigate)
     return () => window.removeEventListener("tournal:access-request", navigate)
   }, [scope])
-  async function mutate(action: () => Promise<AccessDetail>) {
+  async function mutate(action: () => Promise<AccessDetail>, success = "Modification enregistrée") {
     if (mutation.current) return
     mutation.current = true
     setBusy(true)
     setError("")
+    setFeedback("")
     try {
       const next = await action()
       if (mounted.current) {
         setDetail(next)
         setNote(next.note_interne || "")
+        setFeedback(success)
         await reload()
       }
     } catch {
@@ -183,12 +187,9 @@ export function AccessRequestNavigation({ scope, global, boutiques }: Props) {
           }
         }}
       >
-        <DialogContent className="max-w-4xl max-h-[90dvh] overflow-y-auto">
+        <DialogContent className="inset-0 left-0 top-0 translate-x-0 translate-y-0 h-[100dvh] w-screen max-w-none rounded-none overflow-y-auto p-4 sm:left-[50%] sm:top-[50%] sm:h-auto sm:w-full sm:max-w-4xl sm:max-h-[90dvh] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-lg sm:p-6">
           <DialogTitle>Demandes d’accès</DialogTitle>
-          <DialogDescription>
-            Étudiez les demandes attribuées à votre périmètre. L’acceptation à
-            cette étape ne crée aucun compte.
-          </DialogDescription>
+          <DialogDescription className="hidden sm:block">Étudiez les demandes de création de boutique et choisissez la suite à donner.</DialogDescription>
           <div className="flex flex-wrap gap-3 items-end">
             <label className="text-sm font-bold">
               Statut
@@ -219,13 +220,10 @@ export function AccessRequestNavigation({ scope, global, boutiques }: Props) {
               Actualiser
             </button>
           </div>
-          {error && (
-            <p role="alert" className="text-red-800">
-              {error}
-            </p>
-          )}
+          {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm font-bold text-red-800">{error}</p>}
+          {feedback && <p role="status" className="rounded-lg bg-emerald-50 p-3 text-sm font-bold text-emerald-800">{feedback}</p>}
           <div className="grid md:grid-cols-2 gap-5">
-            <section aria-label="Liste des demandes">
+            <section aria-label="Liste des demandes" className={detail ? "hidden md:block" : "block"}>
               <ul className="space-y-2">
                 {rows.map((row) => (
                   <li key={row.id}>
@@ -267,9 +265,10 @@ export function AccessRequestNavigation({ scope, global, boutiques }: Props) {
                 </button>
               </div>
             </section>
-            <section aria-label="Détail de la demande">
+            <section aria-label="Détail de la demande" className={detail ? "block" : "hidden md:block"}>
               {detail ? (
                 <>
+                  <button type="button" disabled={busy} onClick={() => { setDetail(null); setFeedback(""); }} className="mb-3 rounded-lg border px-3 py-2 text-sm font-bold md:hidden">← Retour aux demandes</button>
                   <h2 className="text-lg font-black">
                     {detail.nom || "Demande anonymisée"}
                   </h2>
@@ -286,40 +285,7 @@ export function AccessRequestNavigation({ scope, global, boutiques }: Props) {
                       {detail.message || "Non renseigné"}
                     </dd>
                   </dl>
-                  {global && !terminal && (
-                    <div className="space-y-2 border rounded-lg p-3">
-                      <label htmlFor="access-destination">
-                        Attribuer à une boutique
-                      </label>
-                      <select
-                        id="access-destination"
-                        value={destination}
-                        onChange={(e) => setDestination(e.target.value)}
-                        disabled={busy}
-                        className="w-full border rounded p-2"
-                      >
-                        <option value="">SuperAdmin uniquement</option>
-                        {boutiques.map((b) => (
-                          <option key={b.id} value={b.id}>
-                            {b.nom}
-                          </option>
-                        ))}
-                      </select>
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() =>
-                          void mutate(() =>
-                            routeRequest(detail.id, destination || null),
-                          )
-                        }
-                        className="border rounded px-3 py-2"
-                      >
-                        Enregistrer l’attribution
-                      </button>
-                    </div>
-                  )}
-                  <label className="block my-3">
+                  <details className="my-3 rounded-xl border p-3"><summary className="cursor-pointer font-bold">Note interne (optionnelle)</summary><label className="mt-3 block">
                     Note interne (1 000 caractères maximum, sans donnée
                     sensible)
                     <textarea
@@ -330,37 +296,27 @@ export function AccessRequestNavigation({ scope, global, boutiques }: Props) {
                       className="block w-full border rounded-lg p-2"
                       rows={3}
                     />
-                  </label>
+                  </label></details>
                   {!terminal && (
-                    <div className="flex flex-wrap gap-2">
-                      {([
-                        "vue",
-                        "acceptee",
-                        "refusee",
-                        "complement_demande",
-                      ] as const).map((value) => (
+                    <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+                      {(["acceptee", "refusee", "complement_demande"] as const).map((value) => (
                         <button
                           key={value}
                           type="button"
                           disabled={busy}
                           onClick={() =>
-                            void mutate(() =>
-                              decideRequest(detail.id, value, note),
-                            )
+                            void mutate(
+                            () => decideRequest(detail.id, value, note),
+                            value === "acceptee" ? "Demande acceptée" : value === "refusee" ? "Demande refusée" : "Complément demandé",
+                          )
                           }
-                          className={`rounded-lg border px-3 py-2 font-bold ${
+                          className={`min-h-11 rounded-lg border px-3 py-2 font-bold disabled:opacity-50 ${
                             value === "acceptee"
                               ? "bg-[#C9A227] text-slate-950"
                               : ""
                           }`}
                         >
-                          {value === "vue"
-                            ? "Marquer vue"
-                            : value === "acceptee"
-                              ? "Accepter"
-                              : value === "refusee"
-                                ? "Refuser"
-                                : "Demander un complément"}
+                          {value === "acceptee" ? "Accepter & créer la boutique" : value === "refusee" ? "Refuser" : "Demander un complément"}
                         </button>
                       ))}
                     </div>
@@ -374,8 +330,7 @@ export function AccessRequestNavigation({ scope, global, boutiques }: Props) {
                   )}
                   {detail.statut === "acceptee" && (
                     <p className="text-sm mt-3">
-                      Demande approuvée. La création du compte et son activation
-                      seront disponibles à l’étape B.
+                      Demande acceptée.
                     </p>
                   )}
                 </>
