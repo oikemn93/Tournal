@@ -26,7 +26,7 @@ async function run({ frenchStatus = 'APPROVED', authStatus = 'APPROVED', authent
       const parsed = new URL(url);
       if (parsed.pathname.endsWith('/message_templates') && !options.method) {
         const name = parsed.searchParams.get('name');
-        const status = name === 'tournal_account_ready_v1' ? frenchStatus : authStatus;
+        const status = name === 'tournal_account_ready_v2' ? frenchStatus : authStatus;
         return Response.json({ data: [
           { name: 'unrelated', status: 'APPROVED', language: 'fr' },
           { name, status: 'APPROVED', language: 'en' },
