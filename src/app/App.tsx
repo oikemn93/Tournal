@@ -10009,7 +10009,6 @@ export default function App() {
           {saveState==="saved"&&<span className="text-xs text-green-600 font-semibold flex items-center gap-1"><span className="inline-block w-1.5 h-1.5 rounded-full bg-green-500"/>Sauvegardé</span>}
           {saveState==="error"&&<span className="text-xs text-red-500 font-semibold flex items-center gap-1"><span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500"/>Erreur sync</span>}
           {saveState==="idle"&&backendOk===false&&<span className="text-xs text-red-400 font-semibold flex items-center gap-1"><span className="inline-block w-1.5 h-1.5 rounded-full bg-red-400"/>Hors ligne</span>}
-          {(isOwner || currentUser.isSuperAdmin) && appSessionReady && !locked && <AccessRequestNavigation key={`${currentUser.id}:${boutique.id}`} scope={boutique.id} global={currentUser.isSuperAdmin} boutiques={boutiques}/>}
           <button onClick={pullRemote} title="Synchroniser maintenant" className="p-2 rounded-xl active:scale-95 transition-transform" style={{ background:"#EEE9D8" }}><RefreshCw size={16} className="text-muted-foreground"/></button>
           <button onClick={()=>setNotifOpen(o=>!o)} className="relative p-2.5 rounded-xl" style={{ background:"#EEE9D8" }}>
             <Bell size={22} className="text-muted-foreground"/>
