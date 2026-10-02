@@ -153,6 +153,13 @@ Deno.serve(async (req)=>{
       if(!createResponse.ok){
         if(Number(createResult?.error?.code??0)===10){
           const diag=await tokenDiagnostics();
+          const hasManagement=diag.granted_permissions.includes("whatsapp_business_management");
+          const hasMessaging=diag.granted_permissions.includes("whatsapp_business_messaging");
+          if(hasManagement&&hasMessaging&&diag.waba_accessible){
+            throw new Error(
+              `Meta autorise la lecture du WABA mais refuse la création de templates via l’application. Créez manuellement les templates "${WHATSAPP_UTILITY_TEMPLATE_NAME}" (UTILITY) et "${WHATSAPP_AUTH_TEMPLATE_NAME}" (AUTHENTICATION) dans WhatsApp Manager. Tournal les détectera automatiquement dès qu’ils seront APPROVED.`
+            );
+          }
           const required=["whatsapp_business_management","whatsapp_business_messaging"];
           const missing=required.filter((permission)=>!diag.granted_permissions.includes(permission));
           throw new Error(
