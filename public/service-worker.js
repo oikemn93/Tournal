@@ -227,18 +227,16 @@ async function enqueueCreateSale(request, body) {
   });
 }
 
-async function enqueueCashPayment(request, body) {
+async function enqueueOfflinePayment(request, body) {
   const invoiceId = String(body.p_invoice_id || '');
   if (!invoiceId.startsWith('OFF-')) {
-    return offlineError('Mode hors-ligne : l’encaissement espèces est autorisé uniquement pour une vente créée hors ligne pendant cette phase. Les règlements d’anciennes factures restent bloqués pour éviter une incohérence de solde.');
-  }
-  if (String(body.p_payment_method || '').toLowerCase() !== 'espèces') {
-    return offlineError('Mode hors-ligne : seuls les paiements en espèces sont autorisés. Mobile money, carte et avoir client nécessitent une connexion serveur.');
+    return offlineError('Mode hors-ligne : l’encaissement est autorisé uniquement pour une vente créée hors ligne pendant cette phase. Les règlements d’anciennes factures restent bloqués pour éviter une incohérence de solde.');
   }
   const idempotencyKey = String(body.p_idempotency_key || crypto.randomUUID());
   const id = `record_payment:${idempotencyKey}`;
   const createdAt = Date.now();
   const amount = Number(body.p_amount || 0);
+  const paymentMethod = String(body.p_payment_method || 'Espèces');
   await putQueue({
     id,
     kind: 'record_payment',
@@ -259,7 +257,7 @@ async function enqueueCashPayment(request, body) {
     payment: {
       id: -createdAt,
       amount,
-      payment_method: 'Espèces',
+      payment_method: paymentMethod,
       paid_at: new Date(createdAt).toISOString(),
       operator_id: 'offline',
       operator_name: 'Hors ligne',
@@ -328,14 +326,14 @@ async function handleSupabaseRequest(request) {
       const response = await timedFetch(request);
       if (response.status < 500) return response;
     } catch {}
-    return enqueueCashPayment(clone, body).catch(() => offlineError('Impossible d’enregistrer le paiement localement. Ne remettez pas de reçu hors ligne.'));
+    return enqueueOfflinePayment(clone, body).catch(() => offlineError('Impossible d’enregistrer le paiement localement. Ne remettez pas de reçu hors ligne.'));
   }
 
   try {
     return await timedFetch(request);
   } catch {
     if (isMutation) {
-      return offlineError('Mode hors-ligne : cette opération est bloquée. Seules la création de vente et son encaissement en espèces sont autorisés; retours/remboursements, droits/utilisateurs, transferts et autres écritures exigent une connexion.');
+      return offlineError('Mode hors-ligne : cette opération est bloquée. Seules la création de vente et l’enregistrement de son règlement sont autorisés; retours/remboursements, droits/utilisateurs, transferts et autres écritures exigent une connexion.');
     }
     return offlineError('Mode hors-ligne : donnée serveur indisponible. Les écrans déjà chargés conservent les dernières données synchronisées en mémoire.');
   }
