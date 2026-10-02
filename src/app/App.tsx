@@ -6722,39 +6722,27 @@ function fmtDateTime(ts: number): string {
   return new Date(ts).toLocaleString("fr-FR", { day:"2-digit", month:"short", year:"numeric", hour:"2-digit", minute:"2-digit", second:"2-digit" });
 }
 
-function SupervisionSection({ boutique, allBoutiques, backendOk, lastSyncAt }: {
-  boutique: Boutique; allBoutiques: Boutique[];
-  backendOk: boolean|null; lastSyncAt: number;
-}) {
-  const [logs, setLogs]               = useState<TechLog[]>([]);
-  const [loading, setLoading]         = useState(true);
-  const [tab, setTab]                 = useState<"logs"|"reseau">("logs");
-  const [catFilter, setCatFilter]     = useState<TechLogCat|"all">("all");
+function SupervisionSection({ boutique }: { boutique: Boutique }) {
+  const [logs, setLogs] = useState<TechLog[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [reload, setReload] = useState(0);
+  const [catFilter, setCatFilter] = useState<TechLogCat|"all">("all");
   const [levelFilter, setLevelFilter] = useState<TechLogLevel|"all">("all");
-  const [networkHealth, setNetworkHealth] = useState<Record<string,TechLog[]>>({});
-  const [netLoading, setNetLoading]   = useState(false);
 
   useEffect(() => {
-    let cancelled=false; setLoading(true);
-    void loadTechLogs(boutique.id,200).then(rows=>{if(cancelled)return;setLogs(rows.map(row=>({id:String(row.id),ts:Date.parse(row.created_at),level:row.level,cat:(row.category as TechLogCat),msg:row.message,detail:row.detail??undefined})));}).catch(error=>{console.warn("Supervision technique indisponible",error);if(!cancelled)setLogs([]);}).finally(()=>{if(!cancelled)setLoading(false);});
-    return()=>{cancelled=true;};
-  }, [boutique.id]);
-
-  useEffect(() => {
-    if (tab !== "reseau" || allBoutiques.length < 2) return;
-    setNetLoading(true);
-    setNetworkHealth(Object.fromEntries(allBoutiques.map(b => [b.id, []])));
-    setNetLoading(false);
-  }, [tab, allBoutiques]);
-
-  const now = Date.now();
-  const errors24h = logs.filter(l => l.level==="error" && l.ts > now - 864e5).length;
-  const errors7d  = logs.filter(l => l.level==="error" && l.ts > now - 6048e5).length;
-  const warns24h  = logs.filter(l => l.level==="warn"  && l.ts > now - 864e5).length;
-
-  const statusColor = backendOk===false ? "#ef4444" : errors24h > 0 ? "#f59e0b" : "#10b981";
-  const statusLabel = backendOk===false ? "Hors ligne" : errors24h > 0 ? "Dégradé" : "Opérationnel";
-  const statusIcon  = backendOk===false ? "🔴" : errors24h > 0 ? "🟡" : "🟢";
+    let cancelled = false;
+    setLoading(true); setLoadError(false); setLogs([]);
+    void loadTechLogs(boutique.id, 200).then(rows => {
+      if (cancelled) return;
+      setLogs(rows.map(row => ({id:String(row.id), ts:Date.parse(row.created_at), level:row.level, cat:row.category as TechLogCat, msg:row.message, detail:row.detail??undefined})));
+    }).catch(() => {
+      if (!cancelled) setLoadError(true);
+    }).finally(() => {
+      if (!cancelled) setLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [boutique.id, reload]);
 
   const filtered = logs.filter(l =>
     (catFilter==="all" || l.cat===catFilter) &&
@@ -6764,86 +6752,13 @@ function SupervisionSection({ boutique, allBoutiques, backendOk, lastSyncAt }: {
   return (
     <div className="space-y-4">
 
-      {/* ── Health summary ─────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 gap-3">
-        <div className="bg-card rounded-2xl p-4 border border-border col-span-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="text-xl">{statusIcon}</span>
-              <div>
-                <p className="text-sm font-black" style={{ color:statusColor }}>{statusLabel}</p>
-                <p className="text-xs text-muted-foreground">État général du système</p>
-              </div>
-            </div>
-            <div className="text-right">
-              <p className="text-xs text-muted-foreground">Dernière sync</p>
-              <p className="text-xs font-bold">{lastSyncAt ? fmtAge(lastSyncAt) : "—"}</p>
-            </div>
-          </div>
-        </div>
-        <div className="bg-card rounded-2xl p-4 border border-border">
-          <p className="text-xs text-muted-foreground mb-1">Erreurs 24h</p>
-          <p className="text-2xl font-black" style={{ color: errors24h>0 ? "#ef4444" : "#10b981", fontFamily:"'Nunito',sans-serif" }}>{errors24h}</p>
-        </div>
-        <div className="bg-card rounded-2xl p-4 border border-border">
-          <p className="text-xs text-muted-foreground mb-1">Erreurs 7 jours</p>
-          <p className="text-2xl font-black" style={{ color: errors7d>0 ? "#f59e0b" : "#10b981", fontFamily:"'Nunito',sans-serif" }}>{errors7d}</p>
-        </div>
-        {warns24h > 0 && (
-          <div className="col-span-2 rounded-2xl px-4 py-3 flex items-center gap-2" style={{ background:"#f59e0b14", border:"1px solid #f59e0b30" }}>
-            <span>⚠️</span>
-            <p className="text-xs font-semibold" style={{ color:"#b45309" }}>{warns24h} avertissement{warns24h>1?"s":""} au cours des dernières 24h</p>
-          </div>
-        )}
+      <div className="bg-card rounded-2xl p-4 border border-border">
+        <h2 className="text-sm font-black">Journal technique · {boutique.nom}</h2>
+        <p className="text-sm text-muted-foreground mt-2">Les 200 événements enregistrés les plus récents de cette boutique. Ce journal ne mesure pas la disponibilité du système et ne constitue pas un audit exhaustif.</p>
+        <button type="button" disabled={loading} onClick={() => setReload(value => value + 1)} className="mt-3 rounded-xl border px-3 py-2 text-sm font-bold disabled:opacity-50">{loading ? "Chargement…" : "Actualiser le journal"}</button>
       </div>
-
-      {/* ── Tabs ─────────────────────────────────────────────────────────── */}
-      {allBoutiques.length > 1 && (
-        <div className="flex gap-2">
-          {(["logs","reseau"] as const).map(t => (
-            <button key={t} onClick={() => setTab(t)}
-              className="px-4 py-2 rounded-xl text-xs font-bold"
-              style={{ background: tab===t ? boutique.color : boutique.color+"18", color: tab===t ? "#fff" : boutique.color }}>
-              {t==="logs" ? "📋 Logs" : "🌐 Réseau"}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* ── Network health grid ──────────────────────────────────────────── */}
-      {tab==="reseau" && (
-        <div className="space-y-3">
-          {netLoading ? (
-            <div className="text-center py-8"><p className="text-sm text-muted-foreground">Chargement…</p></div>
-          ) : allBoutiques.map(b => {
-            const bLogs = networkHealth[b.id] ?? [];
-            const bErr24 = bLogs.filter(l => l.level==="error" && l.ts > now - 864e5).length;
-            const bWarn24 = bLogs.filter(l => l.level==="warn" && l.ts > now - 864e5).length;
-            const bOk = bErr24===0 && bWarn24===0;
-            const bColor = bErr24>0 ? "#ef4444" : bWarn24>0 ? "#f59e0b" : "#10b981";
-            return (
-              <div key={b.id} className="bg-card rounded-2xl border border-border px-4 py-3 flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl flex-shrink-0 flex items-center justify-center text-sm font-black" style={{ background:b.color+"22", color:b.color, fontFamily:"'Nunito',sans-serif" }}>{b.initials}</div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-bold">{b.nom}</p>
-                  <p className="text-xs text-muted-foreground">{b.ville}</p>
-                </div>
-                <div className="text-right">
-                  <div className="flex items-center gap-1.5 justify-end">
-                    <span className="text-base">{bOk ? "🟢" : bErr24>0 ? "🔴" : "🟡"}</span>
-                    <span className="text-xs font-bold" style={{ color:bColor }}>{bOk ? "OK" : `${bErr24+bWarn24} alerte${bErr24+bWarn24>1?"s":""}`}</span>
-                  </div>
-                  {bLogs.length>0 && <p className="text-xs text-muted-foreground mt-0.5">{bLogs.length} entrée{bLogs.length>1?"s":""}</p>}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* ── Log filters ──────────────────────────────────────────────────── */}
-      {tab==="logs" && (
-        <>
+      {loadError && <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">Impossible de charger le journal. Les événements sont indisponibles ; cela ne signifie pas qu’aucune erreur ne s’est produite.<button type="button" onClick={() => setReload(value => value + 1)} className="block mt-2 font-bold underline">Réessayer</button></div>}
+      {!loadError && (<>
           <div className="flex gap-2 flex-wrap">
             {(["all","error","warn","info"] as const).map(l => (
               <button key={l} onClick={() => setLevelFilter(l)}
@@ -6855,7 +6770,7 @@ function SupervisionSection({ boutique, allBoutiques, backendOk, lastSyncAt }: {
             ))}
           </div>
           <div className="flex gap-2 flex-wrap">
-            {(["all","sync","email","pdf","qz","session","backend"] as const).map(c => (
+            {(["all","sync","rpc","loading","printing","network","session","other"] as const).map(c => (
               <button key={c} onClick={() => setCatFilter(c)}
                 className="px-3 py-1.5 rounded-full text-xs font-bold"
                 style={{ background: catFilter===c ? (c==="all"?"#1f2937":CAT_COLOR[c as TechLogCat]) : "#f3f4f6",
@@ -6870,8 +6785,8 @@ function SupervisionSection({ boutique, allBoutiques, backendOk, lastSyncAt }: {
             <div className="text-center py-8"><p className="text-sm text-muted-foreground">Chargement…</p></div>
           ) : filtered.length === 0 ? (
             <div className="text-center py-12">
-              <CheckCircle size={40} className="mx-auto mb-3" style={{ color:"#10b981", opacity:0.5 }}/>
-              <p className="text-sm font-bold text-muted-foreground">Aucun log</p>
+              <Activity size={40} className="mx-auto mb-3 text-muted-foreground" style={{ opacity:0.5 }}/>
+              <p className="text-sm font-bold text-muted-foreground">Aucun événement enregistré correspondant</p>
               <p className="text-xs text-muted-foreground mt-1">Aucun événement correspondant aux filtres sélectionnés.</p>
             </div>
           ) : (
@@ -7081,7 +6996,7 @@ function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdat
     { id:"fonctionnel", icon:"⚙️", label:"Fonctionnel", subs:[{id:"stock-params",label:"Catalogue"},{id:"boutique",label:"Boutique"},{id:"payment-terms",label:"Délais paiement"},{id:"caisse",label:"Caisse"}] },
     { id:"systeme",     icon:"🔧", label:"Système",     subs:[{id:"imprimante",label:"Imprimante"},{id:"lecteur",label:"Code-barre"},{id:"tiroir",label:"Tiroir caisse"}] },
     { id:"journal",     icon:"📋", label:"Journal",     subs:[{id:"activite",label:"Activité"}] },
-    { id:"supervision", icon:"🩺", label:"Supervis.",   subs:[{id:"supervision",label:"Monitoring"}] },
+    { id:"supervision", icon:"🩺", label:"Technique",   subs:[{id:"supervision",label:"Journal technique"}] },
   ];
 
   function navTo(catId: CatId, secId: AdminSec) { setCatOpen(catId); setSection(secId); }
@@ -7513,8 +7428,7 @@ function AdminView({ boutique, allBoutiques, platformUsers, currentUser, onUpdat
         </>}
 
         {section==="supervision"&&<SupervisionSection
-          boutique={boutique} allBoutiques={allBoutiques}
-          backendOk={backendOk??null} lastSyncAt={lastSyncAt??0}/>}
+          key={boutique.id} boutique={boutique}/>}
 
       </div>{/* end main content */}
     </div>
