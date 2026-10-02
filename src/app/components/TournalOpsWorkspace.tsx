@@ -1,238 +1,2503 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { listRequests, requestDetail, decideRequest, routeRequest, type AccessSummary, type AccessDetail } from "../../lib/access-requests";
-import { createBoutique, createBoutiqueWithNewOwner, sendWhatsAppOnboarding } from "../../lib/api";
-import { Activity, AlertTriangle, ArrowLeft, Building2, CheckCircle2, ChevronRight, ClipboardCheck, Headphones, LayoutDashboard, LogOut, Plus, RefreshCw, Search, Settings, ShieldCheck, Store, Users, X } from "lucide-react";
+import "./tournal-ops.css"
+
+import * as Dialog from "@radix-ui/react-dialog"
+
+import React, { useEffect, useMemo, useRef, useState } from "react"
+
 import {
-  createOpsAccount, createOpsContact, createOpsInteraction, deleteOpsContact, createOpsTask, createOpsTicket, decideOpsAccessRequest, loadOpsSupportDiagnostic, loadOpsWorkspace, linkOpsBoutiqueToAccount, requestOpsBoutiqueAccess, updateOpsAccount, updateOpsContact, updateOpsOnboarding,
-  updateOpsTask, updateOpsTicket, upsertOpsStaffProfile,
-  type OpsOnboarding, type OpsPriority, type OpsStaffProfile, type OpsSupportDiagnostic, type OpsTask, type OpsTicket, type OpsWorkspace,
-} from "../../lib/ops";
+  listRequests,
+  requestDetail,
+  decideRequest,
+  routeRequest,
+  type AccessSummary,
+  type AccessDetail,
+} from "../../lib/access-requests"
 
-type BoutiqueLike = { id:string; nom:string; ville?:string; tel?:string; email?:string; products?:unknown[]; entries?:Array<{qty?:number;recordedAt?:string;date?:string;movementType?:string}>; invoices?:Array<{dateRaw?:string;date?:string}> };
-type UserLike = { id:string; nom:string; phone?:string; isSuperAdmin?:boolean; assignments?:Array<{boutiqueId:string;role?:string}> };
-type View = "home"|"clients"|"support"|"activity"|"team"|"system";
-const NAV:[View,string,React.ElementType][] = [["home","Vue d’ensemble",LayoutDashboard],["clients","Demandes & boutiques",Building2],["support","Support",Headphones],["activity","Activité",Activity],["team","Équipe",Users],["system","Système",Settings]];
-const fmtDate=(value?:string|null)=>{if(!value)return "—";const d=new Date(value);if(Number.isNaN(d.getTime()))return "—";try{return new Intl.DateTimeFormat("fr-FR",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"}).format(d)}catch{return d.toLocaleString("fr-FR")}};
-const priorityRank:Record<OpsPriority,number>={urgent:0,high:1,normal:2,low:3};
-const priorityLabel:Record<OpsPriority,string>={urgent:"Urgent",high:"Haute",normal:"Normale",low:"Basse"};
-const teamLabel:Record<string,string>={sales:"Sales",service:"Service",support:"Support",success:"Success",management:"Management"};
+import {
+  createBoutique,
+  createBoutiqueWithNewOwner,
+  sendWhatsAppOnboarding,
+} from "../../lib/api"
 
-function Modal({title,onClose,children}:{title:string;onClose:()=>void;children:React.ReactNode}) {
-  return <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center" onClick={onClose}><div className="w-full sm:max-w-lg rounded-t-3xl sm:rounded-xl bg-white p-5 max-h-[85vh] overflow-y-auto" onClick={e=>e.stopPropagation()}><div className="flex items-center justify-between mb-4"><h2 className="font-semibold text-lg">{title}</h2><button onClick={onClose} className="h-9 w-9 rounded-xl bg-slate-100 flex items-center justify-center"><X size={17}/></button></div>{children}</div></div>;
+import {
+  Activity,
+  ArrowLeft,
+  CheckCircle2,
+  ChevronRight,
+  ClipboardCheck,
+  Headphones,
+  LayoutDashboard,
+  LogOut,
+  Plus,
+  RefreshCw,
+  Search,
+  Settings,
+  ShieldCheck,
+  Store,
+  Users,
+  X,
+} from "lucide-react"
+
+import {
+  createOpsInteraction,
+  createOpsTask,
+  createOpsTicket,
+  decideOpsAccessRequest,
+  loadOpsWorkspace,
+  updateOpsOnboarding,
+  updateOpsTask,
+  updateOpsTicket,
+  upsertOpsStaffProfile,
+  type OpsPriority,
+  type OpsStaffProfile,
+  type OpsTask,
+  type OpsTicket,
+  type OpsWorkspace,
+} from "../../lib/ops"
+
+type BoutiqueLike = {
+  id: string
+  nom: string
+  ville?: string
+  tel?: string
+  email?: string
+  products?: unknown[]
+  entries?: Array<{
+    qty?: number
+    recordedAt?: string
+    date?: string
+    movementType?: string
+  }>
+  invoices?: Array<{ dateRaw?: string; date?: string }>
 }
-const input="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-200";
-const panel="bg-white border border-slate-200 rounded-xl";
 
-export function TournalOpsWorkspace({boutiques,users,onOpenBoutique,onSystem,onLogout,canSystemAdmin=true,canEnterBoutique=true,opsRole}:{boutiques:BoutiqueLike[];users:UserLike[];onOpenBoutique:(id:string)=>void;onSystem:()=>void;onLogout:()=>void;canSystemAdmin?:boolean;canEnterBoutique?:boolean;opsRole?:string}) {
-  const [view,setView]=useState<View>("home");
-  const [clientTab,setClientTab]=useState<"requests"|"shops"|"accounts">("requests");
-  const [supportTab,setSupportTab]=useState<"tickets"|"tasks">("tickets");
-  const [publicRequests,setPublicRequests]=useState<AccessSummary[]>([]);
-  const [publicRequestsLoading,setPublicRequestsLoading]=useState(false);
-  const [publicRequestDetail,setPublicRequestDetail]=useState<AccessDetail|null>(null);
-  const [publicRequestBusy,setPublicRequestBusy]=useState(false);
-  const [publicRequestNote,setPublicRequestNote]=useState("");
-    const [provisionModal,setProvisionModal]=useState(false);
-  const [manualProvision,setManualProvision]=useState(false);
-  const [provisionName,setProvisionName]=useState("");
-  const [provisionCity,setProvisionCity]=useState("");
-  const [provisionOwner,setProvisionOwner]=useState("");
-  const [provisionOwnerMode,setProvisionOwnerMode]=useState<"existing"|"new">("new");
-  const [newOwnerName,setNewOwnerName]=useState("");
-  const [newOwnerPhone,setNewOwnerPhone]=useState("");
-  const [provisionSaving,setProvisionSaving]=useState(false);
-  const [onboardingCredentials,setOnboardingCredentials]=useState<{boutiqueId:string;fullName:string;phone:string;temporaryPassword:string;boutiqueName:string}|null>(null);
-  const [whatsappSending,setWhatsappSending]=useState(false);
-  const [whatsappSent,setWhatsappSent]=useState(false);
-  const [query,setQuery]=useState("");
-  const [opsBoutiques,setOpsBoutiques]=useState<BoutiqueLike[]>(boutiques);
-  const [workspace,setWorkspace]=useState<OpsWorkspace|null>(null);
-  const [loading,setLoading]=useState(true);
-  const [error,setError]=useState("");
-  const [selectedId,setSelectedId]=useState<string|null>(null);
-  const [taskModal,setTaskModal]=useState(false);
-  const [ticketModal,setTicketModal]=useState(false);
-  const [taskTitle,setTaskTitle]=useState(""); const [taskBoutique,setTaskBoutique]=useState(""); const [taskTeam,setTaskTeam]=useState<"sales"|"service"|"support"|"success"|"management">("service"); const [taskPriority,setTaskPriority]=useState<OpsPriority>("normal"); const [taskDue,setTaskDue]=useState(""); const [taskAssignee,setTaskAssignee]=useState("");
-  const [ticketSubject,setTicketSubject]=useState(""); const [ticketBoutique,setTicketBoutique]=useState(""); const [ticketPriority,setTicketPriority]=useState<OpsPriority>("normal"); const [ticketRequester,setTicketRequester]=useState(""); const [ticketPhone,setTicketPhone]=useState(""); const [ticketAssignee,setTicketAssignee]=useState("");
-  const [saving,setSaving]=useState(false);
-  const [interactionKind,setInteractionKind]=useState<"note"|"call"|"meeting"|"handoff">("note"); const [interactionTeam,setInteractionTeam]=useState<"sales"|"service"|"support"|"success"|"management">("service"); const [interactionTitle,setInteractionTitle]=useState(""); const [interactionDetail,setInteractionDetail]=useState(""); const [interactionSaving,setInteractionSaving]=useState(false);
-  const [accountGroup,setAccountGroup]=useState(""); const [newAccountName,setNewAccountName]=useState(""); const [accountGroupingSaving,setAccountGroupingSaving]=useState(false);
-  const [contactName,setContactName]=useState(""); const [contactPhone,setContactPhone]=useState(""); const [contactEmail,setContactEmail]=useState(""); const [contactRole,setContactRole]=useState(""); const [contactSaving,setContactSaving]=useState(false);
-  const [accessReason,setAccessReason]=useState(""); const [accessMinutes,setAccessMinutes]=useState(30); const [accessSaving,setAccessSaving]=useState(false); const [diagnostic,setDiagnostic]=useState<OpsSupportDiagnostic|null>(null); const [diagnosticLoading,setDiagnosticLoading]=useState(false);
+type UserLike = {
+  id: string
+  nom: string
+  phone?: string
+  isSuperAdmin?: boolean
+  assignments?: Array<{ boutiqueId: string; role?: string }>
+}
 
-  async function refresh() { setLoading(true); setError(""); try { setWorkspace(await loadOpsWorkspace()); } catch(e) { setError(e instanceof Error?e.message:"Chargement Ops impossible"); } finally { setLoading(false); } }
-  useEffect(()=>{ void refresh(); },[]);
-  useEffect(()=>{ setOpsBoutiques(boutiques); },[boutiques]);
-  useEffect(()=>{ if(view!=="clients"||clientTab!=="requests"||!canSystemAdmin)return; let alive=true; setPublicRequestsLoading(true); listRequests(null,null,0).then(items=>{if(alive)setPublicRequests(items)}).catch(()=>{if(alive)setPublicRequests([])}).finally(()=>{if(alive)setPublicRequestsLoading(false)}); return()=>{alive=false}; },[view,clientTab,canSystemAdmin]);
+type View = "home" | "clients" | "support" | "activity" | "team" | "system"
 
-  const rows=useMemo(()=>opsBoutiques.map(b=>{
-    const members=users.filter(u=>u.assignments?.some(a=>a.boutiqueId===b.id));
-    const overview=workspace?.overview.find(item=>item.boutique_id===b.id);
-    const lastSale=overview?.last_sale_at??(b.invoices??[]).map(i=>i.dateRaw??i.date??"").filter(Boolean).sort().at(-1)??null;
-    const firstSale=overview?.first_sale_at??(b.invoices??[]).map(i=>i.dateRaw??i.date??"").filter(Boolean).sort().at(0)??null;
-    const receipts=(b.entries??[]).filter(e=>(e.qty??0)>0&&e.movementType==="achat");
-    const firstReceipt=overview?.first_receipt_at??receipts.map(e=>e.recordedAt??e.date??"").filter(Boolean).sort().at(0)??null;
-    const setup=(overview?.product_count??b.products?.length??0)>0;
-    const onboarding=workspace?.onboarding.find(o=>o.boutique_id===b.id);
-    const openTasks=workspace?.tasks.filter(t=>t.boutique_id===b.id&&!['done','cancelled'].includes(t.status))??[];
-    const openTickets=workspace?.tickets.filter(t=>t.boutique_id===b.id&&!['resolved','closed'].includes(t.status))??[];
-    const ownerReady=(overview?.owner_count??0)>0||members.some(m=>m.assignments?.some(a=>a.boutiqueId===b.id&&(a.role==="Propriétaire"||a.role==="owner")));
-    const checks=[ownerReady,members.length>0,setup,Boolean(firstReceipt||onboarding?.first_receipt_at),Boolean(firstSale||onboarding?.first_sale_at),Boolean(onboarding?.training_done)];
-    const progress=Math.round(checks.filter(Boolean).length/checks.length*100);
-    const score=Math.max(0,Math.min(100,progress-(openTickets.some(t=>t.priority==='urgent')?20:0)-(openTasks.filter(t=>t.due_at&&new Date(t.due_at)<new Date()).length*5)));
-    return {...b,members,lastSale,firstSale,firstReceipt,setup,onboarding,openTasks,openTickets,ownerReady,progress,score};
-  }),[opsBoutiques,users,workspace]);
-  const normalizedQuery=query.trim().toLowerCase();
-  const filtered=rows.filter(b=>{
-    const link=workspace?.accountBoutiques.find(x=>x.boutique_id===b.id);
-    const account=link?workspace?.accounts.find(a=>a.id===link.account_id):null;
-    const memberText=(b.members??[]).map(m=>(m?.nom??"")+" "+(m?.phone??"")).join(" ");
-    const searchable=[b.nom,b.ville,b.tel,account?.name,memberText].filter(Boolean).join(" ").toLowerCase();
-    return !normalizedQuery||searchable.includes(normalizedQuery);
-  });
-  const accountGroups=(workspace?.accounts??[]).map(account=>({account,boutiques:rows.filter(b=>workspace?.accountBoutiques.some(link=>link.account_id===account.id&&link.boutique_id===b.id))})).filter(group=>group.boutiques.length>0);
-  const attention=rows.filter(b=>b.progress<100||b.openTickets.length>0||b.openTasks.length>0).sort((a,b)=>a.score-b.score);
-  const selected=rows.find(b=>b.id===selectedId)??null;
-  const activeTasks=(workspace?.tasks??[]).filter(t=>!['done','cancelled'].includes(t.status)).sort((a,b)=>priorityRank[a.priority]-priorityRank[b.priority]||String(a.due_at??'9999').localeCompare(String(b.due_at??'9999')));
-  const activeTickets=(workspace?.tickets??[]).filter(t=>!['resolved','closed'].includes(t.status)).sort((a,b)=>priorityRank[a.priority]-priorityRank[b.priority]||b.id-a.id);
-  const opsUsers=users.filter(user=>workspace?.staff.some(profile=>profile.user_id===user.id&&profile.active));
-  const userName=(id:string|null)=>id?users.find(user=>user.id===id)?.nom??"Non assigné":"Non assigné";
-  const canManageOnboarding=canSystemAdmin||opsRole==="service"||opsRole==="manager";
-  const canManageAccount=canSystemAdmin||opsRole==="sales"||opsRole==="manager";
-  const canManageContacts=canSystemAdmin||["sales","service","support","manager"].includes(opsRole??"");
-  const canGroupAccounts=canSystemAdmin||opsRole==="manager";
-  const canDeleteContacts=canSystemAdmin||opsRole==="manager";
-  const selectedAccountLink=selected?workspace?.accountBoutiques.find(link=>link.boutique_id===selected.id):null;
-  const selectedAccount=selectedAccountLink?workspace?.accounts.find(account=>account.id===selectedAccountLink.account_id):null;
-  const selectedContacts=selectedAccount?(workspace?.contacts??[]).filter(contact=>contact.account_id===selectedAccount.id):[];
-  const canManageTickets=canSystemAdmin||opsRole==="support"||opsRole==="manager";
-  const canManageTask=(task:OpsTask)=>canSystemAdmin||opsRole==="manager"||(opsRole==="sales"&&task.team==="sales")||(opsRole==="service"&&(task.team==="service"||task.team==="success"))||(opsRole==="support"&&task.team==="support");
-  const pendingAccess=(workspace?.accessRequests??[]).filter(r=>r.status==="pending");
-
-  async function openPublicRequest(id:string){setPublicRequestBusy(true);setError("");try{let d=await requestDetail(id);if(d.statut==="nouvelle"){try{d=await decideRequest(d.id,"vue",d.note_interne||"");}catch{}}setPublicRequestDetail(d);setPublicRequestNote(d.note_interne||"");}catch(e){setError(e instanceof Error?e.message:"Demande inaccessible");}finally{setPublicRequestBusy(false)}}
-  async function mutatePublicRequest(action:()=>Promise<AccessDetail>){if(publicRequestBusy)return;setPublicRequestBusy(true);setError("");try{const d=await action();setPublicRequestDetail(d);setPublicRequestNote(d.note_interne||"");setPublicRequests(items=>items.map(r=>r.id===d.id?d:r));}catch(e){setError(e instanceof Error?e.message:"Action impossible");}finally{setPublicRequestBusy(false)}}
-  function startProvisionFromRequest(){if(!publicRequestDetail)return;setManualProvision(false);setProvisionName(publicRequestDetail.societe||publicRequestDetail.nom||"");setProvisionCity("");const digits=(value?:string|null)=>(value||"").replace(/\D/g,"").replace(/^00/,"");const requestPhone=digits(publicRequestDetail.telephone);const owner=users.find(user=>requestPhone&&digits(user.phone)===requestPhone);setProvisionOwner(owner?.id||"");setProvisionOwnerMode(owner?"existing":"new");setNewOwnerName(publicRequestDetail.nom||"");setNewOwnerPhone(publicRequestDetail.telephone||"");setWhatsappSent(false);setProvisionModal(true)}
-  function startManualProvision(){setManualProvision(true);setProvisionName("");setProvisionCity("");setProvisionOwner("");setProvisionOwnerMode("new");setNewOwnerName("");setNewOwnerPhone("");setWhatsappSent(false);setProvisionModal(true)}
-  async function provisionBoutique(){const useNewOwner=provisionOwnerMode==="new";if(!provisionName.trim()||!provisionCity.trim()||provisionSaving||(!manualProvision&&!publicRequestDetail)||(useNewOwner?(!newOwnerName.trim()||!newOwnerPhone.trim()):!provisionOwner))return;setProvisionSaving(true);setError("");try{const name=provisionName.trim();const city=provisionCity.trim();let boutiqueId="";if(useNewOwner){const created=await createBoutiqueWithNewOwner({nom:name,ville:city,ownerName:newOwnerName.trim(),ownerPhone:newOwnerPhone.trim()});boutiqueId=created.boutiqueId;setOnboardingCredentials({boutiqueId:created.boutiqueId,fullName:created.ownerName,phone:created.ownerPhone,temporaryPassword:created.temporaryPassword,boutiqueName:name});setWhatsappSent(false);}else{const created=await createBoutique(name,city,provisionOwner);boutiqueId=created.boutiqueId;setOnboardingCredentials(null);}setOpsBoutiques(items=>[...items.filter(b=>b.id!==boutiqueId),{id:boutiqueId,nom:name,ville:city}]);if(!manualProvision&&publicRequestDetail){const routed=await routeRequest(publicRequestDetail.id,boutiqueId);const accepted=await decideRequest(routed.id,"acceptee",publicRequestNote);setPublicRequestDetail(null);setPublicRequests(items=>items.map(r=>r.id===accepted.id?accepted:r));}setProvisionModal(false);setManualProvision(false);await refresh();setView("clients");setClientTab("shops");setSelectedId(boutiqueId);}catch(e){setError(e instanceof Error?e.message:"Création de la boutique impossible");}finally{setProvisionSaving(false)}}
-  async function sendCredentialsViaWhatsApp(){if(!onboardingCredentials||whatsappSending)return;setWhatsappSending(true);setError("");try{const sent=await sendWhatsAppOnboarding({phone:onboardingCredentials.phone,fullName:onboardingCredentials.fullName,boutiqueName:onboardingCredentials.boutiqueName,temporaryPassword:onboardingCredentials.temporaryPassword});if(sent.temporaryPassword&&sent.temporaryPassword!==onboardingCredentials.temporaryPassword)setOnboardingCredentials({...onboardingCredentials,temporaryPassword:sent.temporaryPassword});setWhatsappSent(true);}catch(e){setError(e instanceof Error?e.message:"Envoi WhatsApp impossible");}finally{setWhatsappSending(false)}}
-  async function submitTask(){if(!taskTitle.trim()||saving)return;setSaving(true);try{const item=await createOpsTask({boutiqueId:taskBoutique||null,title:taskTitle,team:taskTeam,priority:taskPriority,dueAt:taskDue?new Date(taskDue).toISOString():null,assigneeId:taskAssignee||null});setWorkspace(w=>w?{...w,tasks:[item,...w.tasks]}:w);setTaskTitle("");setTaskBoutique("");setTaskDue("");setTaskAssignee("");setTaskModal(false);}catch(e){setError(e instanceof Error?e.message:"Création impossible");}finally{setSaving(false)}}
-  async function submitTicket(){if(!ticketSubject.trim()||!ticketBoutique||saving)return;setSaving(true);try{const item=await createOpsTicket({boutiqueId:ticketBoutique,subject:ticketSubject,priority:ticketPriority,requesterName:ticketRequester,requesterPhone:ticketPhone,assigneeId:ticketAssignee||null});setWorkspace(w=>w?{...w,tickets:[item,...w.tickets]}:w);setTicketSubject("");setTicketBoutique("");setTicketRequester("");setTicketPhone("");setTicketAssignee("");setTicketModal(false);void refresh();}catch(e){setError(e instanceof Error?e.message:"Création impossible");}finally{setSaving(false)}}
-  async function completeTask(task:OpsTask){const updated=await updateOpsTask(task.id,{status:"done"});setWorkspace(w=>w?{...w,tasks:w.tasks.map(t=>t.id===updated.id?updated:t)}:w)}
-  async function resolveTicket(ticket:OpsTicket){const updated=await updateOpsTicket(ticket.id,{status:"resolved"});await createOpsInteraction({boutiqueId:ticket.boutique_id,kind:"support",team:"support",title:`Ticket #${ticket.id} résolu · ${ticket.subject}`,relatedTicketId:ticket.id});setWorkspace(w=>w?{...w,tickets:w.tickets.map(t=>t.id===updated.id?updated:t)}:w);void refresh()}
-  async function requestAccess(boutiqueId:string){
-    if(!accessReason.trim()||accessSaving)return; setAccessSaving(true); setError("");
-    try{const item=await requestOpsBoutiqueAccess(boutiqueId,accessReason,accessMinutes);setWorkspace(w=>w?{...w,accessRequests:[item,...w.accessRequests.filter(r=>r.id!==item.id)]}:w);setAccessReason("");}
-    catch(e){setError(e instanceof Error?e.message:"Demande d’accès impossible");} finally{setAccessSaving(false);}
+const fmtDate = (value?: string | null) => {
+  if (!value) return "—"
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return "—"
+  try {
+    return new Intl.DateTimeFormat("fr-FR", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(d)
+  } catch {
+    return d.toLocaleString("fr-FR")
   }
-  async function openDiagnostic(boutiqueId:string){setDiagnosticLoading(true);setError("");try{setDiagnostic(await loadOpsSupportDiagnostic(boutiqueId));}catch(e){setDiagnostic(null);setError(e instanceof Error?e.message:"Diagnostic indisponible");}finally{setDiagnosticLoading(false);}}
-  async function decideAccess(id:number,approve:boolean){try{const item=await decideOpsAccessRequest(id,approve);setWorkspace(w=>w?{...w,accessRequests:w.accessRequests.map(r=>r.id===item.id?item:r)}:w);}catch(e){setError(e instanceof Error?e.message:"Décision impossible");}}
+}
 
-  async function saveContact(){if(!selectedAccount||!contactName.trim()||contactSaving)return;setContactSaving(true);try{const contact=await createOpsContact({accountId:selectedAccount.id,boutiqueId:selected?.id??null,name:contactName,phone:contactPhone,email:contactEmail,roleLabel:contactRole});setWorkspace(w=>w?{...w,contacts:[contact,...w.contacts]}:w);setContactName("");setContactPhone("");setContactEmail("");setContactRole("");}catch(e){setError(e instanceof Error?e.message:"Contact impossible");}finally{setContactSaving(false)}}
+const requestStatus: Record<string, string> = {
+  nouvelle: "Nouvelle",
+  vue: "À étudier",
+  complement_demande: "En attente de complément",
+  acceptee: "Acceptée",
+  refusee: "Refusée",
+}
 
-  async function saveClientInteraction(boutiqueId:string){
-    if(!interactionTitle.trim()||interactionSaving)return;
-    setInteractionSaving(true);
-    try{
-      const interaction=await createOpsInteraction({boutiqueId,kind:interactionKind,team:interactionTeam,title:interactionTitle,detail:interactionDetail});
-      let newTask:OpsTask|null=null;
-      if(interactionKind==="handoff") newTask=await createOpsTask({boutiqueId,title:interactionTitle,description:interactionDetail,team:interactionTeam,priority:"normal",source:"handoff"});
-      setWorkspace(w=>w?{...w,interactions:[interaction,...w.interactions],tasks:newTask?[newTask,...w.tasks]:w.tasks}:w);
-      setInteractionTitle("");setInteractionDetail("");setInteractionKind("note");
-    }catch(e){setError(e instanceof Error?e.message:"Interaction impossible");}
-    finally{setInteractionSaving(false);}
+const priorityRank: Record<OpsPriority, number> = {
+  urgent: 0,
+  high: 1,
+  normal: 2,
+  low: 3,
+}
+
+const priorityLabel: Record<OpsPriority, string> = {
+  urgent: "Urgent",
+  high: "Haute",
+  normal: "Normale",
+  low: "Basse",
+}
+
+const teamLabel: Record<string, string> = {
+  sales: "Commercial",
+  service: "Accompagnement",
+  support: "Support",
+  success: "Suivi client",
+  management: "Direction",
+  manager: "Responsable",
+}
+
+function Modal({
+  title,
+  onClose,
+  children,
+}: {
+  title: string
+  onClose: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <Dialog.Root
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose()
+      }}
+    >
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+        <Dialog.Content
+          aria-describedby={undefined}
+          className="fixed left-1/2 top-1/2 z-50 w-[calc(100%_-_2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-xl bg-white p-6 max-h-[90vh] overflow-y-auto"
+        >
+          <div className="flex items-center justify-between mb-5">
+            <Dialog.Title className="font-semibold text-lg">
+              {title}
+            </Dialog.Title>
+            <button
+              onClick={onClose}
+              aria-label="Fermer"
+              className="p-2 rounded-lg hover:bg-slate-100"
+            >
+              <X size={18} />
+            </button>
+          </div>
+          {children}
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  )
+}
+
+const input =
+  "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
+
+export function TournalOpsWorkspace({
+  boutiques,
+  users,
+  onOpenBoutique,
+  onSystem,
+  onLogout,
+  canSystemAdmin = true,
+  canEnterBoutique = true,
+  opsRole,
+}: {
+  boutiques: BoutiqueLike[]
+  users: UserLike[]
+  onOpenBoutique: (id: string) => void
+  onSystem: () => void
+  onLogout: () => void
+  canSystemAdmin?: boolean
+  canEnterBoutique?: boolean
+  opsRole?: string
+}) {
+  const [view, setView] = useState<View>("home")
+
+  const [clientTab, setClientTab] = useState<"requests" | "shops">("requests")
+
+  const [supportTab, setSupportTab] = useState<"tickets" | "tasks">("tickets")
+
+  const [publicRequests, setPublicRequests] = useState<AccessSummary[]>([])
+
+  const [publicRequestsLoading, setPublicRequestsLoading] = useState(false)
+
+  const [publicRequestDetail, setPublicRequestDetail] =
+    useState<AccessDetail | null>(null)
+
+  const [publicRequestBusy, setPublicRequestBusy] = useState(false)
+
+  const [publicRequestNote, setPublicRequestNote] = useState("")
+
+  const [provisionModal, setProvisionModal] = useState(false)
+
+  const [manualProvision, setManualProvision] = useState(false)
+
+  const [provisionName, setProvisionName] = useState("")
+
+  const [provisionCity, setProvisionCity] = useState("")
+
+  const [provisionOwner, setProvisionOwner] = useState("")
+
+  const [provisionOwnerMode, setProvisionOwnerMode] =
+    useState<"existing" | "new">("new")
+
+  const [newOwnerName, setNewOwnerName] = useState("")
+
+  const [newOwnerPhone, setNewOwnerPhone] = useState("")
+
+  const [provisionSaving, setProvisionSaving] = useState(false)
+
+  const [onboardingCredentials, setOnboardingCredentials] = useState<{
+    boutiqueId: string
+    fullName: string
+    phone: string
+    temporaryPassword: string
+    boutiqueName: string
+  } | null>(null)
+
+  const [whatsappSending, setWhatsappSending] = useState(false)
+
+  const [whatsappSent, setWhatsappSent] = useState(false)
+
+  const [query, setQuery] = useState("")
+
+  const [filter, setFilter] = useState("all")
+
+  const [busyAction, setBusyAction] = useState("")
+
+  const [staffCandidate, setStaffCandidate] = useState("")
+
+  const [requestError, setRequestError] = useState("")
+
+  const [requestOffset, setRequestOffset] = useState(0)
+
+  const [moreRequests, setMoreRequests] = useState(false)
+
+  const actionLock = useRef(false)
+
+  function navigate(next: View, tab?: "requests" | "shops") {
+    setView(next)
+    if (tab) setClientTab(tab)
+    setQuery("")
+    setFilter("all")
   }
 
-  if(provisionModal){
-    const requestOwner=publicRequestDetail&&provisionOwner?users.find(user=>user.id===provisionOwner):null;
-    return <div className="min-h-screen bg-slate-100 text-slate-900" data-screen-source="tournal-ops-boutique-create">
-      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white"><div className="mx-auto max-w-3xl px-4 py-3 flex items-center gap-3">
-        <button type="button" disabled={provisionSaving} onClick={()=>setProvisionModal(false)} className="h-10 w-10 rounded-xl bg-slate-100 flex items-center justify-center disabled:opacity-50" aria-label="Retour"><ArrowLeft size={18}/></button>
-        <div className="min-w-0 flex-1"><p className="font-semibold">Créer la boutique</p><p className="text-[11px] text-slate-500">{manualProvision?"Création manuelle Ops":`Depuis la demande de ${publicRequestDetail?.nom||"ce contact"}`}</p></div>
-      </div></header>
-      <main className="mx-auto max-w-3xl p-4 sm:p-6">
-        {error&&<div className="mb-4 rounded-xl bg-red-50 text-red-700 px-3 py-2 text-sm font-medium">{error}</div>}
-        <section className="rounded-2xl bg-white border border-slate-200 p-5 sm:p-6 space-y-5">
-          {!manualProvision&&publicRequestDetail&&<div className="rounded-xl bg-slate-50 border border-slate-200 p-4"><p className="font-semibold">{publicRequestDetail.nom||"Demande"}</p><p className="mt-1 text-sm text-slate-500">{publicRequestDetail.telephone||"Téléphone non renseigné"} · {publicRequestDetail.type_activite||"Activité non renseignée"}</p></div>}
-          <label className="block text-sm font-medium text-slate-700">Nom de la boutique<input autoFocus value={provisionName} onChange={e=>setProvisionName(e.target.value)} className={`${input} mt-1`}/></label>
-          <label className="block text-sm font-medium text-slate-700">Ville<input value={provisionCity} onChange={e=>setProvisionCity(e.target.value)} placeholder="Ville" className={`${input} mt-1`}/></label>
-          <div>
-            <p className="text-sm font-medium text-slate-700">Propriétaire</p>
-            <div className="mt-2 grid grid-cols-2 gap-2">
-              <button type="button" onClick={()=>setProvisionOwnerMode("new")} className={`rounded-xl border px-3 py-3 text-sm font-semibold ${provisionOwnerMode==="new"?"border-slate-950 bg-slate-950 text-white":"border-slate-200 bg-white text-slate-600"}`}>Nouveau propriétaire</button>
-              <button type="button" onClick={()=>setProvisionOwnerMode("existing")} className={`rounded-xl border px-3 py-3 text-sm font-semibold ${provisionOwnerMode==="existing"?"border-slate-950 bg-slate-950 text-white":"border-slate-200 bg-white text-slate-600"}`}>Utilisateur existant</button>
+  async function runAction(key: string, action: () => Promise<void>) {
+    if (actionLock.current) return
+    actionLock.current = true
+    setBusyAction(key)
+    setError("")
+    try {
+      await action()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Action impossible. Réessayez.")
+    } finally {
+      actionLock.current = false
+      setBusyAction("")
+    }
+  }
+
+  async function changeStaff(id: string, role: string) {
+    await runAction("staff-" + id, async () => {
+      const old = workspace?.staff.find((s) => s.user_id === id)
+      if (!role && !old) return
+      const saved = await upsertOpsStaffProfile(
+        id,
+        (role || old!.role) as OpsStaffProfile["role"],
+        Boolean(role),
+      )
+      setWorkspace((w) =>
+        w
+          ? { ...w, staff: [...w.staff.filter((s) => s.user_id !== id), saved] }
+          : w,
+      )
+      setStaffCandidate("")
+    })
+  }
+
+  async function refreshRequests(offset = 0) {
+    setPublicRequestsLoading(true)
+    setRequestError("")
+    try {
+      const items = await listRequests(null, null, offset)
+      setPublicRequests((old) =>
+        offset
+          ? [...old, ...items.filter((i) => !old.some((o) => o.id === i.id))]
+          : items,
+      )
+      setRequestOffset(offset)
+      setMoreRequests(items.length === 50)
+    } catch (e) {
+      setRequestError(e instanceof Error ? e.message : "Demandes indisponibles")
+    } finally {
+      setPublicRequestsLoading(false)
+    }
+  }
+
+  const [opsBoutiques, setOpsBoutiques] = useState<BoutiqueLike[]>(boutiques)
+
+  const [workspace, setWorkspace] = useState<OpsWorkspace | null>(null)
+
+  const [loading, setLoading] = useState(true)
+
+  const [error, setError] = useState("")
+
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+
+  const [taskModal, setTaskModal] = useState(false)
+
+  const [ticketModal, setTicketModal] = useState(false)
+
+  const [taskTitle, setTaskTitle] = useState("")
+  const [taskBoutique, setTaskBoutique] = useState("")
+  const [taskTeam, setTaskTeam] =
+    useState<"sales" | "service" | "support" | "success" | "management">(
+      "service",
+    )
+  const [taskPriority, setTaskPriority] = useState<OpsPriority>("normal")
+  const [taskDue, setTaskDue] = useState("")
+  const [taskAssignee, setTaskAssignee] = useState("")
+
+  const [ticketSubject, setTicketSubject] = useState("")
+  const [ticketBoutique, setTicketBoutique] = useState("")
+  const [ticketPriority, setTicketPriority] = useState<OpsPriority>("normal")
+  const [ticketRequester, setTicketRequester] = useState("")
+  const [ticketPhone, setTicketPhone] = useState("")
+  const [ticketAssignee, setTicketAssignee] = useState("")
+
+  const [saving, setSaving] = useState(false)
+
+  const [interactionTitle, setInteractionTitle] = useState("")
+
+  const [interactionDetail, setInteractionDetail] = useState("")
+
+  const [interactionSaving, setInteractionSaving] = useState(false)
+
+  async function refresh() {
+    setLoading(true)
+    setError("")
+    try {
+      setWorkspace(await loadOpsWorkspace())
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Chargement Ops impossible")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void refresh()
+  }, [])
+
+  useEffect(() => {
+    setOpsBoutiques(boutiques)
+  }, [boutiques])
+
+  useEffect(() => {
+    if (canSystemAdmin) void refreshRequests()
+  }, [canSystemAdmin])
+
+  const rows = useMemo(
+    () =>
+      opsBoutiques.map((b) => {
+        const members = users.filter((u) =>
+          u.assignments?.some((a) => a.boutiqueId === b.id),
+        )
+
+        const overview = workspace?.overview.find(
+          (item) => item.boutique_id === b.id,
+        )
+
+        const lastSale =
+          overview?.last_sale_at ??
+          (b.invoices ?? [])
+            .map((i) => i.dateRaw ?? i.date ?? "")
+            .filter(Boolean)
+            .sort()
+            .at(-1) ??
+          null
+
+        const firstSale =
+          overview?.first_sale_at ??
+          (b.invoices ?? [])
+            .map((i) => i.dateRaw ?? i.date ?? "")
+            .filter(Boolean)
+            .sort()
+            .at(0) ??
+          null
+
+        const receipts = (b.entries ?? []).filter(
+          (e) => (e.qty ?? 0) > 0 && e.movementType === "achat",
+        )
+
+        const firstReceipt =
+          overview?.first_receipt_at ??
+          receipts
+            .map((e) => e.recordedAt ?? e.date ?? "")
+            .filter(Boolean)
+            .sort()
+            .at(0) ??
+          null
+
+        const setup = (overview?.product_count ?? b.products?.length ?? 0) > 0
+
+        const onboarding = workspace?.onboarding.find(
+          (o) => o.boutique_id === b.id,
+        )
+
+        const openTasks =
+          workspace?.tasks.filter(
+            (t) =>
+              t.boutique_id === b.id &&
+              !["done", "cancelled"].includes(t.status),
+          ) ?? []
+
+        const openTickets =
+          workspace?.tickets.filter(
+            (t) =>
+              t.boutique_id === b.id &&
+              !["resolved", "closed"].includes(t.status),
+          ) ?? []
+
+        const ownerReady =
+          (overview?.owner_count ?? 0) > 0 ||
+          members.some((m) =>
+            m.assignments?.some(
+              (a) =>
+                a.boutiqueId === b.id &&
+                (a.role === "Propriétaire" || a.role === "owner"),
+            ),
+          )
+
+        const checks = [
+          ownerReady,
+          members.length > 0,
+          setup,
+          Boolean(firstReceipt || onboarding?.first_receipt_at),
+          Boolean(firstSale || onboarding?.first_sale_at),
+          Boolean(onboarding?.training_done),
+        ]
+
+        const progress = Math.round(
+          (checks.filter(Boolean).length / checks.length) * 100,
+        )
+
+        return {
+          ...b,
+          members,
+          lastSale,
+          firstSale,
+          firstReceipt,
+          setup,
+          onboarding,
+          openTasks,
+          openTickets,
+          ownerReady,
+          progress,
+        }
+      }),
+    [opsBoutiques, users, workspace],
+  )
+
+  const normalizedQuery = query.trim().toLowerCase()
+
+  const filtered = rows.filter((b) => {
+    const link = workspace?.accountBoutiques.find((x) => x.boutique_id === b.id)
+
+    const account = link
+      ? workspace?.accounts.find((a) => a.id === link.account_id)
+      : null
+
+    const memberText = (b.members ?? [])
+      .map((m) => (m?.nom ?? "") + " " + (m?.phone ?? ""))
+      .join(" ")
+
+    const searchable = [b.nom, b.ville, b.tel, account?.name, memberText]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+
+    return !normalizedQuery || searchable.includes(normalizedQuery)
+  })
+
+  const attention = rows
+    .filter(
+      (b) =>
+        b.progress < 100 || b.openTickets.length > 0 || b.openTasks.length > 0,
+    )
+    .sort((a, b) => a.progress - b.progress)
+
+  const selected = rows.find((b) => b.id === selectedId) ?? null
+
+  const activeTasks = (workspace?.tasks ?? [])
+    .filter((t) => !["done", "cancelled"].includes(t.status))
+    .sort(
+      (a, b) =>
+        priorityRank[a.priority] - priorityRank[b.priority] ||
+        String(a.due_at ?? "9999").localeCompare(String(b.due_at ?? "9999")),
+    )
+
+  const activeTickets = (workspace?.tickets ?? [])
+    .filter((t) => !["resolved", "closed"].includes(t.status))
+    .sort(
+      (a, b) =>
+        priorityRank[a.priority] - priorityRank[b.priority] || b.id - a.id,
+    )
+
+  const opsUsers = users.filter((user) =>
+    workspace?.staff.some(
+      (profile) => profile.user_id === user.id && profile.active,
+    ),
+  )
+
+  const userName = (id: string | null) =>
+    id
+      ? (users.find((user) => user.id === id)?.nom ?? "Non assigné")
+      : "Non assigné"
+
+  const canManageOnboarding =
+    canSystemAdmin || opsRole === "service" || opsRole === "manager"
+
+  const canManageContacts =
+    canSystemAdmin ||
+    ["sales", "service", "support", "manager"].includes(opsRole ?? "")
+
+  const selectedAccountLink = selected
+    ? workspace?.accountBoutiques.find(
+        (link) => link.boutique_id === selected.id,
+      )
+    : null
+
+  const selectedAccount = selectedAccountLink
+    ? workspace?.accounts.find(
+        (account) => account.id === selectedAccountLink.account_id,
+      )
+    : null
+
+  const selectedContacts = selectedAccount
+    ? (workspace?.contacts ?? []).filter(
+        (contact) => contact.account_id === selectedAccount.id,
+      )
+    : []
+
+  const canManageTickets =
+    canSystemAdmin || opsRole === "support" || opsRole === "manager"
+
+  const canManageTask = (task: OpsTask) =>
+    canSystemAdmin ||
+    opsRole === "manager" ||
+    (opsRole === "sales" && task.team === "sales") ||
+    (opsRole === "service" &&
+      (task.team === "service" || task.team === "success")) ||
+    (opsRole === "support" && task.team === "support")
+
+  const pendingAccess = (workspace?.accessRequests ?? []).filter(
+    (r) => r.status === "pending",
+  )
+
+  async function openPublicRequest(id: string) {
+    setPublicRequestBusy(true)
+    setError("")
+    try {
+      let d = await requestDetail(id)
+      if (d.statut === "nouvelle") {
+        try {
+          d = await decideRequest(d.id, "vue", d.note_interne || "")
+        } catch {}
+      }
+      setPublicRequestDetail(d)
+      setPublicRequests((items) => items.map((r) => (r.id === d.id ? d : r)))
+      setPublicRequestNote(d.note_interne || "")
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Demande inaccessible")
+    } finally {
+      setPublicRequestBusy(false)
+    }
+  }
+
+  async function mutatePublicRequest(action: () => Promise<AccessDetail>) {
+    if (publicRequestBusy) return
+    setPublicRequestBusy(true)
+    setError("")
+    try {
+      const d = await action()
+      setPublicRequestDetail(d)
+      setPublicRequestNote(d.note_interne || "")
+      setPublicRequests((items) => items.map((r) => (r.id === d.id ? d : r)))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Action impossible")
+    } finally {
+      setPublicRequestBusy(false)
+    }
+  }
+
+  function startProvisionFromRequest() {
+    if (!publicRequestDetail) return
+    setManualProvision(false)
+    setProvisionName(
+      publicRequestDetail.societe || publicRequestDetail.nom || "",
+    )
+    setProvisionCity("")
+    const digits = (value?: string | null) =>
+      (value || "").replace(/\D/g, "").replace(/^00/, "")
+    const requestPhone = digits(publicRequestDetail.telephone)
+    const owner = users.find(
+      (user) => requestPhone && digits(user.phone) === requestPhone,
+    )
+    setProvisionOwner(owner?.id || "")
+    setProvisionOwnerMode(owner ? "existing" : "new")
+    setNewOwnerName(publicRequestDetail.nom || "")
+    setNewOwnerPhone(publicRequestDetail.telephone || "")
+    setWhatsappSent(false)
+    setProvisionModal(true)
+  }
+
+  function startManualProvision() {
+    setManualProvision(true)
+    setProvisionName("")
+    setProvisionCity("")
+    setProvisionOwner("")
+    setProvisionOwnerMode("new")
+    setNewOwnerName("")
+    setNewOwnerPhone("")
+    setWhatsappSent(false)
+    setProvisionModal(true)
+  }
+
+  async function provisionBoutique() {
+    const useNewOwner = provisionOwnerMode === "new"
+    if (
+      !provisionName.trim() ||
+      !provisionCity.trim() ||
+      provisionSaving ||
+      (!manualProvision && !publicRequestDetail) ||
+      (useNewOwner
+        ? !newOwnerName.trim() || !newOwnerPhone.trim()
+        : !provisionOwner)
+    )
+      return
+    setProvisionSaving(true)
+    setError("")
+    try {
+      const name = provisionName.trim()
+      const city = provisionCity.trim()
+      let boutiqueId = ""
+      if (useNewOwner) {
+        const created = await createBoutiqueWithNewOwner({
+          nom: name,
+          ville: city,
+          ownerName: newOwnerName.trim(),
+          ownerPhone: newOwnerPhone.trim(),
+        })
+        boutiqueId = created.boutiqueId
+        setOnboardingCredentials({
+          boutiqueId: created.boutiqueId,
+          fullName: created.ownerName,
+          phone: created.ownerPhone,
+          temporaryPassword: created.temporaryPassword,
+          boutiqueName: name,
+        })
+        setWhatsappSent(false)
+      } else {
+        const created = await createBoutique(name, city, provisionOwner)
+        boutiqueId = created.boutiqueId
+        setOnboardingCredentials(null)
+      }
+      setOpsBoutiques((items) => [
+        ...items.filter((b) => b.id !== boutiqueId),
+        { id: boutiqueId, nom: name, ville: city },
+      ])
+      if (!manualProvision && publicRequestDetail) {
+        const routed = await routeRequest(publicRequestDetail.id, boutiqueId)
+        const accepted = await decideRequest(
+          routed.id,
+          "acceptee",
+          publicRequestNote,
+        )
+        setPublicRequestDetail(null)
+        setPublicRequests((items) =>
+          items.map((r) => (r.id === accepted.id ? accepted : r)),
+        )
+      }
+      setProvisionModal(false)
+      setManualProvision(false)
+      await refresh()
+      setView("clients")
+      setClientTab("shops")
+      setSelectedId(boutiqueId)
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : "Création de la boutique impossible",
+      )
+    } finally {
+      setProvisionSaving(false)
+    }
+  }
+
+  async function sendCredentialsViaWhatsApp() {
+    if (!onboardingCredentials || whatsappSending) return
+    setWhatsappSending(true)
+    setError("")
+    try {
+      const sent = await sendWhatsAppOnboarding({
+        phone: onboardingCredentials.phone,
+        fullName: onboardingCredentials.fullName,
+        boutiqueName: onboardingCredentials.boutiqueName,
+        temporaryPassword: onboardingCredentials.temporaryPassword,
+      })
+      if (
+        sent.temporaryPassword &&
+        sent.temporaryPassword !== onboardingCredentials.temporaryPassword
+      )
+        setOnboardingCredentials({
+          ...onboardingCredentials,
+          temporaryPassword: sent.temporaryPassword,
+        })
+      setWhatsappSent(true)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Envoi WhatsApp impossible")
+    } finally {
+      setWhatsappSending(false)
+    }
+  }
+
+  async function submitTask() {
+    if (!taskTitle.trim() || saving) return
+    setSaving(true)
+    setError("")
+    try {
+      const item = await createOpsTask({
+        boutiqueId: taskBoutique || null,
+        title: taskTitle,
+        team: taskTeam,
+        priority: taskPriority,
+        dueAt: taskDue ? new Date(taskDue).toISOString() : null,
+        assigneeId: taskAssignee || null,
+      })
+      setWorkspace((w) => (w ? { ...w, tasks: [item, ...w.tasks] } : w))
+      setTaskTitle("")
+      setTaskBoutique("")
+      setTaskDue("")
+      setTaskAssignee("")
+      setTaskModal(false)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Création impossible")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function submitTicket() {
+    if (!ticketSubject.trim() || !ticketBoutique || saving) return
+    setSaving(true)
+    setError("")
+    try {
+      const item = await createOpsTicket({
+        boutiqueId: ticketBoutique,
+        subject: ticketSubject,
+        priority: ticketPriority,
+        requesterName: ticketRequester,
+        requesterPhone: ticketPhone,
+        assigneeId: ticketAssignee || null,
+      })
+      setWorkspace((w) => (w ? { ...w, tickets: [item, ...w.tickets] } : w))
+      setTicketSubject("")
+      setTicketBoutique("")
+      setTicketRequester("")
+      setTicketPhone("")
+      setTicketAssignee("")
+      setTicketModal(false)
+      void refresh()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Création impossible")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function completeTask(task: OpsTask) {
+    await runAction("task-" + task.id, async () => {
+      const updated = await updateOpsTask(task.id, { status: "done" })
+      setWorkspace((w) =>
+        w
+          ? {
+              ...w,
+              tasks: w.tasks.map((t) => (t.id === updated.id ? updated : t)),
+            }
+          : w,
+      )
+    })
+  }
+
+  async function resolveTicket(ticket: OpsTicket) {
+    await runAction("ticket-" + ticket.id, async () => {
+      const updated = await updateOpsTicket(ticket.id, { status: "resolved" })
+      setWorkspace((w) =>
+        w
+          ? {
+              ...w,
+              tickets: w.tickets.map((t) =>
+                t.id === updated.id ? updated : t,
+              ),
+            }
+          : w,
+      )
+      await createOpsInteraction({
+        boutiqueId: ticket.boutique_id,
+        kind: "support",
+        team: "support",
+        title: `Ticket #${ticket.id} résolu · ${ticket.subject}`,
+        relatedTicketId: ticket.id,
+      })
+    })
+  }
+
+  async function decideAccess(id: number, approve: boolean) {
+    try {
+      const item = await decideOpsAccessRequest(id, approve)
+      setWorkspace((w) =>
+        w
+          ? {
+              ...w,
+              accessRequests: w.accessRequests.map((r) =>
+                r.id === item.id ? item : r,
+              ),
+            }
+          : w,
+      )
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Décision impossible")
+    }
+  }
+
+  async function saveClientInteraction(boutiqueId: string) {
+    if (!interactionTitle.trim() || interactionSaving) return
+
+    setInteractionSaving(true)
+    setError("")
+
+    try {
+      const interaction = await createOpsInteraction({
+        boutiqueId,
+        kind: "note",
+        team:
+          opsRole === "sales"
+            ? "sales"
+            : opsRole === "support"
+              ? "support"
+              : "service",
+        title: interactionTitle,
+        detail: interactionDetail,
+      })
+      setWorkspace((w) =>
+        w ? { ...w, interactions: [interaction, ...w.interactions] } : w,
+      )
+      setInteractionTitle("")
+      setInteractionDetail("")
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Note non enregistrée")
+    } finally {
+      setInteractionSaving(false)
+    }
+  }
+
+  if (provisionModal) {
+    const requestOwner =
+      publicRequestDetail && provisionOwner
+        ? users.find((user) => user.id === provisionOwner)
+        : null
+
+    return (
+      <div
+        className="ops-detail min-h-screen bg-slate-100 text-slate-900"
+        data-screen-source="tournal-ops-boutique-create"
+      >
+        <header className="sticky top-0 z-30 border-b border-slate-200 bg-white">
+          <div className="mx-auto max-w-3xl px-4 py-3 flex items-center gap-3">
+            <button
+              type="button"
+              disabled={provisionSaving}
+              onClick={() => setProvisionModal(false)}
+              className="h-10 w-10 rounded-xl bg-slate-100 flex items-center justify-center disabled:opacity-50"
+              aria-label="Retour"
+            >
+              <ArrowLeft size={18} />
+            </button>
+            <div className="min-w-0 flex-1">
+              <p className="font-semibold">Créer la boutique</p>
+              <p className="text-[11px] text-slate-500">
+                {manualProvision
+                  ? "Création manuelle Ops"
+                  : `Depuis la demande de ${publicRequestDetail?.nom || "ce contact"}`}
+              </p>
             </div>
           </div>
-          {provisionOwnerMode==="existing"?<label className="block text-sm font-medium text-slate-700">Utilisateur<select value={provisionOwner} onChange={e=>setProvisionOwner(e.target.value)} className={`${input} mt-1`}><option value="">Sélectionner un utilisateur existant</option>{users.filter(u=>!u.isSuperAdmin).map(u=><option key={u.id} value={u.id}>{u.nom}{u.phone?` · ${u.phone}`:""}</option>)}</select>{requestOwner&&<span className="mt-1 block text-xs text-emerald-700">Correspondance trouvée avec le téléphone de la demande : {requestOwner.nom}.</span>}</label>:<div className="grid gap-4 sm:grid-cols-2"><label className="block text-sm font-medium text-slate-700">Nom du propriétaire<input value={newOwnerName} onChange={e=>setNewOwnerName(e.target.value)} placeholder="Nom complet" className={`${input} mt-1`}/></label><label className="block text-sm font-medium text-slate-700">Téléphone WhatsApp<input value={newOwnerPhone} onChange={e=>setNewOwnerPhone(e.target.value)} placeholder="+221..." className={`${input} mt-1`}/><span className="mt-1 block text-xs text-slate-500">Un mot de passe temporaire sécurisé sera généré automatiquement.</span></label></div>}
-          <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 border-t pt-4"><button disabled={provisionSaving} onClick={()=>setProvisionModal(false)} className="rounded-xl border px-4 py-3 text-sm font-medium disabled:opacity-50">Retour</button><button disabled={provisionSaving||!provisionName.trim()||!provisionCity.trim()||(provisionOwnerMode==="new"?(!newOwnerName.trim()||!newOwnerPhone.trim()):!provisionOwner)} onClick={()=>void provisionBoutique()} className="rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-40">{provisionSaving?"Création…":manualProvision?"Créer la boutique":"Créer & accepter"}</button></div>
-        </section>
-      </main>
-    </div>;
+        </header>
+        <main className="mx-auto max-w-3xl p-4 sm:p-6">
+          {error && (
+            <div className="mb-4 rounded-xl bg-red-50 text-red-700 px-3 py-2 text-sm font-medium">
+              {error}
+            </div>
+          )}
+          <section className="rounded-2xl bg-white border border-slate-200 p-5 sm:p-6 space-y-5">
+            {!manualProvision && publicRequestDetail && (
+              <div className="rounded-xl bg-slate-50 border border-slate-200 p-4">
+                <p className="font-semibold">
+                  {publicRequestDetail.nom || "Demande"}
+                </p>
+                <p className="mt-1 text-sm text-slate-500">
+                  {publicRequestDetail.telephone || "Téléphone non renseigné"} ·{" "}
+                  {publicRequestDetail.type_activite ||
+                    "Activité non renseignée"}
+                </p>
+              </div>
+            )}
+            <label className="block text-sm font-medium text-slate-700">
+              Nom de la boutique
+              <input
+                autoFocus
+                value={provisionName}
+                onChange={(e) => setProvisionName(e.target.value)}
+                className={`${input} mt-1`}
+              />
+            </label>
+            <label className="block text-sm font-medium text-slate-700">
+              Ville
+              <input
+                value={provisionCity}
+                onChange={(e) => setProvisionCity(e.target.value)}
+                placeholder="Ville"
+                className={`${input} mt-1`}
+              />
+            </label>
+            <div>
+              <p className="text-sm font-medium text-slate-700">Propriétaire</p>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setProvisionOwnerMode("new")}
+                  className={`rounded-xl border px-3 py-3 text-sm font-semibold ${
+                    provisionOwnerMode === "new"
+                      ? "border-slate-950 bg-slate-950 text-white"
+                      : "border-slate-200 bg-white text-slate-600"
+                  }`}
+                >
+                  Nouveau propriétaire
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setProvisionOwnerMode("existing")}
+                  className={`rounded-xl border px-3 py-3 text-sm font-semibold ${
+                    provisionOwnerMode === "existing"
+                      ? "border-slate-950 bg-slate-950 text-white"
+                      : "border-slate-200 bg-white text-slate-600"
+                  }`}
+                >
+                  Utilisateur existant
+                </button>
+              </div>
+            </div>
+            {provisionOwnerMode === "existing" ? (
+              <label className="block text-sm font-medium text-slate-700">
+                Utilisateur
+                <select
+                  value={provisionOwner}
+                  onChange={(e) => setProvisionOwner(e.target.value)}
+                  className={`${input} mt-1`}
+                >
+                  <option value="">Sélectionner un utilisateur existant</option>
+                  {users
+                    .filter((u) => !u.isSuperAdmin)
+                    .map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.nom}
+                        {u.phone ? ` · ${u.phone}` : ""}
+                      </option>
+                    ))}
+                </select>
+                {requestOwner && (
+                  <span className="mt-1 block text-xs text-emerald-700">
+                    Correspondance trouvée avec le téléphone de la demande :{" "}
+                    {requestOwner.nom}.
+                  </span>
+                )}
+              </label>
+            ) : (
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block text-sm font-medium text-slate-700">
+                  Nom du propriétaire
+                  <input
+                    value={newOwnerName}
+                    onChange={(e) => setNewOwnerName(e.target.value)}
+                    placeholder="Nom complet"
+                    className={`${input} mt-1`}
+                  />
+                </label>
+                <label className="block text-sm font-medium text-slate-700">
+                  Téléphone WhatsApp
+                  <input
+                    value={newOwnerPhone}
+                    onChange={(e) => setNewOwnerPhone(e.target.value)}
+                    placeholder="+221..."
+                    className={`${input} mt-1`}
+                  />
+                  <span className="mt-1 block text-xs text-slate-500">
+                    Un mot de passe temporaire sécurisé sera généré
+                    automatiquement.
+                  </span>
+                </label>
+              </div>
+            )}
+            <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 border-t pt-4">
+              <button
+                disabled={provisionSaving}
+                onClick={() => setProvisionModal(false)}
+                className="rounded-xl border px-4 py-3 text-sm font-medium disabled:opacity-50"
+              >
+                Retour
+              </button>
+              <button
+                disabled={
+                  provisionSaving ||
+                  !provisionName.trim() ||
+                  !provisionCity.trim() ||
+                  (provisionOwnerMode === "new"
+                    ? !newOwnerName.trim() || !newOwnerPhone.trim()
+                    : !provisionOwner)
+                }
+                onClick={() => void provisionBoutique()}
+                className="rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-40"
+              >
+                {provisionSaving
+                  ? "Création…"
+                  : manualProvision
+                    ? "Créer la boutique"
+                    : "Créer & accepter"}
+              </button>
+            </div>
+          </section>
+        </main>
+      </div>
+    )
   }
 
-  if(publicRequestDetail){
-    const terminal=publicRequestDetail.statut==="acceptee"||publicRequestDetail.statut==="refusee";
-    return <div className="min-h-screen bg-slate-100 text-slate-900" data-screen-source="tournal-ops-access-request-detail">
-      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white"><div className="mx-auto max-w-3xl px-4 py-3 flex items-center gap-3">
-        <button type="button" disabled={publicRequestBusy} onClick={()=>setPublicRequestDetail(null)} className="h-10 w-10 rounded-xl bg-slate-100 flex items-center justify-center disabled:opacity-50" aria-label="Retour aux demandes"><ArrowLeft size={18}/></button>
-        <div className="min-w-0 flex-1"><p className="font-semibold">Demande de création</p><p className="text-[11px] text-slate-500">{fmtDate(publicRequestDetail.created_at)}</p></div>
-      </div></header>
-      <main className="mx-auto max-w-3xl p-4 sm:p-6 space-y-4">
-        {error&&<div className="rounded-xl bg-red-50 text-red-700 px-3 py-2 text-sm font-medium">{error}</div>}
-        <section className="rounded-2xl bg-white border border-slate-200 p-5 sm:p-6">
-          <div className="flex items-start justify-between gap-4 border-b pb-4"><div><h1 className="text-xl font-semibold">{publicRequestDetail.nom||"Demande anonymisée"}</h1><p className="mt-1 text-sm text-slate-500">{publicRequestDetail.societe||publicRequestDetail.type_activite||"—"}</p></div><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold">{publicRequestDetail.statut}</span></div>
-          <dl className="mt-5 grid sm:grid-cols-[140px_1fr] gap-x-4 gap-y-3 text-sm"><dt className="text-slate-500">Téléphone</dt><dd className="font-medium">{publicRequestDetail.telephone||"—"}</dd><dt className="text-slate-500">Activité</dt><dd>{publicRequestDetail.type_activite||"—"}</dd><dt className="text-slate-500">Message</dt><dd className="whitespace-pre-wrap">{publicRequestDetail.message||"—"}</dd></dl>
-          {!terminal&&<div className="mt-6 border-t pt-5 space-y-4"><details><summary className="cursor-pointer text-sm font-medium text-slate-600">Note interne</summary><textarea value={publicRequestNote} onChange={e=>setPublicRequestNote(e.target.value)} maxLength={1000} rows={3} className={`${input} mt-2`}/></details><div className="grid gap-2 sm:grid-cols-3"><button disabled={publicRequestBusy} onClick={()=>void mutatePublicRequest(()=>decideRequest(publicRequestDetail.id,"complement_demande",publicRequestNote))} className="rounded-xl border px-4 py-3 text-sm font-semibold disabled:opacity-50">Demander un complément</button><button disabled={publicRequestBusy} onClick={()=>void mutatePublicRequest(()=>decideRequest(publicRequestDetail.id,"refusee",publicRequestNote))} className="rounded-xl border border-red-200 px-4 py-3 text-sm font-semibold text-red-700 disabled:opacity-50">Refuser</button><button disabled={publicRequestBusy} onClick={startProvisionFromRequest} className="rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50">Accepter & créer</button></div></div>}
-        </section>
-      </main>
-    </div>;
+  if (publicRequestDetail) {
+    const terminal =
+      publicRequestDetail.statut === "acceptee" ||
+      publicRequestDetail.statut === "refusee"
+
+    return (
+      <div
+        className="ops-detail min-h-screen bg-slate-100 text-slate-900"
+        data-screen-source="tournal-ops-access-request-detail"
+      >
+        <header className="sticky top-0 z-30 border-b border-slate-200 bg-white">
+          <div className="mx-auto max-w-3xl px-4 py-3 flex items-center gap-3">
+            <button
+              type="button"
+              disabled={publicRequestBusy}
+              onClick={() => setPublicRequestDetail(null)}
+              className="h-10 w-10 rounded-xl bg-slate-100 flex items-center justify-center disabled:opacity-50"
+              aria-label="Retour aux demandes"
+            >
+              <ArrowLeft size={18} />
+            </button>
+            <div className="min-w-0 flex-1">
+              <p className="font-semibold">Demande de création</p>
+              <p className="text-[11px] text-slate-500">
+                {fmtDate(publicRequestDetail.created_at)}
+              </p>
+            </div>
+          </div>
+        </header>
+        <main className="mx-auto max-w-3xl p-4 sm:p-6 space-y-4">
+          {error && (
+            <div className="rounded-xl bg-red-50 text-red-700 px-3 py-2 text-sm font-medium">
+              {error}
+            </div>
+          )}
+          <section className="rounded-2xl bg-white border border-slate-200 p-5 sm:p-6">
+            <div className="flex items-start justify-between gap-4 border-b pb-4">
+              <div>
+                <h1 className="text-xl font-semibold">
+                  {publicRequestDetail.nom || "Demande anonymisée"}
+                </h1>
+                <p className="mt-1 text-sm text-slate-500">
+                  {publicRequestDetail.societe ||
+                    publicRequestDetail.type_activite ||
+                    "—"}
+                </p>
+              </div>
+              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold">
+                {requestStatus[publicRequestDetail.statut]}
+              </span>
+            </div>
+            <dl className="mt-5 grid sm:grid-cols-[140px_1fr] gap-x-4 gap-y-3 text-sm">
+              <dt className="text-slate-500">Téléphone</dt>
+              <dd className="font-medium">
+                {publicRequestDetail.telephone || "—"}
+              </dd>
+              <dt className="text-slate-500">Activité</dt>
+              <dd>{publicRequestDetail.type_activite || "—"}</dd>
+              <dt className="text-slate-500">Message</dt>
+              <dd className="whitespace-pre-wrap">
+                {publicRequestDetail.message || "—"}
+              </dd>
+            </dl>
+            {!terminal && (
+              <div className="mt-6 border-t pt-5 space-y-4">
+                <details>
+                  <summary className="cursor-pointer text-sm font-medium text-slate-600">
+                    Note interne (enregistrée avec la décision)
+                  </summary>
+                  <textarea
+                    aria-label="Note interne"
+                    value={publicRequestNote}
+                    onChange={(e) => setPublicRequestNote(e.target.value)}
+                    maxLength={1000}
+                    rows={3}
+                    className={`${input} mt-2`}
+                  />
+                </details>
+                <div className="grid gap-2 sm:grid-cols-3">
+                  <button
+                    disabled={publicRequestBusy}
+                    onClick={() =>
+                      void mutatePublicRequest(() =>
+                        decideRequest(
+                          publicRequestDetail.id,
+                          "complement_demande",
+                          publicRequestNote,
+                        ),
+                      )
+                    }
+                    className="rounded-xl border px-4 py-3 text-sm font-semibold disabled:opacity-50"
+                  >
+                    Mettre en attente de complément
+                  </button>
+                  <button
+                    disabled={publicRequestBusy}
+                    onClick={() =>
+                      void mutatePublicRequest(() =>
+                        decideRequest(
+                          publicRequestDetail.id,
+                          "refusee",
+                          publicRequestNote,
+                        ),
+                      )
+                    }
+                    className="rounded-xl border border-red-200 px-4 py-3 text-sm font-semibold text-red-700 disabled:opacity-50"
+                  >
+                    Refuser
+                  </button>
+                  <button
+                    disabled={publicRequestBusy}
+                    onClick={startProvisionFromRequest}
+                    className="rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
+                  >
+                    Accepter & créer
+                  </button>
+                </div>
+              </div>
+            )}
+          </section>
+        </main>
+      </div>
+    )
   }
 
-  if(selected){
-    const ob=selected.onboarding;
-    const members=selected.members??[];
-    const openTasks=selected.openTasks??[];
-    const openTickets=selected.openTickets??[];
-    const account=selectedAccount??null;
-    const lastActivity=selected.lastSale??selected.firstSale??null;
-    return <div className="min-h-screen bg-slate-100 text-slate-900 pb-10" data-screen-source="tournal-ops-boutique-detail">
-      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white">
-        <div className="mx-auto max-w-4xl px-4 py-3 flex items-center gap-3">
-          <button type="button" onClick={()=>setSelectedId(null)} className="h-10 w-10 rounded-xl bg-slate-100 flex items-center justify-center" aria-label="Retour aux clients"><ArrowLeft size={18}/></button>
-          <div className="min-w-0 flex-1"><p className="font-semibold truncate">{selected.nom||"Boutique"}</p><p className="text-[11px] text-slate-500 truncate">{selected.ville||"Ville non renseignée"}</p></div>
-          {canEnterBoutique&&<button type="button" onClick={()=>onOpenBoutique(selected.id)} className="rounded-lg bg-slate-900 text-white px-3 py-2 text-xs font-semibold">Ouvrir</button>}
+  if (selected) {
+    const linkedWork = selected.openTasks.length + selected.openTickets.length
+
+    const checks: [string, boolean][] = [
+      ["Propriétaire affecté", selected.ownerReady],
+      ["Utilisateurs créés", selected.members.length > 0],
+      ["Catalogue configuré", selected.setup],
+      [
+        "Première réception",
+        Boolean(selected.firstReceipt || selected.onboarding?.first_receipt_at),
+      ],
+      [
+        "Première vente",
+        Boolean(selected.firstSale || selected.onboarding?.first_sale_at),
+      ],
+      ["Formation terminée", Boolean(selected.onboarding?.training_done)],
+    ]
+
+    return (
+      <div
+        className="ops-workspace ops-detail-workspace"
+        data-screen-source="tournal-ops-boutique-detail"
+      >
+        <main className="ops-main">
+          <button
+            className="ops-button ops-back"
+            onClick={() => {
+              setSelectedId(null)
+              navigate("clients", "shops")
+            }}
+          >
+            <ArrowLeft size={17} />
+            Retour aux boutiques
+          </button>
+          <header className="ops-page-heading">
+            <div>
+              <p className="ops-eyebrow">FICHE BOUTIQUE</p>
+              <h1>{selected.nom}</h1>
+              <p>
+                {selected.ville || "Ville non renseignée"}
+                {selectedAccount ? ` · ${selectedAccount.name}` : ""}
+              </p>
+            </div>
+            {canEnterBoutique && (
+              <button
+                className="ops-button primary"
+                onClick={() => onOpenBoutique(selected.id)}
+              >
+                Ouvrir la boutique
+                <ChevronRight size={17} />
+              </button>
+            )}
+          </header>
+          {error && (
+            <div className="ops-error" role="alert">
+              {error}
+            </div>
+          )}
+          {onboardingCredentials?.boutiqueId === selected.id && (
+            <section className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="font-semibold text-emerald-900">
+                    Accès du nouveau propriétaire créé
+                  </p>
+                  <p className="mt-1 text-sm text-emerald-800">
+                    {onboardingCredentials.fullName} ·{" "}
+                    {onboardingCredentials.phone}
+                  </p>
+                  <p className="mt-1 text-xs text-emerald-700">
+                    Mot de passe temporaire :{" "}
+                    <span className="font-mono font-semibold">
+                      {onboardingCredentials.temporaryPassword}
+                    </span>{" "}
+                    · changement obligatoire à la première connexion.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={whatsappSending || whatsappSent}
+                  onClick={() => void sendCredentialsViaWhatsApp()}
+                  className="shrink-0 rounded-xl bg-emerald-700 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
+                >
+                  {whatsappSending
+                    ? "Envoi…"
+                    : whatsappSent
+                      ? "Envoyé sur WhatsApp"
+                      : "Envoyer sur WhatsApp"}
+                </button>
+              </div>
+            </section>
+          )}
+          <div className="ops-home-grid">
+            <div>
+              <section className="ops-card">
+                <div className="ops-section-title">
+                  <div>
+                    <h2>Mise en route</h2>
+                    <p>
+                      {checks.filter(([, ok]) => ok).length} étapes terminées
+                      sur {checks.length}
+                    </p>
+                  </div>
+                </div>
+                {checks.map(([label, ok]) => (
+                  <div className="ops-row" key={label}>
+                    <CheckCircle2
+                      size={19}
+                      className={ok ? "text-emerald-700" : "text-slate-300"}
+                    />
+                    <span className="ops-row-content">{label}</span>
+                    <span className="ops-muted">
+                      {ok ? "Terminé" : "À faire"}
+                    </span>
+                  </div>
+                ))}
+                {canManageOnboarding &&
+                  selected.onboarding &&
+                  !selected.onboarding.training_done && (
+                    <div className="ops-section-title">
+                      <button
+                        disabled={!!busyAction}
+                        className="ops-button"
+                        onClick={() =>
+                          void runAction("training", async () => {
+                            const saved = await updateOpsOnboarding(
+                              selected.id,
+                              {
+                                training_done: true,
+                                training_done_at: new Date().toISOString(),
+                              },
+                            )
+                            setWorkspace((w) =>
+                              w
+                                ? {
+                                    ...w,
+                                    onboarding: w.onboarding.map((o) =>
+                                      o.boutique_id === saved.boutique_id
+                                        ? saved
+                                        : o,
+                                    ),
+                                  }
+                                : w,
+                            )
+                          })
+                        }
+                      >
+                        Marquer la formation terminée
+                      </button>
+                    </div>
+                  )}
+              </section>
+              <section className="ops-card">
+                <div className="ops-section-title">
+                  <div>
+                    <h2>Tickets et tâches</h2>
+                    <p>
+                      {linkedWork
+                        ? `${linkedWork} élément(s) en cours`
+                        : "Aucune action en cours"}
+                    </p>
+                  </div>
+                  {linkedWork > 0 && (
+                    <button
+                      className="ops-button"
+                      onClick={() => {
+                        setSelectedId(null)
+                        navigate("support")
+                        setSupportTab(
+                          selected.openTickets.length ? "tickets" : "tasks",
+                        )
+                        setQuery(selected.nom)
+                      }}
+                    >
+                      Voir le suivi
+                      <ChevronRight size={17} />
+                    </button>
+                  )}
+                </div>
+                {selected.openTickets.map((t) => (
+                  <div className="ops-row" key={"ticket-" + t.id}>
+                    <Headphones size={18} />
+                    <div className="ops-row-content">
+                      <strong>{t.subject}</strong>
+                      <p>
+                        Ticket #{t.id} · {priorityLabel[t.priority]}
+                      </p>
+                    </div>
+                    {canManageTickets && (
+                      <button
+                        disabled={!!busyAction}
+                        className="ops-button"
+                        onClick={() => void resolveTicket(t)}
+                      >
+                        Résoudre
+                      </button>
+                    )}
+                  </div>
+                ))}
+                {selected.openTasks.map((t) => (
+                  <div className="ops-row" key={"task-" + t.id}>
+                    <ClipboardCheck size={18} />
+                    <div className="ops-row-content">
+                      <strong>{t.title}</strong>
+                      <p>
+                        {teamLabel[t.team]} ·{" "}
+                        {t.due_at ? fmtDate(t.due_at) : "Sans échéance"}
+                      </p>
+                    </div>
+                    {canManageTask(t) && (
+                      <button
+                        disabled={!!busyAction}
+                        className="ops-button"
+                        onClick={() => void completeTask(t)}
+                      >
+                        Terminer
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </section>
+            </div>
+            <div>
+              <section className="ops-card">
+                <div className="ops-section-title">
+                  <h2>Contacts et utilisateurs</h2>
+                </div>
+                {selected.tel && (
+                  <div className="ops-row">
+                    <div className="ops-row-content">
+                      <p>Téléphone de la boutique</p>
+                      <a href={`tel:${selected.tel}`}>{selected.tel}</a>
+                    </div>
+                  </div>
+                )}
+                {selected.members.map((u) => (
+                  <div className="ops-row" key={u.id}>
+                    <span className="ops-avatar">{u.nom.slice(0, 1)}</span>
+                    <div className="ops-row-content">
+                      <strong>{u.nom}</strong>
+                      <p>
+                        {u.assignments?.find(
+                          (a) => a.boutiqueId === selected.id,
+                        )?.role ?? "Utilisateur"}
+                        {u.phone ? ` · ${u.phone}` : ""}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+                {selectedContacts.map((c) => (
+                  <div className="ops-row" key={c.id}>
+                    <div className="ops-row-content">
+                      <strong>{c.name}</strong>
+                      <p>
+                        {[c.role_label, c.phone, c.email]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+                {!selected.members.length &&
+                  !selectedContacts.length &&
+                  !selected.tel && (
+                    <p className="ops-notice">Aucun contact renseigné.</p>
+                  )}
+              </section>
+              <section className="ops-card">
+                <div className="ops-section-title">
+                  <div>
+                    <h2>Suivi client</h2>
+                    <p>Dernière vente : {fmtDate(selected.lastSale)}</p>
+                  </div>
+                </div>
+                {(workspace?.interactions ?? [])
+                  .filter((i) => i.boutique_id === selected.id)
+                  .slice(0, 5)
+                  .map((i) => (
+                    <div className="ops-row" key={i.id}>
+                      <div className="ops-row-content">
+                        <strong>{i.title}</strong>
+                        <p>{fmtDate(i.created_at)}</p>
+                        {i.detail && <p>{i.detail}</p>}
+                      </div>
+                    </div>
+                  ))}
+                {canManageContacts && (
+                  <form
+                    className="ops-note-form"
+                    onSubmit={(e) => {
+                      e.preventDefault()
+                      void saveClientInteraction(selected.id)
+                    }}
+                  >
+                    <label>
+                      Ajouter une note
+                      <input
+                        className={input}
+                        value={interactionTitle}
+                        onChange={(e) => setInteractionTitle(e.target.value)}
+                        placeholder="Objet du suivi"
+                        required
+                      />
+                    </label>
+                    <label>
+                      Détails
+                      <textarea
+                        className={input}
+                        value={interactionDetail}
+                        onChange={(e) => setInteractionDetail(e.target.value)}
+                        rows={3}
+                      />
+                    </label>
+                    <button
+                      className="ops-button"
+                      disabled={interactionSaving || !interactionTitle.trim()}
+                    >
+                      {interactionSaving
+                        ? "Enregistrement…"
+                        : "Enregistrer la note"}
+                    </button>
+                  </form>
+                )}
+              </section>
+            </div>
+          </div>
+        </main>
+      </div>
+    )
+  }
+
+  const matches = (...values: (string | null | undefined)[]) =>
+    !normalizedQuery ||
+    values.join(" ").toLocaleLowerCase("fr").includes(normalizedQuery)
+
+  const shopName = (id: string | null) =>
+    rows.find((b) => b.id === id)?.nom ?? "Sans boutique"
+
+  const requests = publicRequests.filter(
+    (r) =>
+      matches(r.nom, r.societe, r.type_activite) &&
+      (filter !== "open" || !["acceptee", "refusee"].includes(r.statut)),
+  )
+
+  const shops = filtered.filter((b) => filter !== "setup" || b.progress < 100)
+
+  const tickets = (
+    filter === "closed"
+      ? (workspace?.tickets ?? []).filter((t) =>
+          ["resolved", "closed"].includes(t.status),
+        )
+      : activeTickets
+  ).filter(
+    (t) =>
+      matches(t.subject, shopName(t.boutique_id), userName(t.assignee_id)) &&
+      (filter !== "urgent" || t.priority === "urgent"),
+  )
+
+  const tasks = (
+    filter === "closed"
+      ? (workspace?.tasks ?? []).filter((t) =>
+          ["done", "cancelled"].includes(t.status),
+        )
+      : activeTasks
+  ).filter(
+    (t) =>
+      matches(t.title, shopName(t.boutique_id), userName(t.assignee_id)) &&
+      (filter !== "urgent" || t.priority === "urgent"),
+  )
+
+  const activity = (workspace?.interactions ?? []).filter((i) =>
+    matches(i.title, i.detail, shopName(i.boutique_id)),
+  )
+
+  const navItems: [string, string, React.ElementType, () => void, boolean][] = [
+    ["home", "À traiter", LayoutDashboard, () => navigate("home"), true],
+
+    [
+      "requests",
+      "Demandes",
+      ClipboardCheck,
+      () => navigate("clients", "requests"),
+      canSystemAdmin,
+    ],
+
+    ["shops", "Boutiques", Store, () => navigate("clients", "shops"), true],
+
+    [
+      "support",
+      "Tickets & tâches",
+      Headphones,
+      () => navigate("support"),
+      true,
+    ],
+
+    ["activity", "Historique", Activity, () => navigate("activity"), true],
+
+    ["team", "Équipe", Users, () => navigate("team"), true],
+
+    [
+      "system",
+      "Administration",
+      Settings,
+      () => navigate("system"),
+      canSystemAdmin,
+    ],
+  ]
+
+  const page = view === "clients" ? clientTab : view
+
+  const descriptions: Record<string, string> = {
+    home: "Les priorités de votre équipe, au même endroit.",
+    requests: "Étudiez les demandes et accompagnez les nouveaux clients.",
+    shops: "Un point d’entrée pour chaque boutique et son suivi.",
+    support: "Résolvez les incidents et organisez les prochaines actions.",
+    activity: "Retrouvez les échanges et les actions de l’équipe.",
+    team: "Les collaborateurs qui ont accès à Tournal Ops.",
+    system: "Paramètres et autorisations d’accès temporaires.",
+  }
+
+  const empty = (message: string) => (
+    <div className="ops-empty">
+      <CheckCircle2 size={28} />
+      <h3>{message}</h3>
+      <p>
+        {query
+          ? "Essayez un autre terme ou effacez la recherche."
+          : "Les nouveaux éléments apparaîtront ici."}
+      </p>
+    </div>
+  )
+
+  const ticketRow = (t: OpsTicket) => (
+    <article className="ops-row" key={"ticket-" + t.id}>
+      <span className={`ops-dot ${t.priority === "urgent" ? "danger" : ""}`}>
+        <Headphones size={18} />
+      </span>
+      <div className="ops-row-content">
+        <strong>{t.subject}</strong>
+        <p>
+          Ticket #{t.id} · {shopName(t.boutique_id)} · {userName(t.assignee_id)}
+        </p>
+        {t.description && <p>{t.description}</p>}
+      </div>
+      <span className={`ops-tag ${t.priority === "urgent" ? "danger" : ""}`}>
+        {priorityLabel[t.priority]}
+      </span>
+      {canManageTickets && !["resolved", "closed"].includes(t.status) && (
+        <button
+          disabled={!!busyAction}
+          className="ops-button"
+          onClick={() => void resolveTicket(t)}
+        >
+          {busyAction === "ticket-" + t.id ? "Résolution…" : "Résoudre"}
+        </button>
+      )}
+    </article>
+  )
+
+  const taskRow = (t: OpsTask) => (
+    <article className="ops-row" key={"task-" + t.id}>
+      <span className="ops-dot">
+        <ClipboardCheck size={18} />
+      </span>
+      <div className="ops-row-content">
+        <strong>{t.title}</strong>
+        <p>
+          {shopName(t.boutique_id)} · {userName(t.assignee_id)}
+          {t.due_at ? ` · Échéance : ${fmtDate(t.due_at)}` : ""}
+        </p>
+      </div>
+      <span className={`ops-tag ${t.priority === "urgent" ? "danger" : ""}`}>
+        {priorityLabel[t.priority]}
+      </span>
+      {canManageTask(t) && !["done", "cancelled"].includes(t.status) && (
+        <button
+          disabled={!!busyAction}
+          className="ops-button"
+          onClick={() => void completeTask(t)}
+        >
+          {busyAction === "task-" + t.id ? "Enregistrement…" : "Terminer"}
+        </button>
+      )}
+    </article>
+  )
+
+  return (
+    <div className="ops-workspace" data-screen-source="tournal-ops-workspace">
+      <a className="ops-skip" href="#ops-main">
+        Aller au contenu
+      </a>
+      <aside className="ops-sidebar">
+        <div className="ops-brand">
+          <span>T</span>
+          <div>
+            Tournal <b>Ops</b>
+            <small>Espace équipe</small>
+          </div>
         </div>
-      </header>
-      <main className="mx-auto max-w-4xl p-4 space-y-4">
-        {error&&<div className="rounded-xl bg-red-50 text-red-700 px-3 py-2 text-xs font-bold">{error}</div>}
-        {onboardingCredentials?.boutiqueId===selected.id&&<section className="rounded-xl border border-emerald-200 bg-emerald-50 p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-semibold text-emerald-900">Accès du nouveau propriétaire créé</p><p className="mt-1 text-sm text-emerald-800">{onboardingCredentials.fullName} · {onboardingCredentials.phone}</p><p className="mt-1 text-xs text-emerald-700">Mot de passe temporaire : <span className="font-mono font-semibold">{onboardingCredentials.temporaryPassword}</span> · changement obligatoire à la première connexion.</p></div><button type="button" disabled={whatsappSending||whatsappSent} onClick={()=>void sendCredentialsViaWhatsApp()} className="shrink-0 rounded-xl bg-emerald-700 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50">{whatsappSending?"Envoi…":whatsappSent?"Envoyé sur WhatsApp":"Envoyer sur WhatsApp"}</button></div></section>}
-        <section className="rounded-xl bg-white border p-5">
-          <div className="flex items-start gap-3"><div className="h-12 w-12 shrink-0 rounded-2xl bg-slate-950 text-white flex items-center justify-center"><Building2 size={21}/></div><div className="min-w-0 flex-1"><h1 className="text-xl font-semibold break-words">{selected.nom||"Boutique"}</h1><p className="text-sm text-slate-500 mt-1">{selected.ville||"Ville non renseignée"} · {members.length} utilisateur(s)</p></div><span className="rounded-full bg-emerald-50 text-emerald-700 px-2 py-1 text-[10px] font-semibold whitespace-nowrap">Santé {Number.isFinite(selected.score)?selected.score:0}/100</span></div>
-          <div className="mt-5"><div className="flex justify-between text-xs font-bold"><span>Onboarding</span><span>{Number.isFinite(selected.progress)?selected.progress:0}%</span></div><div className="mt-2 h-2 rounded-full bg-slate-100 overflow-hidden"><div className="h-full bg-emerald-500" style={{width:`${Math.max(0,Math.min(100,Number.isFinite(selected.progress)?selected.progress:0))}%`}}/></div></div>
-        </section>
-        <section className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <div className="rounded-xl bg-white border border-slate-200 p-4"><p className="text-xs text-slate-500 font-bold">Utilisateurs</p><p className="text-2xl font-semibold mt-1">{members.length}</p></div>
-          <div className="rounded-xl bg-white border border-slate-200 p-4"><p className="text-xs text-slate-500 font-bold">Produits</p><p className="text-2xl font-semibold mt-1">{workspace?.overview.find(x=>x.boutique_id===selected.id)?.product_count??selected.products?.length??0}</p></div>
-          <div className="rounded-xl bg-white border border-slate-200 p-4"><p className="text-xs text-slate-500 font-bold">Tâches ouvertes</p><p className="text-2xl font-semibold mt-1">{openTasks.length}</p></div>
-          <div className="rounded-xl bg-white border border-slate-200 p-4"><p className="text-xs text-slate-500 font-bold">Tickets ouverts</p><p className="text-2xl font-semibold mt-1">{openTickets.length}</p></div>
-        </section>
-        <section className="rounded-xl bg-white border border-slate-200 p-4"><p className="font-semibold text-sm">Compte client</p>{account?<div className="mt-3 grid sm:grid-cols-3 gap-2"><div className="rounded-xl bg-slate-50 p-3"><p className="text-[10px] uppercase text-slate-500 font-semibold">Organisation</p><p className="font-semibold mt-1 break-words">{account.name||"—"}</p></div><div className="rounded-xl bg-slate-50 p-3"><p className="text-[10px] uppercase text-slate-500 font-semibold">Étape</p><p className="font-semibold mt-1">{account.stage||"—"}</p></div><div className="rounded-xl bg-slate-50 p-3"><p className="text-[10px] uppercase text-slate-500 font-semibold">Santé</p><p className="font-semibold mt-1">{account.health_status||"unknown"}</p></div></div>:<p className="mt-2 text-sm text-slate-500">Aucun compte client lié.</p>}</section>
-        <section className="grid md:grid-cols-2 gap-3"><div className="rounded-xl bg-white border border-slate-200 p-4"><p className="font-semibold text-sm">Checklist</p><div className="mt-3 space-y-2">{[["Propriétaire affecté",Boolean(selected.ownerReady)],["Utilisateurs créés",members.length>0],["Catalogue configuré",Boolean(selected.setup)],["Première réception",Boolean(selected.firstReceipt||ob?.first_receipt_at)],["Première vente",Boolean(selected.firstSale||ob?.first_sale_at)],["Formation terminée",Boolean(ob?.training_done)]].map(([label,ok])=><div key={String(label)} className="flex items-center gap-2 text-sm"><CheckCircle2 size={16} className={ok?"text-emerald-600":"text-slate-300"}/><span className={ok?"font-semibold":"text-slate-500"}>{String(label)}</span></div>)}</div></div><div className="rounded-xl bg-white border border-slate-200 p-4"><p className="font-semibold text-sm">Dernière activité connue</p><p className="text-sm font-bold mt-3">{fmtDate(lastActivity)}</p><p className="text-xs text-slate-500 mt-1">La fiche Ops reste légère : aucune donnée financière n’est chargée ici.</p></div></section>
-        <section className="rounded-xl bg-white border border-slate-200 p-4"><div className="flex items-center justify-between gap-3"><div><p className="font-semibold text-sm">Travail lié</p><p className="text-xs text-slate-500 mt-0.5">Tâches et tickets ouverts pour cette boutique</p></div><button type="button" onClick={()=>{setSelectedId(null);setView("support")}} className="rounded-xl bg-slate-100 px-3 py-2 text-xs font-semibold">Ouvrir Travail</button></div><div className="mt-3 space-y-2">{openTasks.slice(0,4).map(t=><div key={t.id} className="rounded-xl bg-slate-50 p-3"><p className="text-sm font-bold">{t.title||"Tâche"}</p><p className="text-xs text-slate-500 mt-1">{teamLabel[t.team]??t.team} · {t.due_at?fmtDate(t.due_at):"sans échéance"}</p></div>)}{openTickets.slice(0,4).map(t=><div key={`ticket-${t.id}`} className="rounded-xl bg-slate-50 p-3"><p className="text-sm font-bold">#{t.id} · {t.subject||"Ticket"}</p><p className="text-xs text-slate-500 mt-1">{priorityLabel[t.priority]??t.priority}</p></div>)}{openTasks.length===0&&openTickets.length===0&&<p className="text-sm text-slate-500">Aucune tâche ni ticket ouvert.</p>}</div></section>
+        <nav aria-label="Navigation principale">
+          {navItems
+            .filter((item) => item[4])
+            .map(([id, label, Icon, action]) => (
+              <button
+                key={id}
+                aria-current={page === id ? "page" : undefined}
+                onClick={action}
+              >
+                <Icon size={19} />
+                {label}
+                {id === "support" && activeTickets.length > 0 && (
+                  <span className="ops-nav-count">{activeTickets.length}</span>
+                )}
+              </button>
+            ))}
+        </nav>
+        <div className="ops-sidebar-footer">
+          <ShieldCheck size={17} />
+          <span>
+            {canSystemAdmin
+              ? "Administrateur"
+              : (teamLabel[opsRole ?? ""] ?? opsRole ?? "Équipe Ops")}
+          </span>
+          <button onClick={onLogout} aria-label="Se déconnecter">
+            <LogOut size={18} />
+          </button>
+        </div>
+      </aside>
+      <main id="ops-main" className="ops-main">
+        <header className="ops-page-heading">
+          <div>
+            <p className="ops-eyebrow">ESPACE OPÉRATIONS</p>
+            <h1>{navItems.find((item) => item[0] === page)?.[1]}</h1>
+            <p>{descriptions[page]}</p>
+          </div>
+          <div className="ops-actions">
+            <button
+              className="ops-button"
+              disabled={loading || publicRequestsLoading}
+              onClick={() => {
+                void refresh()
+                if (canSystemAdmin) void refreshRequests()
+              }}
+            >
+              <RefreshCw size={16} />
+              Actualiser
+            </button>
+            {page === "shops" && canSystemAdmin && (
+              <button
+                className="ops-button primary"
+                onClick={startManualProvision}
+              >
+                <Plus size={17} />
+                Créer une boutique
+              </button>
+            )}
+            {view === "support" && (
+              <>
+                <button
+                  className="ops-button"
+                  onClick={() => {
+                    setTaskTeam(
+                      opsRole === "sales"
+                        ? "sales"
+                        : opsRole === "support"
+                          ? "support"
+                          : "service",
+                    )
+                    setTaskModal(true)
+                  }}
+                >
+                  <Plus size={17} />
+                  Tâche
+                </button>
+                {canManageTickets && (
+                  <button
+                    className="ops-button primary"
+                    onClick={() => setTicketModal(true)}
+                  >
+                    <Plus size={17} />
+                    Ticket
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        </header>
+        {error && (
+          <div className="ops-error" role="alert">
+            {error}
+          </div>
+        )}
+        {loading && !workspace ? (
+          <div className="ops-empty" role="status">
+            Chargement de votre espace…
+          </div>
+        ) : !workspace ? (
+          <div className="ops-empty">
+            <h3>L’espace n’a pas pu être chargé.</h3>
+            <button className="ops-button" onClick={() => void refresh()}>
+              Réessayer
+            </button>
+          </div>
+        ) : (
+          <>
+            {view === "home" ? (
+              <>
+                <section className="ops-metrics" aria-label="Aperçu">
+                  <button
+                    onClick={() => {
+                      navigate("support")
+                      setSupportTab("tickets")
+                    }}
+                  >
+                    <span>Tickets ouverts</span>
+                    <strong>{activeTickets.length}</strong>
+                    <small>
+                      Voir les incidents <ChevronRight size={14} />
+                    </small>
+                  </button>
+                  <button
+                    onClick={() => {
+                      navigate("support")
+                      setSupportTab("tasks")
+                    }}
+                  >
+                    <span>Tâches en cours</span>
+                    <strong>{activeTasks.length}</strong>
+                    <small>
+                      Organiser le travail <ChevronRight size={14} />
+                    </small>
+                  </button>
+                  <button
+                    onClick={() => {
+                      navigate("clients", "shops")
+                      setFilter("setup")
+                    }}
+                  >
+                    <span>Boutiques à accompagner</span>
+                    <strong>
+                      {rows.filter((b) => b.progress < 100).length}
+                    </strong>
+                    <small>
+                      Suivre la mise en route <ChevronRight size={14} />
+                    </small>
+                  </button>
+                </section>
+                <div className="ops-home-grid">
+                  <section className="ops-card">
+                    <div className="ops-section-title">
+                      <div>
+                        <h2>Les prochaines actions</h2>
+                        <p>Incidents urgents et tâches arrivées à échéance.</p>
+                      </div>
+                      <span className="ops-tag">Priorités</span>
+                    </div>
+                    {activeTickets
+                      .filter(
+                        (t) =>
+                          t.priority === "urgent" ||
+                          (t.sla_due_at && new Date(t.sla_due_at) < new Date()),
+                      )
+                      .map(ticketRow)}
+                    {activeTasks
+                      .filter(
+                        (t) =>
+                          t.priority === "urgent" ||
+                          (t.due_at && new Date(t.due_at) < new Date()),
+                      )
+                      .map(taskRow)}
+                    {!activeTickets.some(
+                      (t) =>
+                        t.priority === "urgent" ||
+                        (t.sla_due_at && new Date(t.sla_due_at) < new Date()),
+                    ) &&
+                      !activeTasks.some(
+                        (t) =>
+                          t.priority === "urgent" ||
+                          (t.due_at && new Date(t.due_at) < new Date()),
+                      ) &&
+                      empty("Aucune urgence en cours")}
+                  </section>
+                  <section className="ops-card">
+                    <div className="ops-section-title">
+                      <div>
+                        <h2>Accompagner les boutiques</h2>
+                        <p>La prochaine étape pour bien démarrer.</p>
+                      </div>
+                    </div>
+                    {attention
+                      .filter((b) => b.progress < 100)
+                      .slice(0, 6)
+                      .map((b) => (
+                        <button
+                          className="ops-row ops-row-link"
+                          key={b.id}
+                          onClick={() => setSelectedId(b.id)}
+                        >
+                          <span className="ops-avatar">
+                            {b.nom.slice(0, 1)}
+                          </span>
+                          <div className="ops-row-content">
+                            <strong>{b.nom}</strong>
+                            <p>
+                              {!b.ownerReady
+                                ? "Affecter un propriétaire"
+                                : !b.setup
+                                  ? "Configurer le catalogue"
+                                  : !b.firstReceipt
+                                    ? "Enregistrer une réception"
+                                    : !b.firstSale
+                                      ? "Réaliser la première vente"
+                                      : "Terminer la formation"}
+                            </p>
+                          </div>
+                          <ChevronRight size={17} />
+                        </button>
+                      ))}
+                    {!rows.some((b) => b.progress < 100) &&
+                      empty("Toutes les boutiques sont prêtes")}
+                  </section>
+                </div>
+              </>
+            ) : (
+              <>
+                {view !== "system" && (
+                  <div className="ops-toolbar">
+                    <label className="ops-search">
+                      <Search size={18} />
+                      <input
+                        aria-label="Rechercher dans cette page"
+                        placeholder={
+                          page === "shops"
+                            ? "Rechercher une boutique, un contact…"
+                            : "Rechercher dans cette page…"
+                        }
+                        value={query}
+                        onChange={(e) => setQuery(e.target.value)}
+                      />
+                      {query && (
+                        <button
+                          aria-label="Effacer la recherche"
+                          onClick={() => setQuery("")}
+                        >
+                          <X size={16} />
+                        </button>
+                      )}
+                    </label>
+                    {view === "support" && (
+                      <div className="ops-tabs" aria-label="Type de travail">
+                        <button
+                          aria-pressed={supportTab === "tickets"}
+                          onClick={() => setSupportTab("tickets")}
+                        >
+                          Tickets
+                        </button>
+                        <button
+                          aria-pressed={supportTab === "tasks"}
+                          onClick={() => setSupportTab("tasks")}
+                        >
+                          Tâches
+                        </button>
+                      </div>
+                    )}
+                    {["shops", "requests", "support"].includes(page) && (
+                      <select
+                        aria-label="Filtrer les résultats"
+                        value={filter}
+                        onChange={(e) => setFilter(e.target.value)}
+                      >
+                        <option value="all">
+                          {view === "support" ? "En cours" : "Tous"}
+                        </option>
+                        {page === "shops" ? (
+                          <option value="setup">Mise en route</option>
+                        ) : page === "requests" ? (
+                          <option value="open">À traiter</option>
+                        ) : (
+                          <>
+                            <option value="urgent">Urgents</option>
+                            <option value="closed">Terminés</option>
+                          </>
+                        )}
+                      </select>
+                    )}
+                  </div>
+                )}
+                {page === "requests" && canSystemAdmin && (
+                  <section className="ops-card">
+                    <div className="ops-section-title">
+                      <h2>
+                        {requests.length} demande
+                        {requests.length !== 1 ? "s" : ""}
+                      </h2>
+                    </div>
+                    {requestError && (
+                      <div role="alert" className="ops-error">
+                        {requestError}
+                        <button
+                          className="ops-button"
+                          onClick={() => void refreshRequests()}
+                        >
+                          Réessayer
+                        </button>
+                      </div>
+                    )}
+                    {publicRequestsLoading && (
+                      <p className="ops-notice" role="status">
+                        Chargement…
+                      </p>
+                    )}
+                    {requests.map((r) => (
+                      <button
+                        className="ops-row ops-row-link"
+                        key={r.id}
+                        disabled={publicRequestBusy}
+                        onClick={() => void openPublicRequest(r.id)}
+                      >
+                        <span className="ops-avatar">
+                          {(r.nom || "?").slice(0, 1)}
+                        </span>
+                        <div className="ops-row-content">
+                          <strong>
+                            {r.societe || r.nom || "Demande anonymisée"}
+                          </strong>
+                          <p>
+                            {r.societe ? r.nom + " · " : ""}
+                            {r.type_activite || "Activité non renseignée"} ·{" "}
+                            {fmtDate(r.created_at)}
+                          </p>
+                        </div>
+                        <span
+                          className={`ops-tag ${
+                            r.statut === "nouvelle" ? "warning" : ""
+                          }`}
+                        >
+                          {requestStatus[r.statut]}
+                        </span>
+                        <ChevronRight size={17} />
+                      </button>
+                    ))}
+                    {!publicRequestsLoading &&
+                      !requestError &&
+                      requests.length === 0 &&
+                      empty("Aucune demande à afficher")}
+                    {moreRequests && (
+                      <button
+                        className="ops-button ops-load-more"
+                        disabled={publicRequestsLoading}
+                        onClick={() => void refreshRequests(requestOffset + 50)}
+                      >
+                        Charger les demandes suivantes
+                      </button>
+                    )}
+                  </section>
+                )}
+                {page === "shops" && (
+                  <section className="ops-card">
+                    <div className="ops-section-title">
+                      <h2>
+                        {shops.length} boutique{shops.length !== 1 ? "s" : ""}
+                      </h2>
+                      <span className="ops-muted">
+                        Ouvrez une fiche pour agir
+                      </span>
+                    </div>
+                    {shops.map((b) => (
+                      <button
+                        className="ops-row ops-row-link"
+                        key={b.id}
+                        onClick={() => setSelectedId(b.id)}
+                      >
+                        <span className="ops-avatar">{b.nom.slice(0, 1)}</span>
+                        <div className="ops-row-content">
+                          <strong>{b.nom}</strong>
+                          <p>
+                            {b.ville || "Ville non renseignée"}
+                            {b.tel ? ` · ${b.tel}` : ""}
+                          </p>
+                        </div>
+                        <span
+                          className={`ops-tag ${
+                            b.openTickets.length ? "warning" : ""
+                          }`}
+                        >
+                          {b.openTickets.length
+                            ? `${b.openTickets.length} ticket(s)`
+                            : b.progress === 100
+                              ? "Opérationnelle"
+                              : "Mise en route"}
+                        </span>
+                        <ChevronRight size={17} />
+                      </button>
+                    ))}
+                    {shops.length === 0 && empty("Aucune boutique à afficher")}
+                  </section>
+                )}
+                {view === "support" && (
+                  <section className="ops-card">
+                    <div className="ops-section-title">
+                      <h2>
+                        {supportTab === "tickets"
+                          ? `${tickets.length} ticket(s)`
+                          : `${tasks.length} tâche(s)`}
+                      </h2>
+                      <span className="ops-muted">
+                        {filter === "closed"
+                          ? "Terminés"
+                          : "Par ordre de priorité"}
+                      </span>
+                    </div>
+                    {supportTab === "tickets"
+                      ? tickets.map(ticketRow)
+                      : tasks.map(taskRow)}
+                    {(supportTab === "tickets" ? tickets : tasks).length ===
+                      0 && empty("Aucun élément à afficher")}
+                  </section>
+                )}
+                {view === "activity" && (
+                  <section className="ops-card">
+                    {activity.map((i) => (
+                      <article className="ops-row" key={i.id}>
+                        <span className="ops-dot">
+                          <Activity size={17} />
+                        </span>
+                        <div className="ops-row-content">
+                          <strong>{i.title}</strong>
+                          <p>
+                            {shopName(i.boutique_id)} ·{" "}
+                            {teamLabel[i.team ?? ""] ?? "Équipe"} ·{" "}
+                            {fmtDate(i.created_at)}
+                          </p>
+                          {i.detail && <p>{i.detail}</p>}
+                        </div>
+                      </article>
+                    ))}
+                    {activity.length === 0 &&
+                      empty("Aucune activité à afficher")}
+                  </section>
+                )}
+                {view === "team" && (
+                  <section className="ops-card">
+                    <div className="ops-section-title">
+                      <div>
+                        <h2>Collaborateurs Ops</h2>
+                        <p>
+                          Les comptes clients restent dans les fiches boutiques.
+                        </p>
+                      </div>
+                    </div>
+                    {opsUsers
+                      .filter((u) => matches(u.nom, u.phone))
+                      .map((u) => {
+                        const profile = workspace.staff.find(
+                          (s) => s.user_id === u.id,
+                        )!
+                        return (
+                          <div className="ops-row" key={u.id}>
+                            <span className="ops-avatar">
+                              {u.nom.slice(0, 1)}
+                            </span>
+                            <div className="ops-row-content">
+                              <strong>{u.nom}</strong>
+                              <p>{u.phone || "Téléphone non renseigné"}</p>
+                            </div>
+                            {canSystemAdmin ? (
+                              <select
+                                aria-label={`Rôle de ${u.nom}`}
+                                disabled={!!busyAction}
+                                value={profile.role}
+                                onChange={(e) =>
+                                  void changeStaff(u.id, e.target.value)
+                                }
+                              >
+                                <option value="">Retirer l’accès Ops</option>
+                                <option value="sales">Commercial</option>
+                                <option value="service">Accompagnement</option>
+                                <option value="support">Support</option>
+                                <option value="manager">Responsable</option>
+                              </select>
+                            ) : (
+                              <span className="ops-tag">
+                                {teamLabel[profile.role] ?? profile.role}
+                              </span>
+                            )}
+                          </div>
+                        )
+                      })}
+                    {!opsUsers.some((u) => matches(u.nom, u.phone)) && empty("Aucun collaborateur à afficher")}
+                    {canSystemAdmin && (
+                      <div className="ops-staff-add">
+                        <label htmlFor="ops-candidate">
+                          Ajouter un collaborateur existant
+                        </label>
+                        <div>
+                          <select
+                            id="ops-candidate"
+                            value={staffCandidate}
+                            onChange={(e) => setStaffCandidate(e.target.value)}
+                          >
+                            <option value="">
+                              Sélectionner un utilisateur
+                            </option>
+                            {users
+                              .filter(
+                                (u) =>
+                                  !u.isSuperAdmin &&
+                                  !opsUsers.some((o) => o.id === u.id),
+                              )
+                              .map((u) => (
+                                <option value={u.id} key={u.id}>
+                                  {u.nom} {u.phone}
+                                </option>
+                              ))}
+                          </select>
+                          <select
+                            aria-label="Attribuer un rôle au nouveau collaborateur"
+                            value=""
+                            disabled={!staffCandidate || !!busyAction}
+                            onChange={(e) =>
+                              void changeStaff(staffCandidate, e.target.value)
+                            }
+                          >
+                            <option value="">Choisir le rôle…</option>
+                            <option value="sales">Commercial</option>
+                            <option value="service">Accompagnement</option>
+                            <option value="support">Support</option>
+                            <option value="manager">Responsable</option>
+                          </select>
+                        </div>
+                      </div>
+                    )}
+                  </section>
+                )}
+                {view === "system" && canSystemAdmin && (
+                  <>
+                    <section className="ops-card">
+                      <div className="ops-section-title">
+                        <div>
+                          <h2>Administration générale</h2>
+                          <p>
+                            Gérer les comptes, les groupes et les paramètres.
+                          </p>
+                        </div>
+                        <button className="ops-button" onClick={onSystem}>
+                          Ouvrir l’administration
+                          <ChevronRight size={17} />
+                        </button>
+                      </div>
+                    </section>
+                    <section className="ops-card">
+                      <div className="ops-section-title">
+                        <div>
+                          <h2>Accès temporaires aux boutiques</h2>
+                          <p>
+                            Vérifiez le motif avant d’autoriser l’intervention.
+                          </p>
+                        </div>
+                      </div>
+                      {pendingAccess.map((r) => (
+                        <div className="ops-row" key={r.id}>
+                          <div className="ops-row-content">
+                            <strong>{shopName(r.boutique_id)}</strong>
+                            <p>
+                              {userName(r.requester_id)} · {r.requested_minutes}{" "}
+                              minutes
+                            </p>
+                            <p>{r.reason}</p>
+                          </div>
+                          <button
+                            disabled={!!busyAction}
+                            className="ops-button"
+                            onClick={() =>
+                              void runAction("access-" + r.id, () =>
+                                decideAccess(r.id, false),
+                              )
+                            }
+                          >
+                            Refuser
+                          </button>
+                          <button
+                            disabled={!!busyAction}
+                            className="ops-button primary"
+                            onClick={() =>
+                              void runAction("access-" + r.id, () =>
+                                decideAccess(r.id, true),
+                              )
+                            }
+                          >
+                            Autoriser
+                          </button>
+                        </div>
+                      ))}
+                      {pendingAccess.length === 0 &&
+                        empty("Aucun accès en attente")}
+                    </section>
+                  </>
+                )}
+              </>
+            )}
+          </>
+        )}
       </main>
-    </div>;
-  }
-
-  return <div className="min-h-screen bg-slate-50 text-slate-900" data-screen-source="tournal-ops-workspace"><header className="sticky top-0 z-30 border-b bg-white/95 backdrop-blur"><div className="mx-auto max-w-none px-4 lg:px-6 py-3 flex items-center gap-3"><div className="h-9 w-9 rounded-lg bg-slate-900 text-white flex items-center justify-center font-semibold">T</div><div className="flex-1"><p className="font-semibold leading-none">Tournal Ops</p><p className="text-[11px] text-slate-500 mt-1">Centre des opérations</p></div><button onClick={()=>void refresh()} className="h-9 w-9 rounded-xl bg-slate-100 flex items-center justify-center"><RefreshCw size={15} className={loading?"animate-spin":""}/></button><span className="hidden sm:flex items-center gap-1 rounded-full bg-emerald-50 text-emerald-700 px-3 py-1 text-xs font-bold"><ShieldCheck size={13}/> {canSystemAdmin?"SuperAdmin":opsRole?`Ops · ${opsRole}`:"Ops"}</span><button onClick={onLogout} title="Déconnexion" className="h-9 w-9 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center"><LogOut size={15}/></button></div></header><div className="mx-auto max-w-none lg:grid lg:grid-cols-[220px_minmax(0,1fr)]"><aside className="hidden lg:block border-r min-h-[calc(100vh-65px)] bg-white p-3"><p className="px-3 pt-2 pb-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">Navigation</p><nav className="space-y-1">{NAV.filter(([id])=>id!=="system"||canSystemAdmin).map(([id,label,Icon])=><button key={id} onClick={()=>setView(id)} className={`w-full flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium ${view===id?"bg-slate-100 text-slate-950":"text-slate-600 hover:bg-slate-50"}`}><Icon size={16}/>{label}</button>)}</nav></aside><main className="min-w-0 p-4 lg:p-6 space-y-4 pb-24"><div className="flex flex-col md:flex-row md:items-center gap-3"><div className="flex-1"><h1 className="text-2xl font-semibold tracking-tight">{NAV.find(([id])=>id===view)?.[1]}</h1><p className="text-sm text-slate-500 mt-1">{view==="home"?"Ce qui nécessite votre attention aujourd’hui.":view==="clients"?"Demandes de création et boutiques clientes.":view==="support"?"Tickets et tâches de support à traiter.":view==="activity"?"Historique des opérations et événements.":view==="team"?"Rôles et accès de l’équipe interne.":"Administration et accès sensibles."}</p></div><div className="relative w-full md:w-80"><Search className="absolute left-3 top-3 text-slate-400" size={18}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Rechercher boutique, utilisateur, téléphone…" className="w-full rounded-lg border border-slate-300 bg-white py-2 pl-10 pr-4 text-sm outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-200"/></div></div>{error&&<div className="rounded-xl bg-red-50 text-red-700 px-3 py-2 text-xs font-bold">{error}</div>}
-    <nav className="flex lg:hidden gap-2 overflow-x-auto pb-1">{NAV.filter(([id])=>id!=="system"||canSystemAdmin).map(([id,label,Icon])=><button key={id} onClick={()=>setView(id)} className={`shrink-0 flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold ${view===id?"bg-slate-950 text-white":"bg-white border text-slate-600"}`}><Icon size={14}/>{label}</button>)}</nav>
-    {view==="home"&&<>{(canSystemAdmin||opsRole==="manager")&&workspace?.attentionCounts&&<section className="rounded-lg bg-slate-900 text-white p-4"><div className="flex items-center justify-between"><div><p className="font-semibold">Pilotage SLA</p><p className="text-xs text-slate-300">Vue opérationnelle consolidée</p></div><ShieldCheck size={20}/></div><div className="mt-4 grid grid-cols-2 md:grid-cols-5 gap-2">{[["Tâches",workspace.attentionCounts.open_tasks],["En retard",workspace.attentionCounts.overdue_tasks],["Tickets",workspace.attentionCounts.open_tickets],["SLA dépassé",workspace.attentionCounts.sla_breached_tickets],["Urgents",workspace.attentionCounts.urgent_items]].map(([l,v])=><div key={String(l)} className="rounded-xl bg-white/10 p-3"><p className="text-[10px] text-slate-300 font-bold">{l}</p><p className="text-xl font-semibold mt-1">{v}</p></div>)}</div>{workspace.managerMetrics.length>0&&<div className="mt-3 overflow-x-auto"><div className="min-w-[640px] grid grid-cols-5 gap-2 text-[10px] text-slate-300 font-semibold px-2"><span>Équipe</span><span>Tâches</span><span>Retard</span><span>Tickets</span><span>SLA</span></div>{workspace.managerMetrics.slice(0,12).map(m=><div key={m.user_id} className="min-w-[640px] grid grid-cols-5 gap-2 rounded-xl bg-white/5 px-2 py-2 mt-1 text-xs"><span className="font-bold">{userName(m.user_id)} · {m.role}</span><span>{m.open_tasks}</span><span>{m.overdue_tasks}</span><span>{m.open_tickets}</span><span>{m.sla_breached_tickets}</span></div>)}</div>}</section>}<section className="rounded-xl bg-white border p-4"><div className="flex items-center justify-between"><div><p className="font-semibold">Alertes opérationnelles</p><p className="text-xs text-slate-500">Retards et risques nécessitant une action</p></div><AlertTriangle className="text-amber-500" size={19}/></div><div className="mt-3 grid md:grid-cols-3 gap-2">{activeTasks.filter(t=>t.due_at&&new Date(t.due_at)<new Date()).slice(0,4).map(t=><div key={'task-'+t.id} className="rounded-xl bg-amber-50 p-3"><p className="text-[10px] font-semibold text-amber-700">TÂCHE EN RETARD</p><p className="text-xs font-bold mt-1">{t.title}</p><p className="text-[10px] text-slate-500 mt-1">{rows.find(b=>b.id===t.boutique_id)?.nom??'Global'} · {fmtDate(t.due_at)}</p></div>)}{activeTickets.filter(t=>t.sla_due_at&&new Date(t.sla_due_at)<new Date()).slice(0,4).map(t=><div key={'ticket-'+t.id} className="rounded-xl bg-red-50 p-3"><p className="text-[10px] font-semibold text-red-700">SLA DÉPASSÉ</p><p className="text-xs font-bold mt-1">#{t.id} · {t.subject}</p><p className="text-[10px] text-slate-500 mt-1">{rows.find(b=>b.id===t.boutique_id)?.nom??t.boutique_id}</p></div>)}{accountGroups.filter(g=>g.account.health_status==='at_risk').slice(0,4).map(g=><button key={'risk-'+g.account.id} onClick={()=>g.boutiques[0]&&setSelectedId(g.boutiques[0].id)} className="rounded-xl bg-red-50 p-3 text-left"><p className="text-[10px] font-semibold text-red-700">COMPTE À RISQUE</p><p className="text-xs font-bold mt-1">{g.account.name}</p><p className="text-[10px] text-slate-500 mt-1">{g.boutiques.length} boutique(s)</p></button>)}{!activeTasks.some(t=>t.due_at&&new Date(t.due_at)<new Date())&&!activeTickets.some(t=>t.sla_due_at&&new Date(t.sla_due_at)<new Date())&&!accountGroups.some(g=>g.account.health_status==='at_risk')&&<p className="text-sm text-slate-500 md:col-span-3">Aucune alerte critique pour le moment.</p>}</div></section><section className="grid grid-cols-2 md:grid-cols-4 gap-3">{[["Boutiques",rows.length],["Tâches actives",activeTasks.length],["Tickets ouverts",activeTickets.length],["Onboarding 100%",rows.filter(b=>b.progress===100).length]].map(([l,v])=><div key={String(l)} className="rounded-xl bg-white border border-slate-200 p-4"><p className="text-xs font-bold text-slate-500">{l}</p><p className="mt-1 text-2xl font-semibold">{v}</p></div>)}</section><section className="rounded-xl bg-white border overflow-hidden"><div className="p-4 border-b flex items-center justify-between"><div><p className="font-semibold">À traiter</p><p className="text-xs text-slate-500">Priorités clients et onboarding</p></div><AlertTriangle className="text-amber-500" size={20}/></div>{attention.slice(0,10).map(b=><button key={b.id} onClick={()=>setSelectedId(b.id)} className="w-full p-4 border-b last:border-0 text-left flex gap-3 items-center hover:bg-slate-50"><div className="h-9 w-9 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center"><Store size={17}/></div><div className="flex-1"><p className="font-bold">{b.nom}</p><p className="text-xs text-slate-500">Onboarding {b.progress}% · {b.openTasks.length} tâche(s) · {b.openTickets.length} ticket(s)</p></div><ChevronRight size={16}/></button>)}</section></>}
-    {view==="clients"&&<section className="space-y-4"><div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3"><div className="inline-flex rounded-lg border border-slate-200 bg-white p-1 self-start">{[["requests","Demandes"],["shops","Boutiques"]] .map(([id,label])=><button key={id} onClick={()=>setClientTab(id as any)} className={`rounded-lg px-3 py-2 text-xs font-semibold ${clientTab===id?"bg-slate-950 text-white":"text-slate-500 hover:bg-slate-50"}`}>{label}</button>)}</div><div className="flex gap-2"><button onClick={startManualProvision} className="rounded-lg bg-slate-900 text-white px-3 py-2 text-xs font-semibold flex items-center gap-1.5"><Plus size={14}/> Nouvelle boutique</button></div></div>{clientTab==="requests"&&<section className="overflow-hidden rounded-xl border border-slate-200 bg-white"><div className="flex items-center justify-between border-b px-4 py-3"><div><p className="font-semibold">Demandes d’accès</p><p className="text-xs text-slate-500">Entrantes depuis tournal.org · qualification et décision</p></div></div><div className="grid grid-cols-[150px_minmax(180px,1.4fr)_minmax(180px,1.4fr)_160px] gap-3 border-b bg-slate-50 px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500"><span>Date</span><span>Contact</span><span>Société / activité</span><span>Statut</span></div>{publicRequestsLoading?<p className="p-6 text-sm text-slate-500">Chargement des demandes…</p>:publicRequests.map(r=><button type="button" onClick={()=>void openPublicRequest(r.id)} key={r.id} className="grid w-full grid-cols-[150px_minmax(180px,1.4fr)_minmax(180px,1.4fr)_160px] items-center gap-3 border-b border-slate-100 px-4 py-3 text-left text-sm last:border-0 hover:bg-slate-50"><span className="text-xs text-slate-500">{fmtDate(r.created_at)}</span><span className="font-medium">{r.nom||"Demande anonymisée"}</span><span className="truncate text-slate-600">{r.societe||r.type_activite||"—"}</span><span className={r.statut==="nouvelle"?"font-semibold text-amber-700":r.statut==="acceptee"?"font-semibold text-emerald-700":r.statut==="refusee"?"font-semibold text-red-700":"text-slate-600"}>{r.statut==="nouvelle"?"Nouvelle":r.statut==="vue"?"Vue":r.statut==="acceptee"?"Acceptée":r.statut==="refusee"?"Refusée":"Complément demandé"}</span></button>)}{!publicRequestsLoading&&publicRequests.length===0&&<p className="p-6 text-sm text-slate-500">Aucune demande à afficher.</p>}</section>}{clientTab==="accounts"&&<><div className="rounded-xl bg-white border p-4"><div className="flex items-center justify-between gap-3"><div><p className="font-semibold">Pipeline comptes</p><p className="text-xs text-slate-500">Vue Sales partagée · cliquer sur une organisation pour ouvrir une boutique liée</p></div><span className="text-xs font-semibold text-slate-500">{accountGroups.length} compte(s)</span></div><div className="mt-4 grid md:grid-cols-3 xl:grid-cols-6 gap-2">{[["prospect","Prospect"],["sales","Sales"],["onboarding","Onboarding"],["active","Actif"],["at_risk","À risque"],["inactive","Inactif"]].map(([stage,label])=>{const groups=accountGroups.filter(g=>g.account.stage===stage);return <div key={stage} className="rounded-2xl bg-slate-50 p-3 min-h-28"><div className="flex items-center justify-between"><p className="text-[10px] uppercase tracking-wide font-semibold text-slate-500">{label}</p><span className="text-[10px] font-semibold">{groups.length}</span></div><div className="mt-2 space-y-1.5">{groups.slice(0,8).map(g=><button key={g.account.id} onClick={()=>g.boutiques[0]&&setSelectedId(g.boutiques[0].id)} className="w-full rounded-xl bg-white border px-2 py-2 text-left hover:bg-slate-100"><p className="text-xs font-semibold truncate">{g.account.name}</p><p className="text-[10px] text-slate-500">{g.boutiques.length} boutique(s) · {g.account.health_status}</p></button>)}{groups.length===0&&<p className="text-[10px] text-slate-400">Aucun compte</p>}</div></div>})}</div></div>{clientTab==="accounts"&&accountGroups.length>0&&<div className="grid md:grid-cols-2 gap-2">{accountGroups.filter(g=>(g.account.name+" "+g.boutiques.map(b=>b.nom).join(" ")).toLowerCase().includes(query.toLowerCase())).map(g=><div key={g.account.id} className="rounded-xl bg-white border border-slate-200 p-4"><div className="flex items-start justify-between gap-2"><div><p className="font-semibold">{g.account.name}</p><p className="text-xs text-slate-500">{g.boutiques.length} boutique(s) · {g.account.stage}</p></div><span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${g.account.health_status==='at_risk'?'bg-red-50 text-red-700':g.account.health_status==='watch'?'bg-amber-50 text-amber-700':'bg-emerald-50 text-emerald-700'}`}>{g.account.health_status}</span></div><div className="mt-3 flex flex-wrap gap-1">{g.boutiques.map(b=><button key={b.id} onClick={()=>setSelectedId(b.id)} className="rounded-lg bg-slate-100 px-2 py-1 text-xs font-bold hover:bg-slate-200">{b.nom}</button>)}</div></div>)}</div>}</>}{clientTab==="shops"&&<section className="overflow-hidden rounded-xl border border-slate-200 bg-white"><div className="grid grid-cols-[minmax(220px,2fr)_1fr_120px_120px_90px] gap-3 border-b bg-slate-50 px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500"><span>Boutique</span><span>Ville</span><span>Onboarding</span><span>Utilisateurs</span><span>Santé</span></div>{filtered.map(b=><button key={b.id} onClick={()=>setSelectedId(b.id)} className="grid w-full grid-cols-[minmax(220px,2fr)_1fr_120px_120px_90px] gap-3 border-b border-slate-100 px-4 py-3 text-left text-sm last:border-0 hover:bg-slate-50"><span className="font-semibold">{b.nom}</span><span className="text-slate-600">{b.ville||"—"}</span><span>{b.progress}%</span><span>{b.members.length}</span><span className={b.score<60?"font-semibold text-red-700":b.score<85?"font-semibold text-amber-700":"font-semibold text-emerald-700"}>{b.score}/100</span></button>)}{filtered.length===0&&<p className="p-6 text-sm text-slate-500">Aucune boutique ne correspond à la recherche.</p>}</section>}</section>}
-    {view==="support"&&<div className="space-y-4"><div className="flex items-center justify-between gap-3"><div className="inline-flex rounded-lg border border-slate-200 bg-white p-1">{[["tickets","Tickets"],["tasks","Tâches"]].map(([id,label])=><button key={id} onClick={()=>setSupportTab(id as any)} className={`rounded-lg px-3 py-2 text-xs font-semibold ${supportTab===id?"bg-slate-950 text-white":"text-slate-500"}`}>{label}</button>)}</div><button onClick={()=>supportTab==="tickets"?setTicketModal(true):setTaskModal(true)} className="rounded-lg bg-slate-900 text-white px-3 py-2 text-xs font-semibold flex items-center gap-1.5"><Plus size={14}/>{supportTab==="tickets"?"Nouveau ticket":"Nouvelle tâche"}</button></div>{supportTab==="tasks"&&<section className="overflow-hidden rounded-xl border border-slate-200 bg-white"><div className="grid grid-cols-[minmax(260px,2fr)_130px_180px_160px_160px_90px] gap-3 border-b bg-slate-50 px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500"><span>Tâche</span><span>Équipe</span><span>Boutique</span><span>Assignée</span><span>Échéance</span><span>Action</span></div>{activeTasks.slice(0,50).map(t=><div key={t.id} className="grid grid-cols-[minmax(260px,2fr)_130px_180px_160px_160px_90px] items-center gap-3 border-b border-slate-100 px-4 py-3 text-sm last:border-0 hover:bg-slate-50"><span className={t.priority==="urgent"?"font-semibold text-red-700":t.priority==="high"?"font-semibold text-amber-700":"font-medium"}>{t.title}</span><span className="text-slate-600">{teamLabel[t.team]}</span><span className="truncate text-slate-600">{rows.find(b=>b.id===t.boutique_id)?.nom??"Global"}</span><span className="truncate text-slate-600">{userName(t.assignee_id)}</span><span className="text-xs text-slate-500">{t.due_at?fmtDate(t.due_at):"Sans échéance"}</span>{canManageTask(t)?<button onClick={()=>void completeTask(t)} className="rounded-md border border-emerald-200 px-2 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50">Terminer</button>:<span/>}</div>)}{activeTasks.length===0&&<p className="p-6 text-sm text-slate-500">Aucune tâche active.</p>}</section>}{supportTab==="tickets"&&<section className="overflow-hidden rounded-xl border border-slate-200 bg-white"><div className="grid grid-cols-[80px_minmax(260px,2fr)_180px_100px_160px_140px_90px] gap-3 border-b bg-slate-50 px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500"><span>ID</span><span>Sujet</span><span>Boutique</span><span>Priorité</span><span>Assigné</span><span>Ouvert</span><span>Action</span></div>{activeTickets.slice(0,50).map(t=><div key={t.id} className="grid grid-cols-[80px_minmax(260px,2fr)_180px_100px_160px_140px_90px] items-center gap-3 border-b border-slate-100 px-4 py-3 text-sm last:border-0 hover:bg-slate-50"><span className="font-mono text-xs text-slate-500">#{t.id}</span><div className="min-w-0"><p className="truncate font-medium">{t.subject}</p>{t.sla_due_at&&new Date(t.sla_due_at)<new Date()&&<span className="text-[10px] font-semibold text-red-700">SLA dépassé</span>}</div><span className="truncate text-slate-600">{rows.find(b=>b.id===t.boutique_id)?.nom??t.boutique_id}</span><span className={t.priority==="urgent"?"font-semibold text-red-700":t.priority==="high"?"font-semibold text-amber-700":"text-slate-600"}>{priorityLabel[t.priority]}</span><span className="truncate text-slate-600">{userName(t.assignee_id)}</span><span className="text-xs text-slate-500">{fmtDate(t.created_at)}</span>{canManageTickets?<button onClick={()=>void resolveTicket(t)} className="rounded-md border border-emerald-200 px-2 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50">Résoudre</button>:<span/>}</div>)}{activeTickets.length===0&&<p className="p-6 text-sm text-slate-500">Aucun ticket ouvert.</p>}</section>}</div>}
-    {view==="activity"&&<section className="overflow-hidden rounded-xl border border-slate-200 bg-white"><div className="grid grid-cols-[150px_1fr_180px_130px] gap-3 border-b bg-slate-50 px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500"><span>Date</span><span>Événement</span><span>Boutique</span><span>Équipe</span></div>{(workspace?.interactions??[]).slice(0,100).map(i=><div key={i.id} className="grid grid-cols-[150px_1fr_180px_130px] gap-3 border-b border-slate-100 px-4 py-3 text-sm last:border-0"><span className="text-xs text-slate-500">{fmtDate(i.created_at)}</span><span className="font-medium">{i.title}</span><span className="truncate text-slate-600">{rows.find(b=>b.id===i.boutique_id)?.nom??"Global"}</span><span className="text-slate-600">{teamLabel[i.team??'']??i.kind}</span></div>)}{!(workspace?.interactions.length)&&<p className="p-6 text-sm text-slate-500">Aucune activité enregistrée.</p>}</section>}
-    {view==="team"&&<section className="rounded-xl bg-white border overflow-hidden"><div className="p-4 border-b"><p className="font-semibold">Accès équipe Ops</p><p className="text-xs text-slate-500">Gérez les rôles internes sans ouvrir de droits sur les boutiques clientes.</p></div>{users.filter(u=>!u.isSuperAdmin).map(u=>{const profile=workspace?.staff.find(s=>s.user_id===u.id);return <div key={u.id} className="p-3 border-b last:border-0 flex items-center gap-3"><div className="h-9 w-9 rounded-full bg-slate-100 flex items-center justify-center font-semibold text-xs">{u.nom.slice(0,2).toUpperCase()}</div><div className="flex-1"><p className="text-sm font-bold">{u.nom}</p><p className="text-xs text-slate-500">{u.phone??""}</p></div>{canSystemAdmin?<select value={profile?.role??""} onChange={async e=>{if(!e.target.value)return;const saved=await upsertOpsStaffProfile(u.id,e.target.value as OpsStaffProfile['role']);setWorkspace(w=>w?{...w,staff:[...w.staff.filter(s=>s.user_id!==saved.user_id),saved]}:w)}} className="rounded-lg border px-2 py-1.5 text-xs"><option value="">Aucun rôle Ops</option><option value="sales">Sales</option><option value="service">Service</option><option value="support">Support</option><option value="manager">Manager</option></select>:<span className="rounded-lg bg-slate-100 px-2 py-1.5 text-xs font-bold text-slate-600">{profile?.role?teamLabel[profile.role]??profile.role:"—"}</span>}</div>})}</section>}
-    {view==="system"&&canSystemAdmin&&<div className="space-y-3"><section className="rounded-xl bg-white border p-5"><div className="flex gap-3"><div className="h-11 w-11 rounded-xl bg-red-50 text-red-700 flex items-center justify-center"><Settings size={20}/></div><div><p className="font-semibold">Zone système</p><p className="text-xs text-slate-500">Boutiques, comptes, groupes et paramètres sensibles restent séparés de Tournal Ops.</p></div></div><button onClick={onSystem} className="mt-5 w-full rounded-lg bg-slate-900 text-white py-3 text-sm font-semibold">Ouvrir l’administration système</button></section><section className="rounded-xl bg-white border overflow-hidden"><div className="p-4 border-b"><p className="font-semibold">Demandes d’accès Support</p><p className="text-xs text-slate-500">Accès diagnostique temporaire, traçable et sans données financières.</p></div>{pendingAccess.map(r=><div key={r.id} className="p-4 border-b last:border-0"><p className="text-sm font-semibold">{rows.find(b=>b.id===r.boutique_id)?.nom??r.boutique_id}</p><p className="text-xs text-slate-500 mt-1">{userName(r.requester_id)} · {r.requested_minutes} min · {r.reason}</p><div className="mt-2 flex gap-2"><button onClick={()=>void decideAccess(r.id,true)} className="rounded-lg bg-emerald-50 text-emerald-700 px-3 py-2 text-xs font-semibold">Approuver</button><button onClick={()=>void decideAccess(r.id,false)} className="rounded-lg bg-red-50 text-red-700 px-3 py-2 text-xs font-semibold">Refuser</button></div></div>)}{pendingAccess.length===0&&<p className="p-4 text-sm text-slate-500">Aucune demande en attente.</p>}</section></div>}
-  </main></div>
-  {taskModal&&<Modal title="Nouvelle tâche" onClose={()=>setTaskModal(false)}><div className="space-y-3"><input value={taskTitle} onChange={e=>setTaskTitle(e.target.value)} placeholder="Action à réaliser" className={input}/><select value={taskBoutique} onChange={e=>setTaskBoutique(e.target.value)} className={input}><option value="">Tâche globale</option>{rows.map(b=><option key={b.id} value={b.id}>{b.nom}</option>)}</select><div className="grid grid-cols-2 gap-2"><select value={taskTeam} onChange={e=>setTaskTeam(e.target.value as any)} className={input}><option value="sales">Sales</option><option value="service">Service</option><option value="support">Support</option><option value="success">Success</option><option value="management">Management</option></select><select value={taskPriority} onChange={e=>setTaskPriority(e.target.value as OpsPriority)} className={input}><option value="low">Basse</option><option value="normal">Normale</option><option value="high">Haute</option><option value="urgent">Urgente</option></select></div><input type="datetime-local" value={taskDue} onChange={e=>setTaskDue(e.target.value)} className={input}/><select value={taskAssignee} onChange={e=>setTaskAssignee(e.target.value)} className={input}><option value="">Non assignée</option>{opsUsers.map(user=><option key={user.id} value={user.id}>{user.nom}</option>)}</select><button disabled={saving||!taskTitle.trim()} onClick={()=>void submitTask()} className="w-full rounded-lg bg-slate-900 text-white py-3 text-sm font-semibold disabled:opacity-50">Créer la tâche</button></div></Modal>}
-  {ticketModal&&<Modal title="Nouveau ticket support" onClose={()=>setTicketModal(false)}><div className="space-y-3"><select value={ticketBoutique} onChange={e=>setTicketBoutique(e.target.value)} className={input}><option value="">Choisir la boutique</option>{rows.map(b=><option key={b.id} value={b.id}>{b.nom}</option>)}</select><input value={ticketSubject} onChange={e=>setTicketSubject(e.target.value)} placeholder="Sujet du problème" className={input}/><select value={ticketPriority} onChange={e=>setTicketPriority(e.target.value as OpsPriority)} className={input}><option value="low">Basse</option><option value="normal">Normale</option><option value="high">Haute</option><option value="urgent">Urgente</option></select><input value={ticketRequester} onChange={e=>setTicketRequester(e.target.value)} placeholder="Demandeur" className={input}/><input value={ticketPhone} onChange={e=>setTicketPhone(e.target.value)} placeholder="Téléphone" className={input}/><select value={ticketAssignee} onChange={e=>setTicketAssignee(e.target.value)} className={input}><option value="">Non assigné</option>{opsUsers.map(user=><option key={user.id} value={user.id}>{user.nom}</option>)}</select><button disabled={saving||!ticketBoutique||!ticketSubject.trim()} onClick={()=>void submitTicket()} className="w-full rounded-lg bg-slate-900 text-white py-3 text-sm font-semibold disabled:opacity-50">Ouvrir le ticket</button></div></Modal>}
-  </div>;
+      {taskModal && (
+        <Modal
+          title="Nouvelle tâche"
+          onClose={() => {
+            if (!saving) setTaskModal(false)
+          }}
+        >
+          <form
+            className="ops-form"
+            onSubmit={(e) => {
+              e.preventDefault()
+              void submitTask()
+            }}
+          >
+            {error && (
+              <p role="alert" className="ops-error">
+                {error}
+              </p>
+            )}
+            <label>
+              Action à réaliser
+              <input
+                autoFocus
+                required
+                value={taskTitle}
+                onChange={(e) => setTaskTitle(e.target.value)}
+                className={input}
+              />
+            </label>
+            <label>
+              Boutique
+              <select
+                value={taskBoutique}
+                onChange={(e) => setTaskBoutique(e.target.value)}
+                className={input}
+              >
+                <option value="">Tâche globale</option>
+                {rows.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.nom}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Équipe responsable
+              <select
+                value={taskTeam}
+                onChange={(e) => setTaskTeam(e.target.value as typeof taskTeam)}
+                className={input}
+              >
+                {Object.entries(teamLabel)
+                  .filter(([key]) => key !== "manager")
+                  .map(([key, label]) => (
+                    <option key={key} value={key}>
+                      {label}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <label>
+              Priorité
+              <select
+                value={taskPriority}
+                onChange={(e) => setTaskPriority(e.target.value as OpsPriority)}
+                className={input}
+              >
+                {Object.entries(priorityLabel).map(([key, label]) => (
+                  <option key={key} value={key}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Échéance (facultative)
+              <input
+                type="datetime-local"
+                value={taskDue}
+                onChange={(e) => setTaskDue(e.target.value)}
+                className={input}
+              />
+            </label>
+            <label>
+              Responsable
+              <select
+                value={taskAssignee}
+                onChange={(e) => setTaskAssignee(e.target.value)}
+                className={input}
+              >
+                <option value="">Non assignée</option>
+                {opsUsers.map((user) => (
+                  <option key={user.id} value={user.id}>
+                    {user.nom}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              disabled={saving || !taskTitle.trim()}
+              className="rounded-lg bg-emerald-800 text-white py-3 text-sm font-semibold disabled:opacity-50"
+            >
+              {saving ? "Création…" : "Créer la tâche"}
+            </button>
+          </form>
+        </Modal>
+      )}
+      {ticketModal && (
+        <Modal
+          title="Nouveau ticket"
+          onClose={() => {
+            if (!saving) setTicketModal(false)
+          }}
+        >
+          <form
+            className="ops-form"
+            onSubmit={(e) => {
+              e.preventDefault()
+              void submitTicket()
+            }}
+          >
+            {error && (
+              <p role="alert" className="ops-error">
+                {error}
+              </p>
+            )}
+            <label>
+              Boutique
+              <select
+                required
+                value={ticketBoutique}
+                onChange={(e) => setTicketBoutique(e.target.value)}
+                className={input}
+              >
+                <option value="">Choisir la boutique</option>
+                {rows.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.nom}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Sujet du problème
+              <input
+                required
+                value={ticketSubject}
+                onChange={(e) => setTicketSubject(e.target.value)}
+                className={input}
+              />
+            </label>
+            <label>
+              Priorité
+              <select
+                value={ticketPriority}
+                onChange={(e) =>
+                  setTicketPriority(e.target.value as OpsPriority)
+                }
+                className={input}
+              >
+                {Object.entries(priorityLabel).map(([key, label]) => (
+                  <option key={key} value={key}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Demandeur (facultatif)
+              <input
+                value={ticketRequester}
+                onChange={(e) => setTicketRequester(e.target.value)}
+                className={input}
+              />
+            </label>
+            <label>
+              Téléphone (facultatif)
+              <input
+                type="tel"
+                value={ticketPhone}
+                onChange={(e) => setTicketPhone(e.target.value)}
+                className={input}
+              />
+            </label>
+            <label>
+              Responsable
+              <select
+                value={ticketAssignee}
+                onChange={(e) => setTicketAssignee(e.target.value)}
+                className={input}
+              >
+                <option value="">Non assigné</option>
+                {opsUsers.map((user) => (
+                  <option key={user.id} value={user.id}>
+                    {user.nom}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              disabled={saving || !ticketBoutique || !ticketSubject.trim()}
+              className="rounded-lg bg-emerald-800 text-white py-3 text-sm font-semibold disabled:opacity-50"
+            >
+              {saving ? "Création…" : "Créer le ticket"}
+            </button>
+          </form>
+        </Modal>
+      )}
+    </div>
+  )
 }
-
