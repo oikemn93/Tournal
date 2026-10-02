@@ -69,6 +69,13 @@ jobs:
             sha256sum /tmp/access-request-candidate/stage-a.sql
             rm supabase/migrations/20260929204856_access_requests_stage_a.sql
           fi
+          mkdir -p /tmp/post-stage-a
+          while IFS= read -r migration; do
+            test -n "$migration" || continue
+            test -s "supabase/migrations/$migration"
+            cp "supabase/migrations/$migration" "/tmp/post-stage-a/$migration"
+            rm "supabase/migrations/$migration"
+          done < .github/audit/post-stage-a-replay.txt
       - name: Prepare canonical legacy replay
         run: bash scripts/prepare-canonical-replay.sh
 
@@ -76,6 +83,7 @@ jobs:
         run: |
           python3 -m py_compile scripts/*access-request*.py
           python3 scripts/test-access-request-snapshot.py
+          python3 scripts/test-access-request-current-schema.py
       - name: Start local Supabase
         run: supabase start -x studio,imgproxy,edge-runtime,logflare,vector
       - name: Replay complete Git migration history
@@ -91,6 +99,13 @@ jobs:
           python3 scripts/check-access-request-delta.py baseline-access-signatures.txt candidate-access-signatures.txt baseline-access-signatures.txt
           psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -X -v ON_ERROR_STOP=1 -f scripts/test-access-requests-db.sql
           python3 scripts/test-access-requests-race.py
+      - name: Replay already-applied migrations after the frozen Stage A baseline
+        run: |
+          while IFS= read -r migration; do
+            test -n "$migration" || continue
+            psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -X -v ON_ERROR_STOP=1 --single-transaction -f "/tmp/post-stage-a/$migration"
+          done < .github/audit/post-stage-a-replay.txt
+          psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -X -v ON_ERROR_STOP=1 -f .github/audit/access-request-signatures.sql > current-access-signatures.txt
       - name: Count applied migrations
         run: psql 'postgresql://postgres:postgres@127.0.0.1:54322/postgres' -Atc "select count(*) from supabase_migrations.schema_migrations;"
       - name: Run stock integrity matrix on production-equivalent schema
@@ -119,7 +134,7 @@ jobs:
           fi
           test -s production-schema-signatures.txt
           test -s production-access-signatures.txt
-          python3 scripts/check-access-request-delta.py baseline-access-signatures.txt candidate-access-signatures.txt production-access-signatures.txt
+          python3 scripts/check-access-request-current-schema.py current-access-signatures.txt production-access-signatures.txt
       - name: Build exact hashed schema diff
         shell: bash
         run: |
@@ -161,6 +176,7 @@ jobs:
             schema-diff.txt
             baseline-access-signatures.txt
             candidate-access-signatures.txt
+            current-access-signatures.txt
             production-access-signatures.txt
           if-no-files-found: error
           retention-days: 1
