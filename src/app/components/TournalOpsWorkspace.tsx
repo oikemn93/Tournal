@@ -138,6 +138,7 @@ function Modal({
   onClose: () => void
   children: React.ReactNode
 }) {
+  const returnFocus = useRef(document.activeElement instanceof HTMLElement ? document.activeElement : null)
   return (
     <Dialog.Root
       open
@@ -149,6 +150,10 @@ function Modal({
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
         <Dialog.Content
           aria-describedby={undefined}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault()
+            returnFocus.current?.focus()
+          }}
           className="fixed left-1/2 top-1/2 z-50 w-[calc(100%_-_2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-xl bg-white p-6 max-h-[90vh] overflow-y-auto"
         >
           <div className="flex items-center justify-between mb-5">
@@ -450,9 +455,10 @@ export function TournalOpsWorkspace({
             ),
           )
 
+        const usersReady = (overview?.user_count ?? members.length) > 0
         const checks = [
           ownerReady,
-          members.length > 0,
+          usersReady,
           setup,
           Boolean(firstReceipt || onboarding?.first_receipt_at),
           Boolean(firstSale || onboarding?.first_sale_at),
@@ -474,6 +480,7 @@ export function TournalOpsWorkspace({
           openTasks,
           openTickets,
           ownerReady,
+          usersReady,
           progress,
         }
       }),
@@ -761,6 +768,8 @@ export function TournalOpsWorkspace({
       setTaskDue("")
       setTaskAssignee("")
       setTaskModal(false)
+      navigate("support")
+      setSupportTab("tasks")
     } catch (e) {
       setError(e instanceof Error ? e.message : "Création impossible")
     } finally {
@@ -788,6 +797,8 @@ export function TournalOpsWorkspace({
       setTicketPhone("")
       setTicketAssignee("")
       setTicketModal(false)
+      navigate("support")
+      setSupportTab("tickets")
       void refresh()
     } catch (e) {
       setError(e instanceof Error ? e.message : "Création impossible")
@@ -1192,7 +1203,7 @@ export function TournalOpsWorkspace({
 
     const checks: [string, boolean][] = [
       ["Propriétaire affecté", selected.ownerReady],
-      ["Utilisateurs créés", selected.members.length > 0],
+      ["Utilisateurs créés", selected.usersReady],
       ["Catalogue configuré", selected.setup],
       [
         "Première réception",
@@ -1755,6 +1766,7 @@ export function TournalOpsWorkspace({
                           ? "support"
                           : "service",
                     )
+                    setError("")
                     setTaskModal(true)
                   }}
                 >
@@ -1764,7 +1776,7 @@ export function TournalOpsWorkspace({
                 {canManageTickets && (
                   <button
                     className="ops-button primary"
-                    onClick={() => setTicketModal(true)}
+                    onClick={() => {setError("");setTicketModal(true)}}
                   >
                     <Plus size={17} />
                     Ticket
