@@ -66,6 +66,29 @@ Deno.serve(async (req)=>{
 
     const graphHeaders={Authorization:`Bearer ${WHATSAPP_ACCESS_TOKEN}`,"Content-Type":"application/json"};
 
+    async function tokenDiagnostics(){
+      try{
+        const [permissionsResponse,wabaResponse]=await Promise.all([
+          fetch(`https://graph.facebook.com/${WHATSAPP_GRAPH_VERSION}/me/permissions`,{headers:graphHeaders}),
+          fetch(`https://graph.facebook.com/${WHATSAPP_GRAPH_VERSION}/${WHATSAPP_WABA_ID}?fields=id,name`,{headers:graphHeaders}),
+        ]);
+        const permissionsResult=await permissionsResponse.json().catch(()=>null);
+        const wabaResult=await wabaResponse.json().catch(()=>null);
+        const granted=Array.isArray(permissionsResult?.data)
+          ? permissionsResult.data.filter((item:any)=>item?.status==="granted").map((item:any)=>String(item.permission))
+          : [];
+        return {
+          granted_permissions:granted,
+          waba_accessible:wabaResponse.ok,
+          waba_name:wabaResponse.ok?String(wabaResult?.name??""):null,
+          waba_error:wabaResponse.ok?null:String(wabaResult?.error?.message??""),
+        };
+      }catch{
+        return {granted_permissions:[],waba_accessible:false,waba_name:null,waba_error:"Diagnostic Meta indisponible"};
+      }
+    }
+
+
     async function listTemplates(name:string){
       const response=await fetch(
         `https://graph.facebook.com/${WHATSAPP_GRAPH_VERSION}/${WHATSAPP_WABA_ID}/message_templates?name=${encodeURIComponent(name)}&fields=id,name,status,language,category,rejected_reason,components`,
@@ -76,7 +99,14 @@ Deno.serve(async (req)=>{
         const metaMessage=String(result?.error?.message??"");
         const metaCode=Number(result?.error?.code??0);
         if(metaCode===10){
-          throw new Error("Le token Meta n’a pas la permission de gérer les templates WhatsApp. Générez un token avec whatsapp_business_management + whatsapp_business_messaging et donnez au System User un accès complet au compte WhatsApp Business.");
+          const diag=await tokenDiagnostics();
+          const required=["whatsapp_business_management","whatsapp_business_messaging"];
+          const missing=required.filter((permission)=>!diag.granted_permissions.includes(permission));
+          throw new Error(
+            `Permission Meta refusée pour gérer les templates. Permissions réellement accordées au token : ${diag.granted_permissions.join(", ")||"aucune lisible"}. `+
+            `${missing.length?`Manquantes : ${missing.join(", ")}. `:""}`+
+            `Accès WABA : ${diag.waba_accessible?"OK":"NON"}${diag.waba_error?` (${diag.waba_error})`:""}.`
+          );
         }
         if(/unsupported get request|does not exist|cannot be loaded due to missing permissions/i.test(metaMessage)){
           throw new Error("Le WHATSAPP_WABA_ID configuré n’est pas accessible avec ce token Meta. Vérifiez que l’ID est bien le WhatsApp Business Account ID et que le System User du token a un accès complet à ce WABA.");
@@ -122,7 +152,14 @@ Deno.serve(async (req)=>{
       const createResult=await createResponse.json().catch(()=>null);
       if(!createResponse.ok){
         if(Number(createResult?.error?.code??0)===10){
-          throw new Error("Le token Meta n’a pas la permission de créer les templates WhatsApp. Ajoutez whatsapp_business_management au token et donnez au System User un accès complet au WABA.");
+          const diag=await tokenDiagnostics();
+          const required=["whatsapp_business_management","whatsapp_business_messaging"];
+          const missing=required.filter((permission)=>!diag.granted_permissions.includes(permission));
+          throw new Error(
+            `Permission Meta refusée pour créer les templates. Permissions réellement accordées au token : ${diag.granted_permissions.join(", ")||"aucune lisible"}. `+
+            `${missing.length?`Manquantes : ${missing.join(", ")}. `:""}`+
+            `Accès WABA : ${diag.waba_accessible?"OK":"NON"}${diag.waba_error?` (${diag.waba_error})`:""}.`
+          );
         }
         throw new Error(createResult?.error?.message??`Création du template ${params.name} impossible`);
       }
