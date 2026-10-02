@@ -42,7 +42,6 @@ import {
   createOpsInteraction,
   createOpsTask,
   createOpsTicket,
-  decideOpsAccessRequest,
   loadOpsWorkspace,
   updateOpsOnboarding,
   updateOpsTask,
@@ -842,24 +841,6 @@ export function TournalOpsWorkspace({
         relatedTicketId: ticket.id,
       })
     })
-  }
-
-  async function decideAccess(id: number, approve: boolean) {
-    try {
-      const item = await decideOpsAccessRequest(id, approve)
-      setWorkspace((w) =>
-        w
-          ? {
-              ...w,
-              accessRequests: w.accessRequests.map((r) =>
-                r.id === item.id ? item : r,
-              ),
-            }
-          : w,
-      )
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Décision impossible")
-    }
   }
 
   async function saveClientInteraction(boutiqueId: string) {
@@ -2254,7 +2235,7 @@ export function TournalOpsWorkspace({
                         <div>
                           <h2>Accès temporaires aux boutiques</h2>
                           <p>
-                            Vérifiez le motif avant d’autoriser l’intervention.
+                            Le propriétaire valide ces demandes depuis sa boutique.
                           </p>
                         </div>
                       </div>
@@ -2268,28 +2249,7 @@ export function TournalOpsWorkspace({
                             </p>
                             <p>{r.reason}</p>
                           </div>
-                          <button
-                            disabled={!!busyAction}
-                            className="ops-button"
-                            onClick={() =>
-                              void runAction("access-" + r.id, () =>
-                                decideAccess(r.id, false),
-                              )
-                            }
-                          >
-                            Refuser
-                          </button>
-                          <button
-                            disabled={!!busyAction}
-                            className="ops-button primary"
-                            onClick={() =>
-                              void runAction("access-" + r.id, () =>
-                                decideAccess(r.id, true),
-                              )
-                            }
-                          >
-                            Autoriser
-                          </button>
+                          <span className="ops-tag warning">Accord du propriétaire attendu</span>
                         </div>
                       ))}
                       {pendingAccess.length === 0 &&
