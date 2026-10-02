@@ -12,3 +12,5 @@ This is history reconciliation, not a new deployment. Do not rerun these migrati
 The Stage A access-request SQL was also compared to its production ledger entry and matches apart from a trailing blank line. No change to Stage A or the fail-closed comparison is needed. The full canonical replay and production comparison must pass before merging this reconciliation.
 
 Evidence: https://github.com/oikemn93/Tournal/actions/runs/36987155721
+
+The historical fingerprint intentionally describes the frozen pre-Stage-A baseline. The two recovered migrations are therefore preserved unchanged and replayed after that baseline and the Stage A delta/security tests. The final gate compares the complete current schema, including function definitions, grants, policies and the retention job, exactly against the live production signatures. It does not accept a pre-Stage-A or partial schema. Regression tests cover missing, extra, modified, duplicate and empty signatures. No expected historical fingerprint is edited and no failed check is ignored.
