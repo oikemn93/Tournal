@@ -120,7 +120,9 @@ Deno.serve(async (req)=>{
     }
 
     async function ensureTemplate(params:{name:string;category:"UTILITY"|"AUTHENTICATION";components:any[]}){
-      const templates=await listTemplates(params.name);
+      const templates=(await listTemplates(params.name)).filter((item:any)=>
+        item?.name===params.name&&item?.language===WHATSAPP_TEMPLATE_LANGUAGE_CODE
+      );
       const approved=templates.find((item:any)=>item?.status==="APPROVED");
       if(approved) return {ready:true,language:String(approved.language||WHATSAPP_TEMPLATE_LANGUAGE_CODE),template:approved};
 
@@ -185,8 +187,8 @@ Deno.serve(async (req)=>{
       category:"UTILITY",
       components:[{
         type:"BODY",
-        text:`Bonjour {{1}}, votre compte Tournal pour {{2}} est prêt. Votre identifiant de connexion est {{3}}. Connectez-vous sur ${TOURNAL_LOGIN_URL}.`,
-        example:{body_text:[["Awa Diallo","Boutique GGR","+221781224409"]]},
+        text:`Bonjour {{1}}, votre espace Tournal pour {{2}} est maintenant activé. Vous pouvez accéder à Tournal sur ${TOURNAL_LOGIN_URL}.`,
+        example:{body_text:[["Awa Diallo","Boutique Exemple"]]},
       }],
     });
 
@@ -261,7 +263,6 @@ Deno.serve(async (req)=>{
           parameters:[
             {type:"text",text:fullName},
             {type:"text",text:boutiqueName},
-            {type:"text",text:rawPhone},
           ],
         }],
       },

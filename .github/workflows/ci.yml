@@ -56,6 +56,9 @@ jobs:
       - name: Prevent fixed-interval network polling
         run: node scripts/check-no-network-polling.mjs
 
+      - name: WhatsApp onboarding template contract
+        run: node scripts/test-whatsapp-onboarding.mjs
+
       - name: Offline POS cut/reconnect contract
         run: node scripts/test-offline-pos-contract.mjs
 
