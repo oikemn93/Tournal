@@ -19,6 +19,7 @@ type AuthSession = {
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL ?? "https://cnxtylngddwmhugxkzju.supabase.co";
 const PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? "sb_publishable_Jeo4Bx2IsTPCkzsQMYTuFQ_VKPQc9Aq";
 const SESSION_STORAGE_KEY = "tournal.supabase.session";
+const OFFLINE_SESSION_KEY = "tournal.offline.session.v1";
 const SESSION_REFRESH_SKEW_MS = 2 * 60_000;
 const JWT_CLOCK_SKEW_MAX_RETRIES = 3;
 const JWT_CLOCK_SKEW_RETRY_DELAY_MS = 1_000;
@@ -61,7 +62,7 @@ function phoneToEmail(phone: string) {
 
 function readSession(): AuthSession | null {
   try {
-    const raw = sessionStorage.getItem(SESSION_STORAGE_KEY);
+    const raw = sessionStorage.getItem(SESSION_STORAGE_KEY) ?? localStorage.getItem(OFFLINE_SESSION_KEY);
     return raw ? JSON.parse(raw) as AuthSession : null;
   } catch {
     return null;
@@ -70,8 +71,14 @@ function readSession(): AuthSession | null {
 
 function storeSession(session: AuthSession | null) {
   try {
-    if (session) sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
-    else sessionStorage.removeItem(SESSION_STORAGE_KEY);
+    if (session) {
+      const serialized = JSON.stringify(session);
+      sessionStorage.setItem(SESSION_STORAGE_KEY, serialized);
+      localStorage.setItem(OFFLINE_SESSION_KEY, serialized);
+    } else {
+      sessionStorage.removeItem(SESSION_STORAGE_KEY);
+      localStorage.removeItem(OFFLINE_SESSION_KEY);
+    }
   } catch {
     // Private browsing can reject storage. The in-memory request still succeeds.
   }
