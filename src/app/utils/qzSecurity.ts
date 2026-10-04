@@ -1,0 +1,39 @@
+// Public certificate only. The private signing key remains on the server.
+export const QZ_CERTIFICATE = `-----BEGIN CERTIFICATE-----
+MIIDOTCCAiGgAwIBAgIUOa1/7AYJL6pGwXwojhWAcAD/vpIwDQYJKoZIhvcNAQEL
+BQAwLDEYMBYGA1UEAwwPVG91cm5hbCBRWiBUcmF5MRAwDgYDVQQKDAdUb3VybmFs
+MB4XDTI2MDgxMzA0MDgzOVoXDTM2MDgxMDA0MDgzOVowLDEYMBYGA1UEAwwPVG91
+cm5hbCBRWiBUcmF5MRAwDgYDVQQKDAdUb3VybmFsMIIBIjANBgkqhkiG9w0BAQEF
+AAOCAQ8AMIIBCgKCAQEAjlZwFiIgOmFPoanG7TkBdfoFA3pNpUirEyJJSF2T6au3
+1azLUdgVx/ZA1ltmWdsLbJpa3AEycJFPiYHk2aSMY0AQReo9+sj/5j8TE4j4S/wv
+58trY2UaButOs4PcnAbwTx37JudzLsywWJSeJX4zI1EON/wB4DrieB4M2Yvsr+u/
+GA8J1dzczPLbnZixit7gb72gr3q9jZATh6/YRbs35tYYC71jTY/ZxJVmxMRuzmO6
+AXVHMWOCF7ZT5RWF2r369OnqOsvCJXN2G5wmG6s2jPQaUrGT0+OgWvX6Pe8njMyj
+A9BwBC0QRlnwCLSrXvPeXpVc09pm35QkJDr6S/KUqQIDAQABo1MwUTAdBgNVHQ4E
+FgQUupyVz7ptI255R/D2yPjL7iiAEmQwHwYDVR0jBBgwFoAUupyVz7ptI255R/D2
+yPjL7iiAEmQwDwYDVR0TAQH/BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOCAQEAcTA1
+djMmBRrhRtTjCPGrSvq43Tp7VPNzKVLU7CFIBRfBRKnFEm82v1ihLJexKzGLTQmp
+LTM4CbEybjXaFuhzMUE9GokNqIgXQN68T+jMC8hA7R0DPxYK8c9kxYEVlyPulhHx
+WnQ894KcB2v4WkjnNzOInfgAsY4u1fi29UETS1OJNWRSWrdnnD1Gkz/+2cpAZT/h
+mTNgQI0C6bB051yZcvKyYrP7ASoFUlj1xLf7qQFOyOS3XGKkcv5RRLcuzvJGp9tI
+lFVACAKPBsq9w6fXa/BtZlsmYfYTi9mxRCFGjyV/zBSKW9jRlEQuIYtaZKu0P82X
+29No9wIhTQ7U/067jg==
+-----END CERTIFICATE-----`;
+
+type QzSecurity = {
+  setCertificatePromise: (callback: (resolve: (value: string) => void) => void) => void;
+  setSignatureAlgorithm: (algorithm: string) => void;
+  setSignaturePromise: (callback: (message: string) => (resolve: (value: string) => void, reject: (error: unknown) => void) => void) => void;
+};
+
+export function configureQzSecurity(qz: { security: QzSecurity }, sign: (message: string) => Promise<string>) {
+  qz.security.setCertificatePromise(resolve => resolve(QZ_CERTIFICATE));
+  // Must match qz-sign's RSASSA-PKCS1-v1_5 / SHA-512.
+  qz.security.setSignatureAlgorithm("SHA512");
+  qz.security.setSignaturePromise(message => (resolve, reject) => {
+    Promise.resolve().then(() => sign(message)).then(signature => {
+      if (!signature.trim()) throw new Error("Signature QZ indisponible. Vérifiez la configuration de signature serveur.");
+      resolve(signature);
+    }).catch(reject);
+  });
+}
