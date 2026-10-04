@@ -1,3 +1,4 @@
+import { configureQzSecurity } from "./utils/qzSecurity";
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { checkBackend, signQZ, sendInvoiceEmail, storePDFForSMS, getCurrentAuthUser, hasAuthenticatedSession, validateServerSession, refreshSessionIfNeeded, getAuthBootstrap, signInWithPhone, changeOwnPassword, getPinStatus, setQuickPin, verifyQuickPin, startAppSession, validateAppSession, lockAppSession, setAppSessionRecoveryHandler, signOut as signOutFromSupabase, createBoutique, createUser, resetUserPassword, subscribeToBoutiqueChanges, subscribeToBoutiqueSync, isBoutiqueSyncV2Enabled, assignUserToBoutique, unassignUserFromBoutique, upsertAssignmentDirect, deleteAssignmentDirect, recordAuditLog, loadBoutiqueSnapshot, FULL_BOOTSTRAP_HISTORY_DAYS, BOUNDED_BOOTSTRAP_HISTORY_DAYS, loadBoutiqueSyncPatch, loadBoutiquePlatformUsers, loadPlatformUsers, loadGroupes, saveGroupes, loadAuthSettings as loadStoredAuthSettings, saveAuthSettings, updateBoutiqueProfile, createCategory, updateCategory, deleteCategory, updateProductCategory, type BoutiqueSyncEvent, type BoutiqueSyncPatch, type LegacyBoutiqueChange, recordTechLog, loadTechLogs } from "../lib/api";
@@ -5201,26 +5202,7 @@ function silentPrint(html: string) {
 }
 
 // ─── QZ TRAY CERTIFICATE (embedded — avoids fetch failures in proxy environments)
-const QZ_CERT_ROTATED = `-----BEGIN CERTIFICATE-----
-MIIDOTCCAiGgAwIBAgIUOa1/7AYJL6pGwXwojhWAcAD/vpIwDQYJKoZIhvcNAQEL
-BQAwLDEYMBYGA1UEAwwPVG91cm5hbCBRWiBUcmF5MRAwDgYDVQQKDAdUb3VybmFs
-MB4XDTI2MDgxMzA0MDgzOVoXDTM2MDgxMDA0MDgzOVowLDEYMBYGA1UEAwwPVG91
-cm5hbCBRWiBUcmF5MRAwDgYDVQQKDAdUb3VybmFsMIIBIjANBgkqhkiG9w0BAQEF
-AAOCAQ8AMIIBCgKCAQEAjlZwFiIgOmFPoanG7TkBdfoFA3pNpUirEyJJSF2T6au3
-1azLUdgVx/ZA1ltmWdsLbJpa3AEycJFPiYHk2aSMY0AQReo9+sj/5j8TE4j4S/wv
-58trY2UaButOs4PcnAbwTx37JudzLsywWJSeJX4zI1EON/wB4DrieB4M2Yvsr+u/
-GA8J1dzczPLbnZixit7gb72gr3q9jZATh6/YRbs35tYYC71jTY/ZxJVmxMRuzmO6
-AXVHMWOCF7ZT5RWF2r369OnqOsvCJXN2G5wmG6s2jPQaUrGT0+OgWvX6Pe8njMyj
-A9BwBC0QRlnwCLSrXvPeXpVc09pm35QkJDr6S/KUqQIDAQABo1MwUTAdBgNVHQ4E
-FgQUupyVz7ptI255R/D2yPjL7iiAEmQwHwYDVR0jBBgwFoAUupyVz7ptI255R/D2
-yPjL7iiAEmQwDwYDVR0TAQH/BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOCAQEAcTA1
-djMmBRrhRtTjCPGrSvq43Tp7VPNzKVLU7CFIBRfBRKnFEm82v1ihLJexKzGLTQmp
-LTM4CbEybjXaFuhzMUE9GokNqIgXQN68T+jMC8hA7R0DPxYK8c9kxYEVlyPulhHx
-WnQ894KcB2v4WkjnNzOInfgAsY4u1fi29UETS1OJNWRSWrdnnD1Gkz/+2cpAZT/h
-mTNgQI0C6bB051yZcvKyYrP7ASoFUlj1xLf7qQFOyOS3XGKkcv5RRLcuzvJGp9tI
-lFVACAKPBsq9w6fXa/BtZlsmYfYTi9mxRCFGjyV/zBSKW9jRlEQuIYtaZKu0P82X
-29No9wIhTQ7U/067jg==
------END CERTIFICATE-----`;
+
 
 // ─── PRINT AGENT (QZ Tray WebSocket) ─────────────────────────────────────────
 
@@ -5269,13 +5251,7 @@ async function connectQZ(savedPrinter?: string): Promise<void> {
     const qz = (window as any).qz;
     if (!qz) throw new Error("qz unavailable");
 
-    // Load the self-signed certificate from the static asset
-    qz.security.setCertificatePromise((res: any) => { res(QZ_CERT_ROTATED); });
-    // Sign each print request server-side (SHA512withRSA — private key never leaves the server)
-    qz.security.setSignatureAlgorithm("SHA512");
-    qz.security.setSignaturePromise((toSign: string) => (res: any, rej: any) => {
-      signQZ(toSign).then(res).catch(rej);
-    });
+    configureQzSecurity(qz, signQZ);
 
     if (!qz.websocket.isActive()) {
       await qz.websocket.connect({
