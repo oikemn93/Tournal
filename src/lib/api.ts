@@ -232,6 +232,14 @@ async function dataRpc<T>(name: string, params: Record<string, unknown>): Promis
   });
 }
 
+export async function getAccessRequestEmailRecipients() {
+  return dataRpc<string[]>("get_access_request_email_recipients", {});
+}
+
+export async function setAccessRequestEmailRecipients(emails: string[]) {
+  return dataRpc<string[]>("set_access_request_email_recipients", { p_emails: emails });
+}
+
 export type TechnicalLog = { id:number; user_id?:string|null; level:"error"|"warn"|"info"; category:string; message:string; detail?:string|null; context?:Record<string,unknown>; created_at:string };
 export async function recordTechLog(params:{boutiqueId:string;level:"error"|"warn"|"info";category:"rpc"|"loading"|"sync"|"printing"|"network"|"session"|"other";message:string;detail?:string;context?:Record<string,unknown>}) {
   return dataRpc<number>("record_tech_log",{p_boutique_id:params.boutiqueId,p_level:params.level,p_category:params.category,p_message:params.message,p_detail:params.detail??null,p_context:params.context??{}});

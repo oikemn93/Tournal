@@ -10,16 +10,16 @@ type AccessRequestJob = {
   telephone: string | null;
   type_activite: string;
   message: string | null;
+  recipients: string[];
 };
 
 type Env = {
   ACCESS_EMAIL_SECRET: string;
-  DELIVERY_ADDRESS: string;
   OUTBOX_URL: string;
   EMAIL: { send(message: EmailMessage): Promise<void> };
 };
 
-function buildMessage(job: AccessRequestJob, test = false) {
+function buildMessage(job: AccessRequestJob, recipient: string, test = false) {
   const body = [
     test ? "Test de notification Tournal" : "Nouvelle demande d’accès à Tournal",
     "",
@@ -44,7 +44,7 @@ function buildMessage(job: AccessRequestJob, test = false) {
 
   return [
     "From: Tournal <notifications@tournal.org>",
-    `To: ${""}`,
+    `To: ${recipient}`,
     `Subject: ${test ? "[TEST] Tournal - notification des demandes" : "Tournal - Nouvelle demande d acces"}`,
     `Message-ID: <access-${id}@tournal.org>`,
     `Date: ${new Date().toUTCString()}`,
@@ -111,8 +111,11 @@ function authorized(req: Request, secret: string) {
 }
 
 async function send(env: Env, job: AccessRequestJob, test = false) {
-  const raw = buildMessage(job, test).replace("To: \r\n", `To: ${env.DELIVERY_ADDRESS}\r\n`);
-  await env.EMAIL.send(new EmailMessage(sender, env.DELIVERY_ADDRESS, raw));
+  const recipients = [...new Set((job.recipients ?? []).map((value) => value.trim().toLowerCase()).filter(Boolean))];
+  if (recipients.length === 0) throw new Error("no_recipients");
+  for (const recipient of recipients) {
+    await env.EMAIL.send(new EmailMessage(sender, recipient, buildMessage(job, recipient, test)));
+  }
 }
 
 async function run(env: Env) {
@@ -132,19 +135,6 @@ export default {
     try {
       const path = new URL(req.url).pathname;
       if (path === "/run") return Response.json(await run(env));
-      if (path === "/test") {
-        await send(env, {
-          id: crypto.randomUUID(),
-          lease: crypto.randomUUID(),
-          created_at: new Date().toISOString(),
-          nom: "Test de notification Tournal",
-          societe: "Tournal",
-          telephone: "",
-          type_activite: "Test technique",
-          message: "Ceci est un test de réception des alertes de demandes d’accès. Aucune demande réelle n’a été créée.",
-        }, true);
-        return Response.json({ accepted: true });
-      }
       return new Response("Not found", { status: 404 });
     } catch {
       console.error(JSON.stringify({ event: "access_request_email_run_failed" }));
