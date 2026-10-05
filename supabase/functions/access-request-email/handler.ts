@@ -2,10 +2,13 @@ type Config = {
   url: string;
   serviceKey: string;
   secret: string;
-  resendKey: string;
-  emailTo: string[];
-  emailFrom: string;
-  opsUrl: string;
+};
+
+type ProviderConfig = {
+  resend_key?: string | null;
+  email_to?: string | null;
+  email_from?: string | null;
+  ops_url?: string | null;
 };
 
 type EmailJob = {
@@ -157,21 +160,26 @@ function renderEmail(job: EmailJob, opsUrl: string) {
 }
 
 async function sendJob(
-  config: Config,
   request: typeof fetch,
   job: EmailJob,
+  provider: {
+    resendKey: string;
+    emailTo: string[];
+    emailFrom: string;
+    opsUrl: string;
+  },
 ) {
-  const mail = renderEmail(job, config.opsUrl);
+  const mail = renderEmail(job, provider.opsUrl);
   const response = await request("https://api.resend.com/emails", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${config.resendKey}`,
+      Authorization: `Bearer ${provider.resendKey}`,
       "Content-Type": "application/json",
       "Idempotency-Key": `access-request/${job.id}`,
     },
     body: JSON.stringify({
-      from: config.emailFrom,
-      to: config.emailTo,
+      from: provider.emailFrom,
+      to: provider.emailTo,
       subject: mail.subject,
       html: mail.html,
       text: mail.text,
@@ -230,11 +238,23 @@ export function createHandler(config: Config, request: typeof fetch = fetch) {
       }
 
       if (body.action === "dispatch") {
-        if (
-          !config.resendKey ||
-          config.emailTo.length === 0 ||
-          !config.emailFrom
-        )
+        const providerConfig = (await rpc(
+          config,
+          request,
+          "access_email_provider_config",
+          {},
+        )) as ProviderConfig;
+        const resendKey = String(providerConfig?.resend_key ?? "").trim();
+        const emailTo = String(providerConfig?.email_to ?? "")
+          .split(",")
+          .map((value) => value.trim())
+          .filter(Boolean);
+        const emailFrom = String(providerConfig?.email_from ?? "").trim();
+        const opsUrl =
+          String(providerConfig?.ops_url ?? "").trim() ||
+          "https://ops.tournal.org";
+
+        if (!resendKey || emailTo.length === 0 || !emailFrom)
           return reply({ error: "email_not_configured" }, 503);
 
         const claimed = await rpc(
@@ -250,7 +270,12 @@ export function createHandler(config: Config, request: typeof fetch = fetch) {
         for (const job of jobs) {
           let success = false;
           try {
-            success = await sendJob(config, request, job);
+            success = await sendJob(request, job, {
+              resendKey,
+              emailTo,
+              emailFrom,
+              opsUrl,
+            });
           } catch {
             success = false;
           }
