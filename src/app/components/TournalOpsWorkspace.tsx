@@ -16,7 +16,9 @@ import {
 import {
   createBoutique,
   createBoutiqueWithNewOwner,
+  getAccessRequestEmailRecipients,
   sendWhatsAppOnboarding,
+  setAccessRequestEmailRecipients,
 } from "../../lib/api"
 
 import {
@@ -258,6 +260,11 @@ export function TournalOpsWorkspace({
 
   const [moreRequests, setMoreRequests] = useState(false)
 
+  const [accessEmailDraft, setAccessEmailDraft] = useState("")
+  const [accessEmailLoading, setAccessEmailLoading] = useState(false)
+  const [accessEmailSaving, setAccessEmailSaving] = useState(false)
+  const [accessEmailSaved, setAccessEmailSaved] = useState(false)
+
   const actionLock = useRef(false)
 
   function navigate(next: View, tab?: "requests" | "shops") {
@@ -316,6 +323,38 @@ export function TournalOpsWorkspace({
       setRequestError(e instanceof Error ? e.message : "Demandes indisponibles")
     } finally {
       setPublicRequestsLoading(false)
+    }
+  }
+
+  async function loadAccessEmailRecipients() {
+    if (!canSystemAdmin) return
+    setAccessEmailLoading(true)
+    try {
+      const emails = await getAccessRequestEmailRecipients()
+      setAccessEmailDraft(emails.join("\n"))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Destinataires email indisponibles")
+    } finally {
+      setAccessEmailLoading(false)
+    }
+  }
+
+  async function saveAccessEmailRecipients() {
+    const emails = accessEmailDraft
+      .split(/[\n,;]+/)
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean)
+    setAccessEmailSaving(true)
+    setAccessEmailSaved(false)
+    setError("")
+    try {
+      const saved = await setAccessRequestEmailRecipients(emails)
+      setAccessEmailDraft(saved.join("\n"))
+      setAccessEmailSaved(true)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Enregistrement des destinataires impossible")
+    } finally {
+      setAccessEmailSaving(false)
     }
   }
 
@@ -379,7 +418,10 @@ export function TournalOpsWorkspace({
   }, [boutiques])
 
   useEffect(() => {
-    if (canSystemAdmin) void refreshRequests()
+    if (canSystemAdmin) {
+      void refreshRequests()
+      void loadAccessEmailRecipients()
+    }
   }, [canSystemAdmin])
 
   const rows = useMemo(
@@ -2228,6 +2270,46 @@ export function TournalOpsWorkspace({
                           Ouvrir l’administration
                           <ChevronRight size={17} />
                         </button>
+                      </div>
+                    </section>
+                    <section className="ops-card">
+                      <div className="ops-section-title">
+                        <div>
+                          <h2>Notifications des nouvelles demandes</h2>
+                          <p>
+                            Ces adresses reçoivent un email à chaque nouvelle demande d’accès.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="ops-form">
+                        <label>
+                          Adresses email
+                          <textarea
+                            rows={5}
+                            value={accessEmailDraft}
+                            disabled={accessEmailLoading || accessEmailSaving}
+                            onChange={(e) => {
+                              setAccessEmailDraft(e.target.value)
+                              setAccessEmailSaved(false)
+                            }}
+                            className={input}
+                            placeholder={"ops@tournal.org\nresponsable@tournal.org"}
+                          />
+                          <small>Une adresse par ligne. 20 destinataires maximum.</small>
+                        </label>
+                        <div>
+                          <button
+                            type="button"
+                            className="ops-button primary"
+                            disabled={accessEmailLoading || accessEmailSaving || !accessEmailDraft.trim()}
+                            onClick={() => void saveAccessEmailRecipients()}
+                          >
+                            {accessEmailSaving ? "Enregistrement…" : "Enregistrer les destinataires"}
+                          </button>
+                          {accessEmailSaved && (
+                            <span className="ops-tag">Enregistré</span>
+                          )}
+                        </div>
                       </div>
                     </section>
                     <section className="ops-card">
