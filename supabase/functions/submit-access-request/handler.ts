@@ -2,6 +2,8 @@ type Config = {
   url: string
   serviceKey: string
   turnstileSecret: string
+  emailSecret: string
+  emailDispatcherUrl: string
   origins: string[]
 }
 const received = { received: true }
@@ -138,6 +140,28 @@ export function createHandler(config: Config, request: typeof fetch = fetch) {
       )
       if (!submitted.ok)
         return reply({ error: "Envoi indisponible. Réessayez plus tard." }, 503)
+
+      // Email delivery is best-effort and never changes the public form result.
+      // The database outbox remains the source of truth for retries.
+      if (
+        config.emailSecret.length >= 32 &&
+        config.emailDispatcherUrl.startsWith("https://")
+      ) {
+        try {
+          await request(config.emailDispatcherUrl, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${config.emailSecret}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ action: "dispatch" }),
+            signal: AbortSignal.timeout(3500),
+          })
+        } catch {
+          // Leave the queued notification pending; never fail the applicant form.
+        }
+      }
+
       // No database response, account existence, PII or captcha token is logged or returned.
       return reply(received)
     } catch {
