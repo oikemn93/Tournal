@@ -6,7 +6,7 @@ const WHATSAPP_ACCESS_TOKEN=Deno.env.get("WHATSAPP_ACCESS_TOKEN") ?? "";
 const WHATSAPP_PHONE_NUMBER_ID=Deno.env.get("WHATSAPP_PHONE_NUMBER_ID") ?? "";
 const WHATSAPP_WABA_ID=Deno.env.get("WHATSAPP_WABA_ID") ?? "";
 const WHATSAPP_REGISTRATION_PIN=Deno.env.get("WHATSAPP_REGISTRATION_PIN") ?? "";
-const WHATSAPP_UTILITY_TEMPLATE_NAME=Deno.env.get("WHATSAPP_UTILITY_TEMPLATE_NAME") ?? "tournal_account_ready_v1";
+const WHATSAPP_UTILITY_TEMPLATE_NAME=Deno.env.get("WHATSAPP_UTILITY_TEMPLATE_NAME") ?? "tournal_account_ready_v2";
 const WHATSAPP_AUTH_TEMPLATE_NAME=Deno.env.get("WHATSAPP_AUTH_TEMPLATE_NAME") ?? "tournal_login_code_v1";
 const WHATSAPP_TEMPLATE_LANGUAGE_CODE=Deno.env.get("WHATSAPP_TEMPLATE_LANGUAGE_CODE") ?? "fr";
 const WHATSAPP_GRAPH_VERSION=Deno.env.get("WHATSAPP_GRAPH_VERSION") ?? "v23.0";
@@ -120,7 +120,9 @@ Deno.serve(async (req)=>{
     }
 
     async function ensureTemplate(params:{name:string;category:"UTILITY"|"AUTHENTICATION";components:any[]}){
-      const templates=await listTemplates(params.name);
+      const templates=(await listTemplates(params.name)).filter((item:any)=>
+        item?.name===params.name&&item?.language===WHATSAPP_TEMPLATE_LANGUAGE_CODE
+      );
       const approved=templates.find((item:any)=>item?.status==="APPROVED");
       if(approved) return {ready:true,language:String(approved.language||WHATSAPP_TEMPLATE_LANGUAGE_CODE),template:approved};
 
@@ -185,8 +187,8 @@ Deno.serve(async (req)=>{
       category:"UTILITY",
       components:[{
         type:"BODY",
-        text:`Bonjour {{1}}, votre compte Tournal pour {{2}} est prêt. Votre identifiant de connexion est {{3}}. Connectez-vous sur ${TOURNAL_LOGIN_URL}.`,
-        example:{body_text:[["Awa Diallo","Boutique GGR","+221781224409"]]},
+        text:`Bonjour {{1}}, votre espace Tournal pour {{2}} est maintenant activé. Vous pouvez accéder à Tournal sur ${TOURNAL_LOGIN_URL}.`,
+        example:{body_text:[["Awa Diallo","Boutique Exemple"]]},
       }],
     });
 
@@ -261,7 +263,6 @@ Deno.serve(async (req)=>{
           parameters:[
             {type:"text",text:fullName},
             {type:"text",text:boutiqueName},
-            {type:"text",text:rawPhone},
           ],
         }],
       },
